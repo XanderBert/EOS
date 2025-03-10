@@ -3,11 +3,11 @@
     set(TAG ${tag})
 
     # Fetch GLFW and Setup
-    option(GLFW_BUILD_EXAMPLES "Build the GLFW example programs" OFF)
-    option(GLFW_BUILD_TESTS "Build the GLFW test programs" OFF)
-    option(GLFW_BUILD_DOCS "Build the GLFW documentation" OFF)
-    option(GLFW_INSTALL "Generate installation target" OFF)
-    option(GLFW_DOCUMENT_INTERNALS "Include internals in documentation" OFF)
+    set(GLFW_BUILD_EXAMPLES          OFF CACHE BOOL "")
+    set(GLFW_BUILD_TESTS             OFF CACHE BOOL "")
+    set(GLFW_BUILD_DOCS              OFF CACHE BOOL "")
+    set(GLFW_INSTALL                 OFF CACHE BOOL "")
+    set(GLFW_DOCUMENT_INTERNALS      OFF CACHE BOOL "")
 
     if(UNIX AND NOT APPLE)
         # Disable win32
