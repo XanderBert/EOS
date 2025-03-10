@@ -1,5 +1,11 @@
 ﻿#pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#define WIN32_LEAN_AND_MEAN
+
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -11,7 +17,7 @@
 #endif
 
 #include <GLFW/glfw3native.h>
-#include <stdio.h>
+#include <cstdio>
 
 
 
