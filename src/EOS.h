@@ -1,8 +1,12 @@
 ﻿#pragma once
 #include <concepts>
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <utility>
-#include <string_view>
+
+#include "window.h"
+
 
 
 #define DELETE_COPY(ClassName)                   \
@@ -17,6 +21,19 @@ ClassName& operator=(ClassName&&) = delete;
 DELETE_COPY(ClassName)                           \
 DELETE_MOVE(ClassName)
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+//Setup easy to read defines for platform checks
+#if defined(_WIN32)
+    #define EOS_PLATFORM_WINDOWS
+#elif defined(__linux__)
+    #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
+        #define EOS_PLATFORM_WAYLAND
+    #else
+        #define EOS_PLATFORM_X11,
+    #endif
+#endif
+
 
 
 namespace EOS
@@ -25,15 +42,17 @@ namespace EOS
 
     enum class HardwareDeviceType
     {
-        Discrete = 0,
-        Integrated = 1
+        Integrated  = 1,
+        Discrete    = 2,
+        Virtual     = 3,
+        Software    = 4
     };
 
     struct HardwareDeviceDescription
     {
         uintptr_t id{};
         HardwareDeviceType type { HardwareDeviceType::Integrated} ;
-        std::string_view name[256]{};
+        std::string name{};
     };
 
     // Concept for required HandleType operations
@@ -92,6 +111,12 @@ namespace EOS
 
     };
 
+
+    struct ContextConfiguration final
+    {
+        bool enableValidationLayers{ true };
+    };
+
     class IContext
     {
     protected:
@@ -100,7 +125,14 @@ namespace EOS
     public:
         DELETE_COPY_MOVE(IContext);
         virtual ~IContext() = default;
-
-        [[nodiscard]] virtual ICommandBuffer& AcquireCommandBuffer() = 0;
     };
+
+    struct ContextCreationDescription final
+    {
+        ContextConfiguration config;
+        GLFWwindow* window;
+        HardwareDeviceType preferredHardwareType;
+    };
+
+    std::unique_ptr<IContext> CreateContextWithSwapchain(const ContextCreationDescription& contextCreationDescription);
 }

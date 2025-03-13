@@ -47,6 +47,15 @@ macro(FETCH_VOLK tag, depsDir)
             GIT_TAG        ${TAG}
             SOURCE_DIR     ${VOLK_ROOT_DIR}
     )
+
+    if (WIN32)
+        set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
+    #TODO: Add support for X11 and Wayland
+    #elseif(UNIX AND NOT APPLE)
+    #    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WAYLAND_KHR)
+    endif()
+
+
     add_subdirectory(${VOLK_ROOT_DIR})
 endmacro()
 

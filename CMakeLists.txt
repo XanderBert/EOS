@@ -27,7 +27,7 @@ FETCH_SLANG(v2025.6 ${EOS_DEPENDENCIES_DIR})
 
 
 
-target_include_directories(EOS PUBLIC "${EOS_DEPENDENCIES_DIR}/src/volk")
 target_link_libraries(EOS PUBLIC glfw)
+target_link_libraries(EOS PRIVATE volk_headers)
 #target_link_libraries(EOS PRIVATE slang)
 #target_link_libraries(EOS PRIVATE slang-rt)

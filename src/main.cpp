@@ -1,20 +1,31 @@
 ﻿#include <iostream>
-#include <window.h>
+#include "EOS.h"
 
 int main()
 {
     uint32_t width{}, height{};
-    auto* window = EOS::InitWindow("Hello, World!", width, height);
-    if (!window){ std::cout << "Failed to create window" << std::endl;}
+    GLFWwindow* window = nullptr;//EOS::InitWindow("Hello, World!", width, height);
+    //if (!window){ std::cout << "Failed to create window" << std::endl;}
 
-
-    while (!glfwWindowShouldClose(window))
+    EOS::ContextCreationDescription contextDescr
     {
-        glfwPollEvents();
-    }
+        .config =
+     {
+            .enableValidationLayers = true
+        },
+
+        .window                 = window,
+        .preferredHardwareType  = EOS::HardwareDeviceType::Discrete
+    };
+
+    std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapchain(contextDescr);
 
 
+    //while (!glfwWindowShouldClose(window))
+    //{
+    //    glfwPollEvents();
+    //}
 
-    EOS::DestroyWindow(window);
+    //EOS::DestroyWindow(window);
     return 0;
 }

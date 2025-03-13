@@ -1,19 +1,29 @@
 ﻿#pragma once
 #include <EOS.h>
-
-
-
+#include <vector>
+#include <volk.h>
 
 namespace EOS
 {
-    class VulkanContext : public IContext
+    class VulkanContext final : public IContext
     {
     public:
-    DELETE_COPY_MOVE(VulkanContext)
+        VulkanContext(const ContextCreationDescription& contextDescription);
+        ~VulkanContext() override = default;
+        DELETE_COPY_MOVE(VulkanContext)
 
 
     private:
-        void GetDevices(HardwareDeviceType deviceType, HardwareDeviceDescription* outDevices, uint8_t maxOutDevices = 1);
+        void CreateVulkanInstance();
+        void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
+        bool IsHostVisibleMemorySingleHeap() const;
+    public:
+        //[[nodiscard]] ICommandBuffer& AcquireCommandBuffer() override;
+
+    private:
+        VkInstance VulkanInstance               = VK_NULL_HANDLE;
+        VkPhysicalDevice VulkanPhysicalDevice   = VK_NULL_HANDLE;
+        ContextConfiguration Configuration;
     };
 
 }

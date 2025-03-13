@@ -1,5 +1,7 @@
 ﻿#include "EOS.h"
 
+#include "vulkan/vulkanClasses.h"
+
 namespace EOS
 {
     template <typename HandleType>
@@ -91,5 +93,10 @@ namespace EOS
     const HandleType& Holder<HandleType>::Get() const noexcept
     {
         return handle;
+    }
+
+    std::unique_ptr<IContext> CreateContextWithSwapchain(const ContextCreationDescription& contextCreationDescription)
+    {
+        return std::move( std::make_unique<VulkanContext>(contextCreationDescription) );
     }
 }
