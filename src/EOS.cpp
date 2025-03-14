@@ -1,5 +1,4 @@
 ﻿#include "EOS.h"
-
 #include "vulkan/vulkanClasses.h"
 
 namespace EOS

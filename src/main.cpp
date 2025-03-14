@@ -1,11 +1,11 @@
-﻿#include <iostream>
-#include "EOS.h"
+﻿#include "EOS.h"
 
 int main()
 {
+    //TODO Wrap window and get display based on distro
     uint32_t width{}, height{};
-    GLFWwindow* window = nullptr;//EOS::InitWindow("Hello, World!", width, height);
-    //if (!window){ std::cout << "Failed to create window" << std::endl;}
+    GLFWwindow* window = EOS::InitWindow("Hello, World!", width, height);
+    if (!window){ printf("Failed to Create a window.\n"); }
 
     EOS::ContextCreationDescription contextDescr
     {
@@ -13,8 +13,8 @@ int main()
      {
             .enableValidationLayers = true
         },
-
         .window                 = window,
+        .display                = nullptr,
         .preferredHardwareType  = EOS::HardwareDeviceType::Discrete
     };
 
@@ -26,6 +26,6 @@ int main()
     //    glfwPollEvents();
     //}
 
-    //EOS::DestroyWindow(window);
+    EOS::DestroyWindow(window);
     return 0;
 }

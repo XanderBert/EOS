@@ -19,6 +19,15 @@ else()
     message(FATAL_ERROR "$ENV{VULKAN_SDK} does not exist.")
 endif()
 
+#Setup Defines
+if(WIN32)
+    add_definitions("-DVK_USE_PLATFORM_WIN32_KHR")
+    add_definitions("-DNOMINMAX")
+    add_definitions("-DWIN32_LEAN_AND_MEAN")
+    add_definitions("-DGLFW_EXPOSE_NATIVE_WIN32")
+
+    add_definitions("-DEOS_PLATFORM_WINDOWS")
+endif()
 
 
 FETCH_GLFW(3.4 ${EOS_DEPENDENCIES_DIR})

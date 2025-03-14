@@ -1,21 +1,5 @@
 ﻿#pragma once
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#define WIN32_LEAN_AND_MEAN
-
-#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-
-#ifdef _WIN32
-    #define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-    //TODO: Add support for X11
-    #define GLFW_EXPOSE_NATIVE_WAYLAND
-#endif
-
 #include <GLFW/glfw3native.h>
 #include <cstdio>
 

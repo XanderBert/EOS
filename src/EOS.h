@@ -23,10 +23,9 @@ DELETE_MOVE(ClassName)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+//TODO: Move to cmake
 //Setup easy to read defines for platform checks
-#if defined(_WIN32)
-    #define EOS_PLATFORM_WINDOWS
-#elif defined(__linux__)
+#if defined(__linux__)
     #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
         #define EOS_PLATFORM_WAYLAND
     #else
@@ -129,9 +128,10 @@ namespace EOS
 
     struct ContextCreationDescription final
     {
-        ContextConfiguration config;
-        GLFWwindow* window;
-        HardwareDeviceType preferredHardwareType;
+        ContextConfiguration    config;
+        GLFWwindow*             window;
+        void*                   display;
+        HardwareDeviceType      preferredHardwareType;
     };
 
     std::unique_ptr<IContext> CreateContextWithSwapchain(const ContextCreationDescription& contextCreationDescription);

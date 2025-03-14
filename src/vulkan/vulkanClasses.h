@@ -17,13 +17,14 @@ namespace EOS
         void CreateVulkanInstance();
         void SetupDebugMessenger();
         void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
-
+        void CreateSurface(void* window, void* display);
         [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 
     private:
         VkInstance VulkanInstance                       = VK_NULL_HANDLE;
         VkDebugUtilsMessengerEXT VulkanDebugMessenger   = VK_NULL_HANDLE;
         VkPhysicalDevice VulkanPhysicalDevice           = VK_NULL_HANDLE;
+        VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
         ContextConfiguration Configuration;
     };
 

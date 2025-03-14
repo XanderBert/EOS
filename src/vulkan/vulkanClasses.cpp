@@ -1,4 +1,7 @@
 ﻿#include "vulkanClasses.h"
+#include <string.h>
+
+
 #define VOLK_IMPLEMENTATION
 #include "vulkan/vkTools.h"
 
@@ -11,6 +14,7 @@ namespace EOS
         CreateVulkanInstance();
         volkLoadInstance(VulkanInstance);
         SetupDebugMessenger();
+        CreateSurface(contextDescription.window, contextDescription.display);
 
         std::vector<HardwareDeviceDescription> hardwareDevices;
         GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
@@ -74,7 +78,7 @@ namespace EOS
         std::vector<const char*> instanceExtensionNames;
         std::vector<const char*> availableInstanceExtensionNames;
         instanceExtensionNames.reserve(4);
-        availableInstanceExtensionNames.reserve(4);
+        availableInstanceExtensionNames.reserve(5);
 
         if (Configuration.enableValidationLayers)
         {
@@ -88,7 +92,7 @@ namespace EOS
 
         //Choose the right surface extension
         #if defined(EOS_PLATFORM_WINDOWS)
-                instanceExtensionNames.emplace_back("VK_KHR_win32_surface");
+                instanceExtensionNames.emplace_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
         #elif defined(EOS_PLATFORM_WAYLAND)
                 instanceExtensionNames.emplace_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
         #elif defined(EOS_PLATFORM_X11)
@@ -213,7 +217,7 @@ namespace EOS
         {
             VkPhysicalDeviceProperties deviceProperties;
             vkGetPhysicalDeviceProperties(hardwareDevice, &deviceProperties);
-            const HardwareDeviceType deviceType = static_cast<HardwareDeviceType>(deviceProperties.deviceType);
+            const auto deviceType = static_cast<HardwareDeviceType>(deviceProperties.deviceType);
 
             if (desiredDeviceType != HardwareDeviceType::Software && desiredDeviceType != deviceType) { continue; }
 
@@ -222,6 +226,37 @@ namespace EOS
         }
 
         printf("Selected Hardware Device: %s \n", compatibleDevices.back().name.c_str());
+    }
+
+    void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
+    {
+#if defined(EOS_PLATFORM_WINDOWS)
+        const VkWin32SurfaceCreateInfoKHR SurfaceCreateInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+            .hinstance = GetModuleHandle(nullptr),
+            .hwnd = static_cast<HWND>(window),
+        };
+        VK_ASSERT(vkCreateWin32SurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
+#elif defined(EOS_PLATFORM_X11)
+        const VkXlibSurfaceCreateInfoKHR SurfaceCreateInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+            .flags = 0,
+            .dpy = (Display*)display,
+            .window = (Window)window,
+        };
+        VK_ASSERT(vkCreateXlibSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
+#elif defined(EOS_PLATFORM_WAYLAND)
+        const VkWaylandSurfaceCreateInfoKHR SurfaceCreateInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
+            .flags = 0,
+            .display = (wl_display*)display,
+            .surface = (wl_surface*)window,
+        };
+        VK_ASSERT(vkCreateWaylandSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
+#endif
     }
 
     bool VulkanContext::IsHostVisibleMemorySingleHeap() const
