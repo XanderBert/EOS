@@ -84,11 +84,9 @@ namespace EOS
         {
             validationFeatures.emplace_back(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT);
             validationFeatures.emplace_back(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT);
-            instanceExtensionNames.emplace_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+            instanceExtensionNames.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
-
         instanceExtensionNames.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
-        instanceExtensionNames.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
         //Choose the right surface extension
         #if defined(EOS_PLATFORM_WINDOWS)
@@ -204,30 +202,6 @@ namespace EOS
        VK_ASSERT(vkCreateDebugUtilsMessengerEXT(VulkanInstance, &debugUtilMessengerCreateInfo, nullptr, &VulkanDebugMessenger));
     }
 
-
-
-    void VulkanContext::GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const
-    {
-        uint32_t deviceCount = 0;
-        VK_ASSERT(vkEnumeratePhysicalDevices(VulkanInstance, &deviceCount, nullptr));
-        std::vector<VkPhysicalDevice> hardwareDevices(deviceCount);
-        VK_ASSERT(vkEnumeratePhysicalDevices(VulkanInstance, &deviceCount, hardwareDevices.data()));
-
-        for (VkPhysicalDevice& hardwareDevice : hardwareDevices)
-        {
-            VkPhysicalDeviceProperties deviceProperties;
-            vkGetPhysicalDeviceProperties(hardwareDevice, &deviceProperties);
-            const auto deviceType = static_cast<HardwareDeviceType>(deviceProperties.deviceType);
-
-            if (desiredDeviceType != HardwareDeviceType::Software && desiredDeviceType != deviceType) { continue; }
-
-            //Convert the device to a unsigned (long) int (size dependant on building for 32 or 64 bit) and use that as the GUID of the physical device.
-            compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
-        }
-
-        printf("Selected Hardware Device: %s \n", compatibleDevices.back().name.c_str());
-    }
-
     void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
     {
 #if defined(EOS_PLATFORM_WINDOWS)
@@ -257,6 +231,28 @@ namespace EOS
         };
         VK_ASSERT(vkCreateWaylandSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
 #endif
+    }
+
+    void VulkanContext::GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const
+    {
+        uint32_t deviceCount = 0;
+        VK_ASSERT(vkEnumeratePhysicalDevices(VulkanInstance, &deviceCount, nullptr));
+        std::vector<VkPhysicalDevice> hardwareDevices(deviceCount);
+        VK_ASSERT(vkEnumeratePhysicalDevices(VulkanInstance, &deviceCount, hardwareDevices.data()));
+
+        for (VkPhysicalDevice& hardwareDevice : hardwareDevices)
+        {
+            VkPhysicalDeviceProperties deviceProperties;
+            vkGetPhysicalDeviceProperties(hardwareDevice, &deviceProperties);
+            const auto deviceType = static_cast<HardwareDeviceType>(deviceProperties.deviceType);
+
+            if (desiredDeviceType != HardwareDeviceType::Software && desiredDeviceType != deviceType) { continue; }
+
+            //Convert the device to a unsigned (long) int (size dependant on building for 32 or 64 bit) and use that as the GUID of the physical device.
+            compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
+        }
+
+        printf("Selected Hardware Device: %s \n", compatibleDevices.back().name.c_str());
     }
 
     bool VulkanContext::IsHostVisibleMemorySingleHeap() const

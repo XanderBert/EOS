@@ -16,8 +16,8 @@ namespace EOS
     private:
         void CreateVulkanInstance();
         void SetupDebugMessenger();
-        void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
         void CreateSurface(void* window, void* display);
+        void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
         [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 
     private:
