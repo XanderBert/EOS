@@ -15,14 +15,15 @@ namespace EOS
 
     private:
         void CreateVulkanInstance();
+        void SetupDebugMessenger();
         void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
-        bool IsHostVisibleMemorySingleHeap() const;
-    public:
-        //[[nodiscard]] ICommandBuffer& AcquireCommandBuffer() override;
+
+        [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 
     private:
-        VkInstance VulkanInstance               = VK_NULL_HANDLE;
-        VkPhysicalDevice VulkanPhysicalDevice   = VK_NULL_HANDLE;
+        VkInstance VulkanInstance                       = VK_NULL_HANDLE;
+        VkDebugUtilsMessengerEXT VulkanDebugMessenger   = VK_NULL_HANDLE;
+        VkPhysicalDevice VulkanPhysicalDevice           = VK_NULL_HANDLE;
         ContextConfiguration Configuration;
     };
 

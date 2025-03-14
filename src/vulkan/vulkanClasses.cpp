@@ -10,10 +10,11 @@ namespace EOS
         if (volkInitialize() != VK_SUCCESS) { exit(255); }
         CreateVulkanInstance();
         volkLoadInstance(VulkanInstance);
+        SetupDebugMessenger();
 
         std::vector<HardwareDeviceDescription> hardwareDevices;
         GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
-        if (hardwareDevices.size() <= 0)
+        if (hardwareDevices.empty())
         {
             printf("Couldn't Find a physical hardware device");
             assert(false);
@@ -24,13 +25,24 @@ namespace EOS
         //Some GPU's have a shared memory
         bool useStagingBuffer = !IsHostVisibleMemorySingleHeap();
 
-
         //after device creation:
         //volkLoadDevice();
     }
 
     void VulkanContext::CreateVulkanInstance()
     {
+        uint32_t apiVersion{};
+        vkEnumerateInstanceVersion(&apiVersion);
+        printf("Vulkan API Verion: %d.%d.%d \n", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion), VK_VERSION_PATCH(apiVersion));
+        const VkApplicationInfo applicationInfo
+        {
+            .pApplicationName   = "EOS", //TODO Change this
+            .applicationVersion = VK_MAKE_VERSION(0, 0, 1),
+            .pEngineName        = "EOS",
+            .engineVersion      = VK_MAKE_VERSION(0, 0, 1),
+            .apiVersion         = apiVersion,
+        };
+
         //Check if we can use Validation Layers
         static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 
@@ -41,7 +53,8 @@ namespace EOS
         bool foundLayer = false;
         for (const VkLayerProperties& props : layerProperties)
         {
-            if (strcmp(props.layerName, validationLayer) != 0)
+            //TODO: This will always be true
+            if (strcmp(props.layerName, validationLayer) == 0)
             {
                 foundLayer = true;
                 break;
@@ -50,11 +63,18 @@ namespace EOS
         Configuration.enableValidationLayers = foundLayer;
 
         //Setup the validation layers and extensions
+        uint32_t instanceExtensionCount;
+        VK_ASSERT(vkEnumerateInstanceExtensionProperties(nullptr, &instanceExtensionCount, nullptr));
+        std::vector<VkExtensionProperties> allInstanceExtensions(instanceExtensionCount);
+        VK_ASSERT(vkEnumerateInstanceExtensionProperties(nullptr, &instanceExtensionCount, allInstanceExtensions.data()));
+
         std::vector<VkValidationFeatureEnableEXT> validationFeatures;
         validationFeatures.reserve(2);
 
         std::vector<const char*> instanceExtensionNames;
+        std::vector<const char*> availableInstanceExtensionNames;
         instanceExtensionNames.reserve(4);
+        availableInstanceExtensionNames.reserve(4);
 
         if (Configuration.enableValidationLayers)
         {
@@ -67,13 +87,41 @@ namespace EOS
         instanceExtensionNames.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
         //Choose the right surface extension
-        //#if defined(EOS_PLATFORM_WINDOWS)
-        //        extensionNames.emplace_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-        //#elif defined(EOS_PLATFORM_WAYLAND)
-        //        extensionNames.emplace_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-        //#elif defined(EOS_PLATFORM_X11)
-        //        extensionNames.emplace_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
-        //#endif
+        #if defined(EOS_PLATFORM_WINDOWS)
+                instanceExtensionNames.emplace_back("VK_KHR_win32_surface");
+        #elif defined(EOS_PLATFORM_WAYLAND)
+                instanceExtensionNames.emplace_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+        #elif defined(EOS_PLATFORM_X11)
+                instanceExtensionNames.emplace_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+        #endif
+
+
+        // log and check available instance extensions
+        printf("\nAvailable Vulkan instance extensions:\n");
+        for (const VkExtensionProperties& extension : allInstanceExtensions)
+        {
+            printf("    %s\n", extension.extensionName);
+        }
+
+        bool foundInstanceExtension = false;
+        for (const auto& instanceExtensionName : instanceExtensionNames)
+        {
+            foundInstanceExtension = false;
+            for (const VkExtensionProperties& extension : allInstanceExtensions)
+            {
+                if (strcmp(extension.extensionName, instanceExtensionName) == 0)
+                {
+                    foundInstanceExtension = true;
+                    availableInstanceExtensionNames.emplace_back(instanceExtensionName);
+                    break;
+                }
+            }
+
+            if (!foundInstanceExtension)
+            {
+                printf("    %s -> Is not available on your device.\n", instanceExtensionName);
+            }
+        }
 
         VkValidationFeaturesEXT features =
         {
@@ -82,19 +130,6 @@ namespace EOS
             .enabledValidationFeatureCount  = static_cast<uint32_t>(validationFeatures.size()),
             .pEnabledValidationFeatures     = validationFeatures.data()
         };
-
-        uint32_t apiVersion{};
-        vkEnumerateInstanceVersion(&apiVersion);
-        printf("Vulkan API: %d.%d \n", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion));
-        const VkApplicationInfo applicationInfo
-        {
-            .pApplicationName   = "EOS", //TODO Change this
-            .applicationVersion = VK_MAKE_VERSION(0, 0, 1),
-            .pEngineName        = "EOS",
-            .engineVersion      = VK_MAKE_VERSION(0, 0, 1),
-            .apiVersion         = apiVersion,
-        };
-
 
         VkBool32 fine_grained_locking{VK_TRUE};
         VkBool32 validate_core{VK_TRUE};
@@ -124,7 +159,7 @@ namespace EOS
                 {validationLayer, "stateless_param", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &stateless_param},
                 {validationLayer, "debug_action", VK_LAYER_SETTING_TYPE_STRING_EXT, static_cast<uint32_t>(debug_action.size()), debug_action.data()},
                 {validationLayer, "report_flags", VK_LAYER_SETTING_TYPE_STRING_EXT, static_cast<uint32_t>(report_flags.size()), report_flags.data()},
-            };
+        };
 
         VkLayerSettingsCreateInfoEXT layerSettingsCreateInfo =
         {
@@ -143,13 +178,29 @@ namespace EOS
             .pApplicationInfo        = &applicationInfo,
             .enabledLayerCount       = 1,
             .ppEnabledLayerNames     = &validationLayer,
-            .enabledExtensionCount   = static_cast<uint32_t>(instanceExtensionNames.size()),
-            .ppEnabledExtensionNames = instanceExtensionNames.data(),
+            .enabledExtensionCount   = static_cast<uint32_t>(availableInstanceExtensionNames.size()),
+            .ppEnabledExtensionNames = availableInstanceExtensionNames.data(),
         };
 
         // Actual Vulkan instance creation
         VK_ASSERT(vkCreateInstance(&instanceCreateInfo, nullptr, &VulkanInstance));
     }
+
+    void VulkanContext::SetupDebugMessenger()
+    {
+       const VkDebugUtilsMessengerCreateInfoEXT debugUtilMessengerCreateInfo =
+        {
+           .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+           .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+           .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+           .pfnUserCallback = &DebugCallback,
+           .pUserData = this,
+       };
+
+       VK_ASSERT(vkCreateDebugUtilsMessengerEXT(VulkanInstance, &debugUtilMessengerCreateInfo, nullptr, &VulkanDebugMessenger));
+    }
+
+
 
     void VulkanContext::GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const
     {
