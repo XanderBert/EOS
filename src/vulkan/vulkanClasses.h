@@ -21,6 +21,7 @@ namespace EOS
         void CreateSurface(void* window, void* display);
         void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
         [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
+        void GetDeviceExtensions(std::vector<VkExtensionProperties> deviceExtensions, const char* forValidationLayer = nullptr) const;
 
     private:
         VkInstance VulkanInstance                       = VK_NULL_HANDLE;

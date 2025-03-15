@@ -24,11 +24,7 @@ namespace EOS
 
 
         std::vector<VkExtensionProperties> allDeviceExtensions;
-        uint32_t numExtensions = 0;
-        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, validationLayer, &numExtensions, nullptr);
-        std::vector<VkExtensionProperties> p(numExtensions);
-        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, validationLayer, &numExtensions, p.data());
-        allDeviceExtensions.insert(allDeviceExtensions.end(), p.begin(), p.end());
+        GetDeviceExtensions(allDeviceExtensions);
 
         printf("All Device Extension:\n");
         for (const auto& extension: allDeviceExtensions)
@@ -279,5 +275,19 @@ namespace EOS
         }
 
         return false;
+    }
+
+    void VulkanContext::GetDeviceExtensions(std::vector<VkExtensionProperties> deviceExtensions, const char* forValidationLayer) const
+    {
+        uint32_t numExtensions{0};
+        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, nullptr);
+        std::vector<VkExtensionProperties> props(numExtensions);
+
+
+        //deviceExtensions.resize(numExtensions);
+
+        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, props.data());
+        //Do REsize
+        deviceExtensions.swap(props);
     }
 }
