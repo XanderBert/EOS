@@ -10,7 +10,7 @@ namespace EOS
     class VulkanContext final : public IContext
     {
     public:
-        VulkanContext(const ContextCreationDescription& contextDescription);
+        explicit VulkanContext(const ContextCreationDescription& contextDescription);
         ~VulkanContext() override = default;
         DELETE_COPY_MOVE(VulkanContext)
 
@@ -21,7 +21,7 @@ namespace EOS
         void CreateSurface(void* window, void* display);
         void GetHardwareDevice(HardwareDeviceType desiredDeviceType, std::vector<HardwareDeviceDescription>& compatibleDevices) const;
         [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
-        void GetDeviceExtensions(std::vector<VkExtensionProperties> deviceExtensions, const char* forValidationLayer = nullptr) const;
+        void GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions, const char* forValidationLayer = nullptr) const;
 
     private:
         VkInstance VulkanInstance                       = VK_NULL_HANDLE;

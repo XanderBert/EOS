@@ -4,7 +4,7 @@ int main()
 {
     //TODO Wrap window and get display based on distro
     uint32_t width{}, height{};
-    GLFWwindow* window = EOS::InitWindow("Hello, World!", width, height);
+    GLFWwindow* window = nullptr;//EOS::InitWindow("Hello, World!", width, height);
     if (!window){ printf("Failed to Create a window.\n"); }
 
     EOS::ContextCreationDescription contextDescr

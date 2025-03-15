@@ -23,14 +23,31 @@ namespace EOS
         bool useStagingBuffer = !IsHostVisibleMemorySingleHeap();
 
 
-        std::vector<VkExtensionProperties> allDeviceExtensions;
-        GetDeviceExtensions(allDeviceExtensions);
+        std::vector<VkExtensionProperties> deviceExtensions;
+        std::vector<VkExtensionProperties> deviceExtensionsForValidationLayer;
 
-        printf("All Device Extension:\n");
-        for (const auto& extension: allDeviceExtensions)
+        GetDeviceExtensions(deviceExtensions);
+        GetDeviceExtensions(deviceExtensionsForValidationLayer, validationLayer);
+
+        printf("Device Extension:\n");
+        for (const auto& extension: deviceExtensions)
         {
             printf("    %s\n", extension.extensionName);
         }
+
+        printf("Device Extension For Validation Layers:\n");
+        for (const auto& extension: deviceExtensionsForValidationLayer)
+        {
+            printf("    %s\n", extension.extensionName);
+        }
+
+        std::vector<VkExtensionProperties> allDeviceExtensions;
+        allDeviceExtensions.reserve(deviceExtensions.size() + deviceExtensionsForValidationLayer.size());
+        allDeviceExtensions.insert(allDeviceExtensions.end(), std::make_move_iterator(deviceExtensions.begin()), std::make_move_iterator(deviceExtensions.end()));
+        allDeviceExtensions.insert(allDeviceExtensions.end(), std::make_move_iterator(deviceExtensionsForValidationLayer.begin()), std::make_move_iterator(deviceExtensionsForValidationLayer.end()));
+
+
+
 
         //after device creation:
         //volkLoadDevice();
@@ -212,7 +229,7 @@ namespace EOS
             .hinstance = GetModuleHandle(nullptr),
             .hwnd = static_cast<HWND>(window),
         };
-        VK_ASSERT(vkCreateWin32SurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
+        //VK_ASSERT(vkCreateWin32SurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
 #elif defined(EOS_PLATFORM_X11)
         const VkXlibSurfaceCreateInfoKHR SurfaceCreateInfo =
         {
@@ -277,17 +294,14 @@ namespace EOS
         return false;
     }
 
-    void VulkanContext::GetDeviceExtensions(std::vector<VkExtensionProperties> deviceExtensions, const char* forValidationLayer) const
+    void VulkanContext::GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions, const char* forValidationLayer) const
     {
         uint32_t numExtensions{0};
         vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, nullptr);
-        std::vector<VkExtensionProperties> props(numExtensions);
 
+        deviceExtensions.clear();
+        deviceExtensions.resize(numExtensions);
 
-        //deviceExtensions.resize(numExtensions);
-
-        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, props.data());
-        //Do REsize
-        deviceExtensions.swap(props);
+        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, deviceExtensions.data());
     }
 }
