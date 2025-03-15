@@ -42,7 +42,7 @@ elseif (UNIX AND NOT APPLE)
 
         add_definitions("-DEOS_PLATFORM_X11")
     endif ()
-
+endif()
 
 
 FETCH_GLFW(3.4 ${EOS_DEPENDENCIES_DIR})
