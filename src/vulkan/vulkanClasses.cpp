@@ -18,16 +18,23 @@ namespace EOS
 
         std::vector<HardwareDeviceDescription> hardwareDevices;
         GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
-        if (hardwareDevices.empty())
-        {
-            printf("Couldn't Find a physical hardware device");
-            assert(false);
-        }
-
         VulkanPhysicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().id);
-
-        //Some GPU's have a shared memory
+        printf("Selected Hardware Device: %s \n", hardwareDevices.back().name.c_str());
         bool useStagingBuffer = !IsHostVisibleMemorySingleHeap();
+
+
+        std::vector<VkExtensionProperties> allDeviceExtensions;
+        uint32_t numExtensions = 0;
+        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, validationLayer, &numExtensions, nullptr);
+        std::vector<VkExtensionProperties> p(numExtensions);
+        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, validationLayer, &numExtensions, p.data());
+        allDeviceExtensions.insert(allDeviceExtensions.end(), p.begin(), p.end());
+
+        printf("All Device Extension:\n");
+        for (const auto& extension: allDeviceExtensions)
+        {
+            printf("    %s\n", extension.extensionName);
+        }
 
         //after device creation:
         //volkLoadDevice();
@@ -48,8 +55,6 @@ namespace EOS
         };
 
         //Check if we can use Validation Layers
-        static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
-
         uint32_t numberOfLayers{};
         vkEnumerateInstanceLayerProperties(&numberOfLayers, nullptr);
         std::vector<VkLayerProperties> layerProperties(numberOfLayers);
@@ -252,7 +257,11 @@ namespace EOS
             compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
         }
 
-        printf("Selected Hardware Device: %s \n", compatibleDevices.back().name.c_str());
+        if (hardwareDevices.empty())
+        {
+            printf("Couldn't Find a physical hardware device");
+            assert(false);
+        }
     }
 
     bool VulkanContext::IsHostVisibleMemorySingleHeap() const

@@ -21,20 +21,33 @@ endif()
 
 #Setup Defines
 if(WIN32)
+    message(STATUS "Windows session detected")
     add_definitions("-DVK_USE_PLATFORM_WIN32_KHR")
     add_definitions("-DNOMINMAX")
     add_definitions("-DWIN32_LEAN_AND_MEAN")
     add_definitions("-DGLFW_EXPOSE_NATIVE_WIN32")
 
     add_definitions("-DEOS_PLATFORM_WINDOWS")
-endif()
+elseif (UNIX AND NOT APPLE)
+    if((DEFINED ENV{XDG_SESSION_TYPE} AND "$ENV{XDG_SESSION_TYPE}" STREQUAL "wayland") OR DEFINED ENV{WAYLAND_DISPLAY})
+        message(STATUS "Wayland session detected")
+        add_definitions("-DVK_USE_PLATFORM_WAYLAND_KHR")
+        add_definitions("-DGLFW_EXPOSE_NATIVE_WAYLAND")
+
+        add_definitions("-DEOS_PLATFORM_WAYLAND")
+    else ()
+        message(STATUS "X11 session detected")
+        add_definitions("-DVK_USE_PLATFORM_XLIB_KHR")
+        add_definitions("-DGLFW_EXPOSE_NATIVE_X11")
+
+        add_definitions("-DEOS_PLATFORM_X11")
+    endif ()
+
 
 
 FETCH_GLFW(3.4 ${EOS_DEPENDENCIES_DIR})
 FETCH_VOLK(${VOLK_VERSION} ${EOS_DEPENDENCIES_DIR})
 FETCH_SLANG(v2025.6 ${EOS_DEPENDENCIES_DIR})
-
-
 
 target_link_libraries(EOS PUBLIC glfw)
 target_link_libraries(EOS PRIVATE volk_headers)

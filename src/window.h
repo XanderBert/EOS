@@ -3,8 +3,6 @@
 #include <GLFW/glfw3native.h>
 #include <cstdio>
 
-
-
 namespace EOS
 {
     [[nodiscard]] inline GLFWwindow* InitWindow(const char* windowTitle, uint32_t& outWidth, uint32_t& outHeight)

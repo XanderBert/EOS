@@ -5,6 +5,8 @@
 
 namespace EOS
 {
+    static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
+
     class VulkanContext final : public IContext
     {
     public:
@@ -27,5 +29,4 @@ namespace EOS
         VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
         ContextConfiguration Configuration;
     };
-
 }
