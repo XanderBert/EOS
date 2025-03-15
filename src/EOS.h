@@ -7,8 +7,6 @@
 
 #include "window.h"
 
-
-
 #define DELETE_COPY(ClassName)                   \
 ClassName(const ClassName&) = delete;            \
 ClassName& operator=(const ClassName&) = delete;
@@ -84,9 +82,6 @@ namespace EOS
         HandleType handle{};
     };
 
-
-
-
     class ICommandBuffer
     {
     protected:
@@ -97,7 +92,6 @@ namespace EOS
         virtual ~ICommandBuffer() = default;
 
     };
-
 
     struct ContextConfiguration final
     {
