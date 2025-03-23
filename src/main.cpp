@@ -25,7 +25,7 @@ int main()
     //{
     //    glfwPollEvents();
     //}
-
-    EOS::DestroyWindow(window);
+    //std::unique_ptr<EOS::IContext> context2 = EOS::CreateContextWithSwapchain(contextDescr);
+    //EOS::DestroyWindow(window);
     return 0;
 }

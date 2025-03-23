@@ -7,6 +7,11 @@
 
 namespace EOS
 {
+    VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
+    {
+        SurfaceFormat = GetSwapChainFormat();
+    }
+
     VulkanContext::VulkanContext(const ContextCreationDescription& contextDescription)
     : Configuration(contextDescription.config)
     {
@@ -16,48 +21,244 @@ namespace EOS
         SetupDebugMessenger();
         CreateSurface(contextDescription.window, contextDescription.display);
 
+        //Select the Physical Device
         std::vector<HardwareDeviceDescription> hardwareDevices;
         GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
-        VulkanPhysicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().id);
-        printf("Selected Hardware Device: %s \n", hardwareDevices.back().name.c_str());
-        bool useStagingBuffer = !IsHostVisibleMemorySingleHeap();
+        SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
+
+        //Device Properties
+        VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
+        VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
+        GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice);
+        const uint32_t driverAPIVersion = vkPhysicalDeviceProperties2.properties.apiVersion;
+        printf("        Driver info: %s %s\n", vkPhysicalDeviceDriverProperties.driverName, vkPhysicalDeviceDriverProperties.driverInfo);
+        printf("        Driver Vulkan API Version: %i.%i.%i\n", VK_API_VERSION_MAJOR(driverAPIVersion), VK_API_VERSION_MINOR(driverAPIVersion), VK_API_VERSION_PATCH(driverAPIVersion));
+
+        //Device Features
 
 
-        std::vector<VkExtensionProperties> deviceExtensions;
-        std::vector<VkExtensionProperties> deviceExtensionsForValidationLayer;
+        //TODO make 1.4 compatible
+        //Get Features
+        //VkPhysicalDeviceVulkan14Features vkFeatures14       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES};
+        VkPhysicalDeviceVulkan13Features vkFeatures13       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = nullptr};
+        VkPhysicalDeviceVulkan12Features vkFeatures12       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vkFeatures13};
+        VkPhysicalDeviceVulkan11Features vkFeatures11       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &vkFeatures12};
+        VkPhysicalDeviceFeatures2 startOfDeviceFeaturespNextChain = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vkFeatures11};
+        vkGetPhysicalDeviceFeatures2(VulkanPhysicalDevice, &startOfDeviceFeaturespNextChain);
 
-        GetDeviceExtensions(deviceExtensions);
-        GetDeviceExtensions(deviceExtensionsForValidationLayer, validationLayer);
-
-        printf("Device Extension:\n");
-        for (const auto& extension: deviceExtensions)
+        //Setup the desired features then we check if our device supports these desired features.
+        VkPhysicalDeviceFeatures deviceFeatures10 =
         {
-            printf("    %s\n", extension.extensionName);
-        }
+            .geometryShader                 = startOfDeviceFeaturespNextChain.features.geometryShader,
+            .tessellationShader             = startOfDeviceFeaturespNextChain.features.tessellationShader,
+            .sampleRateShading              = VK_TRUE,
+            .multiDrawIndirect              = VK_TRUE,
+            .drawIndirectFirstInstance      = VK_TRUE,
+            .depthBiasClamp                 = VK_TRUE,
+            .fillModeNonSolid               = startOfDeviceFeaturespNextChain.features.fillModeNonSolid,
+            .samplerAnisotropy              = VK_TRUE,
+            .textureCompressionBC           = startOfDeviceFeaturespNextChain.features.textureCompressionBC,
+            .vertexPipelineStoresAndAtomics = startOfDeviceFeaturespNextChain.features.vertexPipelineStoresAndAtomics,
+            .fragmentStoresAndAtomics       = VK_TRUE,
+            .shaderImageGatherExtended      = VK_TRUE,
+            .shaderInt64                    = startOfDeviceFeaturespNextChain.features.shaderInt64,
+        };
 
-        printf("Device Extension For Validation Layers:\n");
-        for (const auto& extension: deviceExtensionsForValidationLayer)
+        VkPhysicalDeviceVulkan11Features deviceFeatures11 =
         {
-            printf("    %s\n", extension.extensionName);
-        }
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+            .pNext = nullptr,           //Additional DeviceExtensionFeatures can be added here
+            .storageBuffer16BitAccess   = VK_TRUE,
+            .samplerYcbcrConversion     = vkFeatures11.samplerYcbcrConversion,
+            .shaderDrawParameters       = VK_TRUE,
+        };
+
+        VkPhysicalDeviceVulkan12Features deviceFeatures12 =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+            .pNext = &deviceFeatures11,
+            .drawIndirectCount                              = vkFeatures12.drawIndirectCount,
+            .storageBuffer8BitAccess                        = vkFeatures12.storageBuffer8BitAccess,
+            .uniformAndStorageBuffer8BitAccess              = vkFeatures12.uniformAndStorageBuffer8BitAccess,
+            .shaderFloat16                                  = vkFeatures12.shaderFloat16,
+            .descriptorIndexing                             = VK_TRUE,
+            .shaderSampledImageArrayNonUniformIndexing      = VK_TRUE,
+            .descriptorBindingSampledImageUpdateAfterBind   = VK_TRUE,
+            .descriptorBindingStorageImageUpdateAfterBind   = VK_TRUE,
+            .descriptorBindingUpdateUnusedWhilePending      = VK_TRUE,
+            .descriptorBindingPartiallyBound                = VK_TRUE,
+            .descriptorBindingVariableDescriptorCount       = VK_TRUE,
+            .runtimeDescriptorArray                         = VK_TRUE,
+            .scalarBlockLayout                              = VK_TRUE,
+            .uniformBufferStandardLayout                    = VK_TRUE,
+            .hostQueryReset                                 = vkFeatures12.hostQueryReset,
+            .timelineSemaphore                              = VK_TRUE,
+            .bufferDeviceAddress                            = VK_TRUE,
+            .vulkanMemoryModel                              = vkFeatures12.vulkanMemoryModel,
+            .vulkanMemoryModelDeviceScope                   = vkFeatures12.vulkanMemoryModelDeviceScope,
+        };
+
+        VkPhysicalDeviceVulkan13Features deviceFeatures13 =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            .pNext = &deviceFeatures12,
+            .subgroupSizeControl  = VK_TRUE,
+            .synchronization2     = VK_TRUE,
+            .dynamicRendering     = VK_TRUE,
+            .maintenance4         = VK_TRUE,
+        };
+
+        CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13);
+
+
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+            .accelerationStructure                                  = VK_TRUE,
+            .accelerationStructureCaptureReplay                     = VK_FALSE,
+            .accelerationStructureIndirectBuild                     = VK_FALSE,
+            .accelerationStructureHostCommands                      = VK_FALSE,
+            .descriptorBindingAccelerationStructureUpdateAfterBind  = VK_TRUE,
+        };
+
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingFeatures =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+            .rayTracingPipeline                                     = VK_TRUE,
+            .rayTracingPipelineShaderGroupHandleCaptureReplay       = VK_FALSE,
+            .rayTracingPipelineShaderGroupHandleCaptureReplayMixed  = VK_FALSE,
+            .rayTracingPipelineTraceRaysIndirect                    = VK_TRUE,
+            .rayTraversalPrimitiveCulling                           = VK_FALSE,
+        };
+
+        VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+            .rayQuery = VK_TRUE,
+        };
+
+        VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
+            .indexTypeUint8 = VK_TRUE,
+        };
+
+
 
         std::vector<VkExtensionProperties> allDeviceExtensions;
-        allDeviceExtensions.reserve(deviceExtensions.size() + deviceExtensionsForValidationLayer.size());
-        allDeviceExtensions.insert(allDeviceExtensions.end(), std::make_move_iterator(deviceExtensions.begin()), std::make_move_iterator(deviceExtensions.end()));
-        allDeviceExtensions.insert(allDeviceExtensions.end(), std::make_move_iterator(deviceExtensionsForValidationLayer.begin()), std::make_move_iterator(deviceExtensionsForValidationLayer.end()));
+        PrintDeviceExtensions(VulkanPhysicalDevice, allDeviceExtensions);
+        std::vector<const char*> deviceExtensionNames =
+        {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,
+            VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME,
+        };
+
+        void* createInfoNext = &vkFeatures13;
+        auto addOptionalExtension = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name, void* features = nullptr) mutable -> bool
+        {
+            bool extensionFound = false;
+            for (const auto& extension : allDeviceExtensions)
+            {
+                if (strcmp(extension.extensionName, name) == 0) { extensionFound = true; }
+            }
+            if (!extensionFound)
+            {
+                printf("Device Extension:%s -> Disabled\n", name);
+                return false;
+            }
+
+            deviceExtensionNames.emplace_back(name);
+            if (features)
+            {
+                //Safe way to access both ->pNext members and write to it
+                std::launder(static_cast<VkBaseOutStructure*>(features))->pNext = std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
+                createInfoNext = features;
+
+                printf("Device Extension:%s -> Enabled\n", name);
+            }
+
+            return true;
+        };
+
+        auto addOptionalExtensions = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name1, const char* name2, void* features = nullptr) mutable -> bool
+        {
+            bool extension1Found = false;
+            bool extension2Found = false;
+            for (const auto& extension : allDeviceExtensions)
+            {
+                if (strcmp(extension.extensionName, name1) == 0) { extension1Found = true; }
+                if (strcmp(extension.extensionName, name2) == 0) { extension2Found = true; }
+            }
+            if (!extension1Found || !extension2Found)
+            {
+                printf("Device Extension:%s -> Disabled\n", name1);
+                printf("Device Extension:%s -> Disabled\n", name2);
+                return false;
+            }
+
+            deviceExtensionNames.push_back(name1);
+            deviceExtensionNames.push_back(name2);
+            if (features)
+            {
+                std::launder(static_cast<VkBaseOutStructure*>(features))->pNext =  std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
+                createInfoNext = features;
+                printf("Device Extension:%s -> Enabled\n", name1);
+                printf("Device Extension:%s -> Enabled\n", name2);
+            }
+
+            return true;
+        };
+
+        addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
+        addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
+        addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
+
+        VulkanDeviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(VulkanPhysicalDevice, VK_QUEUE_GRAPHICS_BIT);
+        if (VulkanDeviceQueues.Graphics.QueueFamilyIndex == DeviceQueues::InvalidIndex) { printf("VK_QUEUE_GRAPHICS_BIT is not supported"); }
+        VulkanDeviceQueues.Compute.QueueFamilyIndex = FindQueueFamilyIndex(VulkanPhysicalDevice, VK_QUEUE_COMPUTE_BIT);
+        if (VulkanDeviceQueues.Compute.QueueFamilyIndex == DeviceQueues::InvalidIndex) { printf("VK_QUEUE_COMPUTE_BIT is not supported"); }
+
+        constexpr float queuePriority = 1.0f;
+        const VkDeviceQueueCreateInfo ciQueue[2] =
+        {
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .queueFamilyIndex = VulkanDeviceQueues.Graphics.QueueFamilyIndex,
+                .queueCount = 1,
+                .pQueuePriorities = &queuePriority,
+            },
+        {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .queueFamilyIndex = VulkanDeviceQueues.Compute.QueueFamilyIndex,
+                .queueCount = 1,
+                .pQueuePriorities = &queuePriority,
+            },
+        };
+        const uint32_t numQueues = ciQueue[0].queueFamilyIndex == ciQueue[1].queueFamilyIndex ? 1 : 2;
+
+        const VkDeviceCreateInfo deviceCreateInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .pNext = &indexTypeUint8Features,
+            .queueCreateInfoCount = numQueues,
+            .pQueueCreateInfos = ciQueue,
+            .enabledExtensionCount = static_cast<uint32_t>(deviceExtensionNames.size()),
+            .ppEnabledExtensionNames = deviceExtensionNames.data(),
+            .pEnabledFeatures = &deviceFeatures10,
+        };
+        VK_ASSERT(vkCreateDevice(VulkanPhysicalDevice, &deviceCreateInfo, nullptr, &VulkanDevice));
+        volkLoadDevice(VulkanDevice);
 
 
-
-
-        //after device creation:
-        //volkLoadDevice();
+        //Create Swapchain
     }
 
     void VulkanContext::CreateVulkanInstance()
     {
         uint32_t apiVersion{};
         vkEnumerateInstanceVersion(&apiVersion);
-        printf("Vulkan API Verion: %d.%d.%d \n", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion), VK_VERSION_PATCH(apiVersion));
+        printf("Vulkan Instance API Version: %d.%d.%d \n", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion), VK_VERSION_PATCH(apiVersion));
         const VkApplicationInfo applicationInfo
         {
             .pApplicationName   = "EOS", //TODO Change this
@@ -247,7 +448,7 @@ namespace EOS
             .display = (wl_display*)display,
             .surface = (wl_surface*)window,
         };
-        VK_ASSERT(vkCreateWaylandSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
+        //VK_ASSERT(vkCreateWaylandSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
 #endif
     }
 
@@ -294,14 +495,5 @@ namespace EOS
         return false;
     }
 
-    void VulkanContext::GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions, const char* forValidationLayer) const
-    {
-        uint32_t numExtensions{0};
-        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, nullptr);
 
-        deviceExtensions.clear();
-        deviceExtensions.resize(numExtensions);
-
-        vkEnumerateDeviceExtensionProperties(VulkanPhysicalDevice, forValidationLayer, &numExtensions, deviceExtensions.data());
-    }
 }

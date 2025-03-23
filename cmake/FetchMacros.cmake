@@ -9,22 +9,20 @@
     set(GLFW_INSTALL                 OFF CACHE BOOL "")
     set(GLFW_DOCUMENT_INTERNALS      OFF CACHE BOOL "")
 
-    if(UNIX AND NOT APPLE)
-        # Disable win32
-        set(GLFW_BUILD_WIN32 OFF)
+    set(GLFW_BUILD_WIN32 OFF)
+    set(GLFW_BUILD_WAYLAND OFF)
+    set(GLFW_BUILD_X11 OFF)
 
-        find_package(Wayland QUIET)
-        if(WAYLAND_FOUND)
-            set(GLFW_BUILD_WAYLAND ON)
-            set(GLFW_BUILD_X11 OFF)
-        else()
-            set(GLFW_BUILD_WAYLAND OFF)
-            set(GLFW_BUILD_X11 ON)
-        endif()
-    else()
-        set(GLFW_BUILD_WAYLAND OFF)
-        set(GLFW_BUILD_X11 OFF)
-    endif()
+    if(USE_WINDOWS)
+        set(GLFW_BUILD_WIN32 ON)
+    elseif (USE_WAYLAND)
+        set(GLFW_BUILD_WAYLAND ON)
+    elseif ()
+        set(GLFW_BUILD_X11 ON)
+    else ()
+        message(FATAL_ERROR "Could not detect OS fro GLFW")
+    endif ()
+
 
     set(GLFW_ROOT_DIR ${DEPS_DIR}/src/glfw)
     FetchContent_Populate(
@@ -83,7 +81,7 @@ macro(FETCH_SLANG tag, depsDir)
     set(SLANG_ROOT_DIR ${DEPS_DIR}/src/slang)
     FetchContent_Populate(
             slang
-            GIT_REPOSITORY https://github.com/shader-slang/slang
+            GIT_REPOSITORY https://github.com/shader-slang/slang.git
             GIT_TAG        ${TAG}
             SOURCE_DIR     ${SLANG_ROOT_DIR}
     )

@@ -37,7 +37,7 @@ macro(CREATE_APP name)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_RELEASE ${PROJECT_NAME}_Release)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_RELWITHDEBINFO ${PROJECT_NAME}_ReleaseDebInfo)
 
-    # On Linux/macOS the binaries are stored in the bin folder
+    # On Linux the binaries are stored in the bin folder
     if (UNIX)
         set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
     endif()
@@ -45,6 +45,8 @@ macro(CREATE_APP name)
     set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 20)
     set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
     set_property(TARGET ${PROJECT_NAME} PROPERTY CMAKE_CXX_EXTENSIONS OFF)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lstdc++")
 
     if(MSVC)
         add_definitions(-D_CONSOLE)

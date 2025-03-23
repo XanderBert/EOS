@@ -10,12 +10,16 @@ Will only target Windows and Linux.
 # Dependencies
 - Vulkan SDK
 - CMake
-- C++20 compiler
+- C++ compiler
 - [GLFW]
 - [GLM]
 - [VOLK]
 - [STB]
 - [SLANG]
+
+
+# Building
+This project is being build with CMAKE
 
 
 
@@ -31,3 +35,4 @@ This project is heavily inspired by LVK and The Forge
 - No C-style Casts
 - Use [[nodiscard]] whenever you return a value
 - For each dependency a separate Fetch macro will be made in FetchMacros.cmake for ease of use and separation 
+- Whenever possible call reserve on std::vector's

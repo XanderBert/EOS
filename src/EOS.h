@@ -111,9 +111,9 @@ namespace EOS
     struct ContextCreationDescription final
     {
         ContextConfiguration    config;
-        GLFWwindow*             window;
-        void*                   display;
-        HardwareDeviceType      preferredHardwareType;
+        GLFWwindow*             window{};
+        void*                   display{};
+        HardwareDeviceType      preferredHardwareType{HardwareDeviceType::Discrete};
     };
 
     std::unique_ptr<IContext> CreateContextWithSwapchain(const ContextCreationDescription& contextCreationDescription);
