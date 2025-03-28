@@ -9,17 +9,16 @@ Will only target Windows and Linux.
 
 # Dependencies
 - Vulkan SDK
-- CMake
-- C++ compiler
 - [GLFW]
 - [GLM]
 - [VOLK]
 - [STB]
 - [SLANG]
+- [VMA]
 
 
 # Building
-This project is being build with CMAKE
+This project is being build with CMake
 
 
 

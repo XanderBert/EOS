@@ -46,17 +46,23 @@ macro(FETCH_VOLK tag, depsDir)
             SOURCE_DIR     ${VOLK_ROOT_DIR}
     )
 
-    if (WIN32)
-        set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
-    #TODO: Add support for X11 and Wayland
-    #elseif(UNIX AND NOT APPLE)
-    #    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WAYLAND_KHR)
-    endif()
-
-
     add_subdirectory(${VOLK_ROOT_DIR})
 endmacro()
 
+macro(FETCH_VMA tag, depsDir)
+    set(DEPS_DIR ${depsDir})
+    set(TAG ${tag})
+
+    set(VMA_ROOT_DIR ${DEPS_DIR}/src/vma)
+    FetchContent_Populate(
+            vma
+            GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+            GIT_TAG        ${TAG}
+            SOURCE_DIR     ${VMA_ROOT_DIR}
+    )
+
+    add_subdirectory(${VMA_ROOT_DIR})
+endmacro()
 
 macro(FETCH_SLANG tag, depsDir)
     set(DEPS_DIR ${depsDir})

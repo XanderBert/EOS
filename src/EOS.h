@@ -1,37 +1,44 @@
 ﻿#pragma once
-#include <concepts>
-#include <cstdint>
+
 #include <memory>
 #include <string>
-#include <utility>
 
+#include "defines.h"
 #include "window.h"
-
-#define DELETE_COPY(ClassName)                   \
-ClassName(const ClassName&) = delete;            \
-ClassName& operator=(const ClassName&) = delete;
-
-#define DELETE_MOVE(ClassName)                   \
-ClassName (ClassName&&) = delete;                \
-ClassName& operator=(ClassName&&) = delete;
-
-#define DELETE_COPY_MOVE(ClassName)              \
-DELETE_COPY(ClassName)                           \
-DELETE_MOVE(ClassName)
-
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 namespace EOS
 {
+    //Forward declare
     class IContext;
 
-    enum class HardwareDeviceType
+#pragma region ENUMS
+    enum class HardwareDeviceType : uint8_t
     {
         Integrated  = 1,
         Discrete    = 2,
         Virtual     = 3,
         Software    = 4
     };
+
+    enum class ColorSpace : uint8_t
+    {
+        SRGB_Linear,
+        SRGB_NonLinear
+    };
+
+    enum class ImageType : uint8_t
+    {
+        Image_1D        = 0,
+        Image_2D        = 1,
+        Image_3D        = 2,
+        CubeMap         = 3,
+        Image_1D_Array  = 4,
+        Image_2D_Array  = 5,
+        CubeMap_Array   = 6,
+        SwapChain       = 7,
+    };
+
+#pragma endregion
 
     struct HardwareDeviceDescription
     {
@@ -40,62 +47,10 @@ namespace EOS
         std::string name{};
     };
 
-    // Concept for required HandleType operations
-    template<typename T>
-    concept ValidHandle = requires(T t)
-    {
-        { t.Valid() } -> std::convertible_to<bool>;
-        { t.Empty() } -> std::convertible_to<bool>;
-        { t.Gen() } -> std::convertible_to<uint32_t>;
-        { t.Index() } -> std::convertible_to<uint32_t>;
-        { t.IndexAsVoid() } -> std::convertible_to<void*>;
-    };
-
-    template<typename HandleType>
-    class Holder final
-    {
-    public:
-        static_assert(std::is_default_constructible_v<HandleType>, "HandleType must be default constructible");
-        static_assert(ValidHandle<HandleType>, "HandleType doesn't satisfy ValidHandle concept");
-
-        Holder() = default;
-        Holder(IContext* ctx, HandleType hdl) noexcept;
-        ~Holder() noexcept;
-
-        DELETE_COPY(Holder)
-        Holder(Holder&& other) noexcept;
-        Holder& operator=(Holder&& other) noexcept;
-
-        void Reset() noexcept;
-
-        [[nodiscard]] explicit operator HandleType() const noexcept;
-        [[nodiscard]] bool Empty() const noexcept;
-        [[nodiscard]] HandleType Release() noexcept;
-        [[nodiscard]] auto Gen() const noexcept;
-        [[nodiscard]] auto Index() const noexcept;
-        [[nodiscard]] auto IndexAsVoid() const noexcept;
-        [[nodiscard]] IContext* Context() const noexcept;
-        [[nodiscard]] const HandleType& Get() const noexcept;
-
-    private:
-        IContext* context{nullptr};
-        HandleType handle{};
-    };
-
-    class ICommandBuffer
-    {
-    protected:
-        ICommandBuffer() = default;
-
-    public:
-        DELETE_COPY_MOVE(ICommandBuffer);
-        virtual ~ICommandBuffer() = default;
-
-    };
-
     struct ContextConfiguration final
     {
         bool enableValidationLayers{ true };
+        ColorSpace DesiredSwapChainColorSpace { ColorSpace::SRGB_Linear };
     };
 
     class IContext
@@ -111,10 +66,10 @@ namespace EOS
     struct ContextCreationDescription final
     {
         ContextConfiguration    config;
-        GLFWwindow*             window{};
+        void*                   window{};
         void*                   display{};
         HardwareDeviceType      preferredHardwareType{HardwareDeviceType::Discrete};
     };
 
-    std::unique_ptr<IContext> CreateContextWithSwapchain(const ContextCreationDescription& contextCreationDescription);
+    std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);
 }
