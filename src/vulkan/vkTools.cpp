@@ -3,8 +3,11 @@
 #define VOLK_IMPLEMENTATION
 #define VMA_IMPLEMENTATION
 
+#include <ranges>
+
 #include "vkTools.h"
 #include "vulkanClasses.h"
+
 
 VkResult SetDebugObjectName(const VkDevice device, const VkObjectType type, const uint64_t handle, const char* name)
 {
@@ -206,7 +209,7 @@ void CheckMissingDeviceFeatures(
 #undef CHECK_FEATURE_1_3
     if (!missingFeatures.empty())
     {
-        printf("Missing Vulkan features: %s\n", missingFeatures.c_str());
+        EOS::Logger->warn("Missing Vulkan features: {}", missingFeatures.c_str());
     }
 }
 
@@ -214,7 +217,7 @@ void SelectHardwareDevice(const std::vector<EOS::HardwareDeviceDescription>& har
 {
     //TODO: Do more check -> Maybe user can specify on what conditions it should be selected?
     physicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().id);
-    printf("Selected Hardware Device: %s \n", hardwareDevices.back().name.c_str());
+    EOS::Logger->info("Selected Hardware Device: {}", hardwareDevices.back().name.c_str());
 }
 
 void GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions,const VkPhysicalDevice& vulkanPhysicalDevice, const char* forValidationLayer)
@@ -235,18 +238,8 @@ void PrintDeviceExtensions(const VkPhysicalDevice& vulkanPhysicalDevice, std::ve
     std::vector<VkExtensionProperties> deviceExtensionsForValidationLayer;
     GetDeviceExtensions(deviceExtensionsForValidationLayer, vulkanPhysicalDevice, validationLayer);
 
-    printf("Device Extension:\n");
-    for (const auto& extension: deviceExtensions)
-    {
-        printf("    %s\n", extension.extensionName);
-    }
-
-    printf("Device Extension For Validation Layer %s:\n", validationLayer);
-    for (const auto& extension: deviceExtensionsForValidationLayer)
-    {
-        printf("    %s\n", extension.extensionName);
-    }
-
+    EOS::Logger->info("Device Extensions:\n     {}", fmt::join(deviceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
+    EOS::Logger->info("Device Extension For Validation Layer:\n     {}", fmt::join(deviceExtensionsForValidationLayer | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
 
     //Merge the two
     allDeviceExtensions.clear();

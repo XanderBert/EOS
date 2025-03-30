@@ -1,6 +1,6 @@
 ﻿#include "vulkanClasses.h"
 #include <string.h>
-
+#include <ranges>
 
 #include "vulkan/vkTools.h"
 
@@ -20,6 +20,7 @@ VulkanImage::VulkanImage(const ImageDescription &description)
 
     //TODO: Specify that this debug name is for image -> _image
     VK_ASSERT(SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
+
 }
 
 void VulkanImage::CreateImageView(VkImageView& imageView, const VkDevice device, VkImage image, const EOS::ImageType imageType,
@@ -63,13 +64,27 @@ VkImageType VulkanImage::ToImageType(const EOS::ImageType imageType)
 
 VkImageViewType VulkanImage::ToImageViewType(EOS::ImageType imageType)
 {
-    //TODO: This solution is not future proof.
-    if (imageType == EOS::ImageType::SwapChain)
+    switch (imageType)
     {
-        return VK_IMAGE_VIEW_TYPE_2D;
+        case (EOS::ImageType::Image_1D):
+            return VK_IMAGE_VIEW_TYPE_1D;
+        case (EOS::ImageType::Image_1D_Array):
+            return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+        case(EOS::ImageType::Image_2D):
+            return VK_IMAGE_VIEW_TYPE_2D;
+        case(EOS::ImageType::Image_2D_Array):
+            return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        case(EOS::ImageType::CubeMap):
+            return VK_IMAGE_VIEW_TYPE_CUBE;
+        case(EOS::ImageType::CubeMap_Array):
+            return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+        case(EOS::ImageType::SwapChain):
+            return VK_IMAGE_VIEW_TYPE_2D;
+        case(EOS::ImageType::Image_3D):
+            return  VK_IMAGE_VIEW_TYPE_3D;
     }
 
-    return static_cast<VkImageViewType>(imageType);
+    return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
 }
 
 VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
@@ -197,7 +212,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 : Configuration(contextDescription.config)
 {
     if (volkInitialize() != VK_SUCCESS) { exit(255); }
-    CreateVulkanInstance();
+    CreateVulkanInstance(contextDescription.applicationName);
     volkLoadInstance(VulkanInstance);
     SetupDebugMessenger();
     CreateSurface(contextDescription.window, contextDescription.display);
@@ -212,11 +227,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
     GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice);
     const uint32_t driverAPIVersion = vkPhysicalDeviceProperties2.properties.apiVersion;
-    printf("        Driver info: %s %s\n", vkPhysicalDeviceDriverProperties.driverName, vkPhysicalDeviceDriverProperties.driverInfo);
-    printf("        Driver Vulkan API Version: %i.%i.%i\n", VK_API_VERSION_MAJOR(driverAPIVersion), VK_API_VERSION_MINOR(driverAPIVersion), VK_API_VERSION_PATCH(driverAPIVersion));
 
-    //Device Features
-
+    EOS::Logger->info("Driver info: {} {}", vkPhysicalDeviceDriverProperties.driverName, vkPhysicalDeviceDriverProperties.driverInfo);
+    EOS::Logger->info("Driver Vulkan API Version: {}.{}.{}", VK_API_VERSION_MAJOR(driverAPIVersion), VK_API_VERSION_MINOR(driverAPIVersion), VK_API_VERSION_PATCH(driverAPIVersion));
 
     //TODO make 1.4 compatible
     //Get Features
@@ -345,7 +358,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
         }
         if (!extensionFound)
         {
-            printf("Device Extension:%s -> Disabled\n", name);
+            EOS::Logger->warn("Device Extension: {} -> Disabled", name);
             return false;
         }
 
@@ -356,7 +369,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
             std::launder(static_cast<VkBaseOutStructure*>(features))->pNext = std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
             createInfoNext = features;
 
-            printf("Device Extension:%s -> Enabled\n", name);
+            EOS::Logger->info("Device Extension: {} -> Enabled", name);
         }
 
         return true;
@@ -373,8 +386,8 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
         }
         if (!extension1Found || !extension2Found)
         {
-            printf("Device Extension:%s -> Disabled\n", name1);
-            printf("Device Extension:%s -> Disabled\n", name2);
+            EOS::Logger->warn("Device Extension: {} -> Disabled", name1);
+            EOS::Logger->warn("Device Extension: {} -> Disabled", name2);
             return false;
         }
 
@@ -384,8 +397,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
         {
             std::launder(static_cast<VkBaseOutStructure*>(features))->pNext =  std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
             createInfoNext = features;
-            printf("Device Extension:%s -> Enabled\n", name1);
-            printf("Device Extension:%s -> Enabled\n", name2);
+
+            EOS::Logger->info("Device Extension: {} -> Disabled", name1);
+            EOS::Logger->info("Device Extension: {} -> Disabled", name2);
         }
 
         return true;
@@ -396,9 +410,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
 
     VulkanDeviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(VulkanPhysicalDevice, VK_QUEUE_GRAPHICS_BIT);
-    if (VulkanDeviceQueues.Graphics.QueueFamilyIndex == DeviceQueues::InvalidIndex) { printf("VK_QUEUE_GRAPHICS_BIT is not supported"); }
+    if (VulkanDeviceQueues.Graphics.QueueFamilyIndex == DeviceQueues::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
     VulkanDeviceQueues.Compute.QueueFamilyIndex = FindQueueFamilyIndex(VulkanPhysicalDevice, VK_QUEUE_COMPUTE_BIT);
-    if (VulkanDeviceQueues.Compute.QueueFamilyIndex == DeviceQueues::InvalidIndex) { printf("VK_QUEUE_COMPUTE_BIT is not supported"); }
+    if (VulkanDeviceQueues.Compute.QueueFamilyIndex == DeviceQueues::InvalidIndex) { EOS::Logger->error("VK_QUEUE_COMPUTE_BIT is not supported"); }
 
     constexpr float queuePriority = 1.0f;
     const VkDeviceQueueCreateInfo ciQueue[2] =
@@ -443,14 +457,15 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     std::unique_ptr<VulkanSwapChain> vkSwapchain = std::make_unique<VulkanSwapChain>(desc);
 }
 
-void VulkanContext::CreateVulkanInstance()
+void VulkanContext::CreateVulkanInstance(const char* applicationName)
 {
     uint32_t apiVersion{};
     vkEnumerateInstanceVersion(&apiVersion);
-    printf("Vulkan Instance API Version: %d.%d.%d \n", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion), VK_VERSION_PATCH(apiVersion));
+    EOS::Logger->info("Vulkan Instance API Version: {}.{}.{}", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion), VK_VERSION_PATCH(apiVersion));
+
     const VkApplicationInfo applicationInfo
     {
-        .pApplicationName   = "EOS", //TODO Change this
+        .pApplicationName   = applicationName,
         .applicationVersion = VK_MAKE_VERSION(0, 0, 1),
         .pEngineName        = "EOS",
         .engineVersion      = VK_MAKE_VERSION(0, 0, 1),
@@ -504,21 +519,15 @@ void VulkanContext::CreateVulkanInstance()
             instanceExtensionNames.emplace_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
     #endif
 
-
-    // log and check available instance extensions
-    printf("\nAvailable Vulkan instance extensions:\n");
-    for (const VkExtensionProperties& extension : allInstanceExtensions)
-    {
-        printf("    %s\n", extension.extensionName);
-    }
+    EOS::Logger->info("Vulkan Instance Extensions:\n     {}", fmt::join(allInstanceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
 
     bool foundInstanceExtension = false;
     for (const auto& instanceExtensionName : instanceExtensionNames)
     {
         foundInstanceExtension = false;
-        for (const VkExtensionProperties& extension : allInstanceExtensions)
+        for (const auto&[extensionName, specVersion] : allInstanceExtensions)
         {
-            if (strcmp(extension.extensionName, instanceExtensionName) == 0)
+            if (strcmp(extensionName, instanceExtensionName) == 0)
             {
                 foundInstanceExtension = true;
                 availableInstanceExtensionNames.emplace_back(instanceExtensionName);
@@ -528,7 +537,7 @@ void VulkanContext::CreateVulkanInstance()
 
         if (!foundInstanceExtension)
         {
-            printf("    %s -> Is not available on your device.\n", instanceExtensionName);
+            EOS::Logger->warn("{} -> Is not available on your device.", instanceExtensionName);
         }
     }
 
@@ -661,7 +670,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
 
     if (hardwareDevices.empty())
     {
-        printf("Couldn't Find a physical hardware device");
+        EOS::Logger->critical("Couldn't Find a physical hardware device");
         assert(false);
     }
 }

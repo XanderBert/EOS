@@ -66,9 +66,10 @@ namespace EOS
     struct ContextCreationDescription final
     {
         ContextConfiguration    config;
+        HardwareDeviceType      preferredHardwareType{HardwareDeviceType::Discrete};
+        const char*             applicationName{};
         void*                   window{};
         void*                   display{};
-        HardwareDeviceType      preferredHardwareType{HardwareDeviceType::Discrete};
     };
 
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);

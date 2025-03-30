@@ -7,6 +7,8 @@
 #include <volk.h>
 #include <vk_mem_alloc.h>
 
+#include "pool.h"
+
 //Forward Declares
 class VulkanContext;
 static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
@@ -122,7 +124,7 @@ public:
 private:
     //TODO: All of these private functions should be moved to VkTools
     //The Context Object will "only" have functions that are being used at runtime / not initial setup.
-    void CreateVulkanInstance();
+    void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
@@ -136,6 +138,10 @@ private:
     VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
     DeviceQueues VulkanDeviceQueues{};
     EOS::ContextConfiguration Configuration{};
+
+
+    //EOS::Pool<, VkImage> VulkanImagePool;
+
 
     friend struct VulkanSwapChain;
 };

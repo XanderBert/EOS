@@ -93,3 +93,20 @@ macro(FETCH_SLANG tag, depsDir)
     )
     add_subdirectory(${SLANG_ROOT_DIR})
 endmacro()
+
+
+
+#TODO: When passing tag here, i get the first ever pre release of this library.
+#Why is that? when i manually set the git tag it gets the correct version
+macro(FETCH_SPDLOG depsDir)
+    set(DEPS_DIR ${depsDir})
+
+    set(SPDLOG_ROOT_DIR ${DEPS_DIR}/src/spdlog)
+    FetchContent_Populate(
+            spdlog
+            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+            GIT_TAG        v1.15.2
+            SOURCE_DIR     ${SPDLOG_ROOT_DIR}
+    )
+    add_subdirectory(${SPDLOG_ROOT_DIR})
+endmacro()

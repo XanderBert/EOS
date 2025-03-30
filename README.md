@@ -10,16 +10,12 @@ Will only target Windows and Linux.
 # Dependencies
 - Vulkan SDK
 - [GLFW]
-- [GLM]
 - [VOLK]
-- [STB]
-- [SLANG]
 - [VMA]
-
+- [SPDLOG]
 
 # Building
 This project is being build with CMake
-
 
 
 # Future

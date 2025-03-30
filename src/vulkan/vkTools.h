@@ -7,8 +7,15 @@
 
 
 #include "cassert"
+#include "logger.h"
 
-#define VK_ASSERT(func){ const VkResult result = func; if (result != VK_SUCCESS) { printf("Vulkan Assert failed: %s:%i\n", __FILE__, __LINE__); assert(false); } }
+#define VK_ASSERT(func){ const VkResult result = func;                              \
+    if (result != VK_SUCCESS)                                                       \
+    {                                                                               \
+        EOS::Logger->error("Vulkan Assert failed: {}:{}\n", __FILE__, __LINE__);    \
+        assert(false);                                                              \
+    }                                                                               \
+}
 
 // Forward Declare
 namespace EOS
@@ -19,8 +26,19 @@ namespace EOS
 
 VKAPI_ATTR inline VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData)
 {
-    //TODO: Have logging based or severity
-    printf("%s\n", callbackData->pMessage);
+    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    {
+        EOS::Logger->warn(callbackData->pMessage);
+        return VK_TRUE;
+    }
+
+    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+    {
+        EOS::Logger->error(callbackData->pMessage);
+        return VK_TRUE;
+    }
+
+    EOS::Logger->info(callbackData->pMessage);
     return VK_TRUE;
 }
 
