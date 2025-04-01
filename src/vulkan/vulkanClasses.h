@@ -18,7 +18,7 @@ struct ImageDescription final
     VkImage Image{};
     VkImageUsageFlags UsageFlags{};
     VkExtent3D Extent{};
-    EOS::ImageType ImageType;
+    EOS::ImageType ImageType{EOS::ImageType::Image_2D};
     VkFormat ImageFormat{};
     const char* DebugName{};
     VkDevice Device{};
@@ -140,7 +140,8 @@ private:
     EOS::ContextConfiguration Configuration{};
 
 
-    //EOS::Pool<, VkImage> VulkanImagePool;
+    //using TextureHandle = EOS::Handle<struct Texture>;
+    //EOS::Pool<EOS::Texture, VkImage> VulkanImagePool;
 
 
     friend struct VulkanSwapChain;

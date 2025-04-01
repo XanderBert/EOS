@@ -12,18 +12,16 @@ VulkanImage::VulkanImage(const ImageDescription &description)
 , ImageType(description.ImageType)
 , ImageFormat(description.ImageFormat)
 {
+    VK_ASSERT(SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
+
     //TODO: Set Levels and Layers
     //TODO: Check if depth format
     //TODO: Check if stencil format
 
     CreateImageView(ImageView, description.Device, Image, ImageType, ImageFormat, Levels, Layers, description.DebugName);
-
-    //TODO: Specify that this debug name is for image -> _image
-    VK_ASSERT(SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
-
 }
 
-void VulkanImage::CreateImageView(VkImageView& imageView, const VkDevice device, VkImage image, const EOS::ImageType imageType,
+void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, const EOS::ImageType imageType,
     const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName)
 {
     const VkImageViewCreateInfo createInfo =
@@ -150,16 +148,11 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
     //Create SwapChain Images
     VK_ASSERT(vkGetSwapchainImagesKHR(vkContext->VulkanDevice,SwapChain, &NumberOfSwapChainImages, nullptr);)
-
-    //Make sure we don't go over our max defined SwapChain images
-    NumberOfSwapChainImages = std::min(NumberOfSwapChainImages, MAX_IMAGES);
-
-    //TODO: Double check this vector gets filled in.
-    std::vector<VkImage> swapChainImages{};
-    swapChainImages.reserve(NumberOfSwapChainImages);
-
-    VK_ASSERT(vkGetSwapchainImagesKHR(vkContext->VulkanDevice,SwapChain, &NumberOfSwapChainImages, swapChainImages.data());)
-    assert(NumberOfSwapChainImages >  0);
+    NumberOfSwapChainImages = std::min(NumberOfSwapChainImages, MAX_IMAGES);  //Make sure we don't go over our max defined SwapChain images
+    std::vector<VkImage> swapChainImages(NumberOfSwapChainImages);
+    VK_ASSERT(vkGetSwapchainImagesKHR(vkContext->VulkanDevice, SwapChain, &NumberOfSwapChainImages,swapChainImages.data()));
+    CHECK(NumberOfSwapChainImages <=  0, "Number of SwapChain images is 0");
+    CHECK(swapChainImages.empty(), "The SwapChain images didn't got created");
 
     char debugNameImage[256]{};
     char debugNameImageView[256]{};
@@ -211,9 +204,9 @@ VulkanSwapChain::VulkanSwapChainSupportDetails::VulkanSwapChainSupportDetails(co
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.config)
 {
-    if (volkInitialize() != VK_SUCCESS) { exit(255); }
+    CHECK(volkInitialize() != VK_SUCCESS, "Failed to Initialize VOLK");
+
     CreateVulkanInstance(contextDescription.applicationName);
-    volkLoadInstance(VulkanInstance);
     SetupDebugMessenger();
     CreateSurface(contextDescription.window, contextDescription.display);
 
@@ -222,231 +215,12 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
     SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
 
-    //Device Properties
-    VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
-    VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
-    GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice);
-    const uint32_t driverAPIVersion = vkPhysicalDeviceProperties2.properties.apiVersion;
-
-    EOS::Logger->info("Driver info: {} {}", vkPhysicalDeviceDriverProperties.driverName, vkPhysicalDeviceDriverProperties.driverInfo);
-    EOS::Logger->info("Driver Vulkan API Version: {}.{}.{}", VK_API_VERSION_MAJOR(driverAPIVersion), VK_API_VERSION_MINOR(driverAPIVersion), VK_API_VERSION_PATCH(driverAPIVersion));
-
-    //TODO make 1.4 compatible
-    //Get Features
-    //VkPhysicalDeviceVulkan14Features vkFeatures14       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES};
-    VkPhysicalDeviceVulkan13Features vkFeatures13       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = nullptr};
-    VkPhysicalDeviceVulkan12Features vkFeatures12       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vkFeatures13};
-    VkPhysicalDeviceVulkan11Features vkFeatures11       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &vkFeatures12};
-    VkPhysicalDeviceFeatures2 startOfDeviceFeaturespNextChain = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vkFeatures11};
-    vkGetPhysicalDeviceFeatures2(VulkanPhysicalDevice, &startOfDeviceFeaturespNextChain);
-
-    //Setup the desired features then we check if our device supports these desired features.
-    VkPhysicalDeviceFeatures deviceFeatures10 =
-    {
-        .geometryShader                 = startOfDeviceFeaturespNextChain.features.geometryShader,
-        .tessellationShader             = startOfDeviceFeaturespNextChain.features.tessellationShader,
-        .sampleRateShading              = VK_TRUE,
-        .multiDrawIndirect              = VK_TRUE,
-        .drawIndirectFirstInstance      = VK_TRUE,
-        .depthBiasClamp                 = VK_TRUE,
-        .fillModeNonSolid               = startOfDeviceFeaturespNextChain.features.fillModeNonSolid,
-        .samplerAnisotropy              = VK_TRUE,
-        .textureCompressionBC           = startOfDeviceFeaturespNextChain.features.textureCompressionBC,
-        .vertexPipelineStoresAndAtomics = startOfDeviceFeaturespNextChain.features.vertexPipelineStoresAndAtomics,
-        .fragmentStoresAndAtomics       = VK_TRUE,
-        .shaderImageGatherExtended      = VK_TRUE,
-        .shaderInt64                    = startOfDeviceFeaturespNextChain.features.shaderInt64,
-    };
-
-    VkPhysicalDeviceVulkan11Features deviceFeatures11 =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-        .pNext = nullptr,           //Additional DeviceExtensionFeatures can be added here
-        .storageBuffer16BitAccess   = VK_TRUE,
-        .samplerYcbcrConversion     = vkFeatures11.samplerYcbcrConversion,
-        .shaderDrawParameters       = VK_TRUE,
-    };
-
-    VkPhysicalDeviceVulkan12Features deviceFeatures12 =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .pNext = &deviceFeatures11,
-        .drawIndirectCount                              = vkFeatures12.drawIndirectCount,
-        .storageBuffer8BitAccess                        = vkFeatures12.storageBuffer8BitAccess,
-        .uniformAndStorageBuffer8BitAccess              = vkFeatures12.uniformAndStorageBuffer8BitAccess,
-        .shaderFloat16                                  = vkFeatures12.shaderFloat16,
-        .descriptorIndexing                             = VK_TRUE,
-        .shaderSampledImageArrayNonUniformIndexing      = VK_TRUE,
-        .descriptorBindingSampledImageUpdateAfterBind   = VK_TRUE,
-        .descriptorBindingStorageImageUpdateAfterBind   = VK_TRUE,
-        .descriptorBindingUpdateUnusedWhilePending      = VK_TRUE,
-        .descriptorBindingPartiallyBound                = VK_TRUE,
-        .descriptorBindingVariableDescriptorCount       = VK_TRUE,
-        .runtimeDescriptorArray                         = VK_TRUE,
-        .scalarBlockLayout                              = VK_TRUE,
-        .uniformBufferStandardLayout                    = VK_TRUE,
-        .hostQueryReset                                 = vkFeatures12.hostQueryReset,
-        .timelineSemaphore                              = VK_TRUE,
-        .bufferDeviceAddress                            = VK_TRUE,
-        .vulkanMemoryModel                              = vkFeatures12.vulkanMemoryModel,
-        .vulkanMemoryModelDeviceScope                   = vkFeatures12.vulkanMemoryModelDeviceScope,
-    };
-
-    VkPhysicalDeviceVulkan13Features deviceFeatures13 =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .pNext = &deviceFeatures12,
-        .subgroupSizeControl  = VK_TRUE,
-        .synchronization2     = VK_TRUE,
-        .dynamicRendering     = VK_TRUE,
-        .maintenance4         = VK_TRUE,
-    };
-
-    CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13);
-
-
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-        .accelerationStructure                                  = VK_TRUE,
-        .accelerationStructureCaptureReplay                     = VK_FALSE,
-        .accelerationStructureIndirectBuild                     = VK_FALSE,
-        .accelerationStructureHostCommands                      = VK_FALSE,
-        .descriptorBindingAccelerationStructureUpdateAfterBind  = VK_TRUE,
-    };
-
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
-        .rayTracingPipeline                                     = VK_TRUE,
-        .rayTracingPipelineShaderGroupHandleCaptureReplay       = VK_FALSE,
-        .rayTracingPipelineShaderGroupHandleCaptureReplayMixed  = VK_FALSE,
-        .rayTracingPipelineTraceRaysIndirect                    = VK_TRUE,
-        .rayTraversalPrimitiveCulling                           = VK_FALSE,
-    };
-
-    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
-        .rayQuery = VK_TRUE,
-    };
-
-    VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
-    {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
-        .indexTypeUint8 = VK_TRUE,
-    };
+    CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
 
 
 
-    std::vector<VkExtensionProperties> allDeviceExtensions;
-    PrintDeviceExtensions(VulkanPhysicalDevice, allDeviceExtensions);
-    std::vector<const char*> deviceExtensionNames =
-    {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,
-        VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME,
-    };
-
-    void* createInfoNext = &vkFeatures13;
-    auto addOptionalExtension = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name, void* features = nullptr) mutable -> bool
-    {
-        bool extensionFound = false;
-        for (const auto& extension : allDeviceExtensions)
-        {
-            if (strcmp(extension.extensionName, name) == 0) { extensionFound = true; }
-        }
-        if (!extensionFound)
-        {
-            EOS::Logger->warn("Device Extension: {} -> Disabled", name);
-            return false;
-        }
-
-        deviceExtensionNames.emplace_back(name);
-        if (features)
-        {
-            //Safe way to access both ->pNext members and write to it
-            std::launder(static_cast<VkBaseOutStructure*>(features))->pNext = std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
-            createInfoNext = features;
-
-            EOS::Logger->info("Device Extension: {} -> Enabled", name);
-        }
-
-        return true;
-    };
-
-    auto addOptionalExtensions = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name1, const char* name2, void* features = nullptr) mutable -> bool
-    {
-        bool extension1Found = false;
-        bool extension2Found = false;
-        for (const auto& extension : allDeviceExtensions)
-        {
-            if (strcmp(extension.extensionName, name1) == 0) { extension1Found = true; }
-            if (strcmp(extension.extensionName, name2) == 0) { extension2Found = true; }
-        }
-        if (!extension1Found || !extension2Found)
-        {
-            EOS::Logger->warn("Device Extension: {} -> Disabled", name1);
-            EOS::Logger->warn("Device Extension: {} -> Disabled", name2);
-            return false;
-        }
-
-        deviceExtensionNames.push_back(name1);
-        deviceExtensionNames.push_back(name2);
-        if (features)
-        {
-            std::launder(static_cast<VkBaseOutStructure*>(features))->pNext =  std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
-            createInfoNext = features;
-
-            EOS::Logger->info("Device Extension: {} -> Disabled", name1);
-            EOS::Logger->info("Device Extension: {} -> Disabled", name2);
-        }
-
-        return true;
-    };
-
-    addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
-    addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
-    addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
-
-    VulkanDeviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(VulkanPhysicalDevice, VK_QUEUE_GRAPHICS_BIT);
-    if (VulkanDeviceQueues.Graphics.QueueFamilyIndex == DeviceQueues::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
-    VulkanDeviceQueues.Compute.QueueFamilyIndex = FindQueueFamilyIndex(VulkanPhysicalDevice, VK_QUEUE_COMPUTE_BIT);
-    if (VulkanDeviceQueues.Compute.QueueFamilyIndex == DeviceQueues::InvalidIndex) { EOS::Logger->error("VK_QUEUE_COMPUTE_BIT is not supported"); }
-
-    constexpr float queuePriority = 1.0f;
-    const VkDeviceQueueCreateInfo ciQueue[2] =
-    {
-        {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = VulkanDeviceQueues.Graphics.QueueFamilyIndex,
-            .queueCount = 1,
-            .pQueuePriorities = &queuePriority,
-        },
-    {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = VulkanDeviceQueues.Compute.QueueFamilyIndex,
-            .queueCount = 1,
-            .pQueuePriorities = &queuePriority,
-        },
-    };
-    const uint32_t numQueues = ciQueue[0].queueFamilyIndex == ciQueue[1].queueFamilyIndex ? 1 : 2;
-
-    const VkDeviceCreateInfo deviceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &indexTypeUint8Features,
-        .queueCreateInfoCount = numQueues,
-        .pQueueCreateInfos = ciQueue,
-        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensionNames.size()),
-        .ppEnabledExtensionNames = deviceExtensionNames.data(),
-        .pEnabledFeatures = &deviceFeatures10,
-    };
-    VK_ASSERT(vkCreateDevice(VulkanPhysicalDevice, &deviceCreateInfo, nullptr, &VulkanDevice));
-    volkLoadDevice(VulkanDevice);
-
-
-    //Create Swapchain
+    //Create SwapChain
+    //TODO: will it need a description struct?
     VulkanSwapChainCreationDescription desc
     {
         .vulkanContext = this,
@@ -519,7 +293,7 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
             instanceExtensionNames.emplace_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
     #endif
 
-    EOS::Logger->info("Vulkan Instance Extensions:\n     {}", fmt::join(allInstanceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
+    EOS::Logger->debug("Vulkan Instance Extensions:\n     {}", fmt::join(allInstanceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
 
     bool foundInstanceExtension = false;
     for (const auto& instanceExtensionName : instanceExtensionNames)
@@ -602,6 +376,9 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
 
     // Actual Vulkan instance creation
     VK_ASSERT(vkCreateInstance(&instanceCreateInfo, nullptr, &VulkanInstance));
+
+    //Load the volk Instance
+    volkLoadInstance(VulkanInstance);
 }
 
 void VulkanContext::SetupDebugMessenger()
@@ -668,11 +445,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
         compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
     }
 
-    if (hardwareDevices.empty())
-    {
-        EOS::Logger->critical("Couldn't Find a physical hardware device");
-        assert(false);
-    }
+    CHECK(hardwareDevices.empty(), "Couldn't find a physical hardware device!");
 }
 
 bool VulkanContext::IsHostVisibleMemorySingleHeap() const
@@ -684,10 +457,10 @@ bool VulkanContext::IsHostVisibleMemorySingleHeap() const
 
     constexpr uint32_t checkFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    for (const auto& memoryType : memoryProperties.memoryTypes)
+    const bool hasMemoryType = std::ranges::any_of(memoryProperties.memoryTypes,[checkFlags](const auto& memoryType)
     {
-        if ((memoryType.propertyFlags & checkFlags) == checkFlags) { return true; }
-    }
+        return (memoryType.propertyFlags & checkFlags) == checkFlags;
+    });
 
-    return false;
+    return hasMemoryType;
 }

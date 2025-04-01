@@ -7,7 +7,7 @@ namespace EOS
 {
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription)
     {
-        Logger::Init("EOS");
+        Logger::Init("EOS", ".cache/log.txt");
         return std::move( std::make_unique<VulkanContext>(contextCreationDescription) );
     }
 }

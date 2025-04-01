@@ -8,8 +8,56 @@
 #include "vkTools.h"
 #include "vulkanClasses.h"
 
+const char* ObjectToString(const VkObjectType objectType)
+{
+    switch (objectType)
+    {
+        case VK_OBJECT_TYPE_UNKNOWN: return "Unknown";
+        case VK_OBJECT_TYPE_INSTANCE: return "Instance";
+        case VK_OBJECT_TYPE_PHYSICAL_DEVICE: return "PhysicalDevice";
+        case VK_OBJECT_TYPE_DEVICE: return "Device";
+        case VK_OBJECT_TYPE_QUEUE: return "Queue";
+        case VK_OBJECT_TYPE_SEMAPHORE: return "Semaphore";
+        case VK_OBJECT_TYPE_COMMAND_BUFFER: return "CommandBuffer";
+        case VK_OBJECT_TYPE_FENCE: return "Fence";
+        case VK_OBJECT_TYPE_DEVICE_MEMORY: return "DeviceMemory";
+        case VK_OBJECT_TYPE_BUFFER: return "Buffer";
+        case VK_OBJECT_TYPE_IMAGE: return "Image";
+        case VK_OBJECT_TYPE_EVENT: return "Event";
+        case VK_OBJECT_TYPE_QUERY_POOL: return "QueryPool";
+        case VK_OBJECT_TYPE_BUFFER_VIEW: return "BufferView";
+        case VK_OBJECT_TYPE_IMAGE_VIEW: return "ImageView";
+        case VK_OBJECT_TYPE_SHADER_MODULE: return "ShaderModule";
+        case VK_OBJECT_TYPE_PIPELINE_CACHE: return "PipelineCache";
+        case VK_OBJECT_TYPE_PIPELINE_LAYOUT: return "PipelineLayout";
+        case VK_OBJECT_TYPE_RENDER_PASS: return "RenderPass";
+        case VK_OBJECT_TYPE_PIPELINE: return "Pipeline";
+        case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT: return "DescriptorSetLayout";
+        case VK_OBJECT_TYPE_SAMPLER: return "Sampler";
+        case VK_OBJECT_TYPE_DESCRIPTOR_POOL: return "DescriptorPool";
+        case VK_OBJECT_TYPE_DESCRIPTOR_SET: return "DescriptorSet";
+        case VK_OBJECT_TYPE_FRAMEBUFFER: return "Framebuffer";
+        case VK_OBJECT_TYPE_COMMAND_POOL: return "CommandPool";
+        case VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION: return "SamplerYcbcrConversion";
+        case VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE: return "DescriptorUpdateTemplate";
+        case VK_OBJECT_TYPE_SURFACE_KHR: return "SurfaceKHR";
+        case VK_OBJECT_TYPE_SWAPCHAIN_KHR: return "SwapchainKHR";
+        case VK_OBJECT_TYPE_DISPLAY_KHR: return "DisplayKHR";
+        case VK_OBJECT_TYPE_DISPLAY_MODE_KHR: return "DisplayModeKHR";
+        case VK_OBJECT_TYPE_DEBUG_REPORT_CALLBACK_EXT: return "DebugReportCallbackEXT";
+        case VK_OBJECT_TYPE_DEBUG_UTILS_MESSENGER_EXT: return "DebugUtilsMessengerEXT";
+        case VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR: return "AccelerationStructureKHR";
+        case VK_OBJECT_TYPE_VALIDATION_CACHE_EXT: return "ValidationCacheEXT";
+        case VK_OBJECT_TYPE_PERFORMANCE_CONFIGURATION_INTEL: return "PerformanceConfigurationINTEL";
+        case VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR: return "DeferredOperationKHR";
+        case VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_NV: return "IndirectCommandsLayoutNV";
+        case VK_OBJECT_TYPE_PRIVATE_DATA_SLOT_EXT: return "PrivateDataSlotEXT";
+        case VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA: return "BufferCollectionFUCHSIA";
+        default: return "UnknownType";
+    }
+}
 
-VkResult SetDebugObjectName(const VkDevice device, const VkObjectType type, const uint64_t handle, const char* name)
+VkResult SetDebugObjectName(const VkDevice& device, const VkObjectType& type, const uint64_t handle, const char* name)
 {
     if (!name || !*name) { return VK_SUCCESS; }
 
@@ -24,7 +72,7 @@ VkResult SetDebugObjectName(const VkDevice device, const VkObjectType type, cons
     return vkSetDebugUtilsObjectNameEXT(device, &nameInfo);
 }
 
-uint32_t FindQueueFamilyIndex(VkPhysicalDevice physicalDevice, VkQueueFlags flags)
+uint32_t FindQueueFamilyIndex(const VkPhysicalDevice& physicalDevice, VkQueueFlags flags)
 {
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
@@ -66,7 +114,8 @@ void CheckMissingDeviceFeatures(
     const VkPhysicalDeviceFeatures& deviceFeatures10, const VkPhysicalDeviceFeatures2& vkFeatures10,
     const VkPhysicalDeviceVulkan11Features& deviceFeatures11, const VkPhysicalDeviceVulkan11Features& vkFeatures11,
     const VkPhysicalDeviceVulkan12Features& deviceFeatures12, const VkPhysicalDeviceVulkan12Features& vkFeatures12,
-    const VkPhysicalDeviceVulkan13Features& deviceFeatures13, const VkPhysicalDeviceVulkan13Features& vkFeatures13)
+    const VkPhysicalDeviceVulkan13Features& deviceFeatures13, const VkPhysicalDeviceVulkan13Features& vkFeatures13,
+    const std::optional<VkPhysicalDeviceVulkan14Features>& deviceFeatures14, const std::optional<VkPhysicalDeviceVulkan14Features>& vkFeatures14)
 {
     std::string missingFeatures;
 #define CHECK_VULKAN_FEATURE(reqFeatures, availFeatures, feature, version) if ((reqFeatures.feature == VK_TRUE) && (availFeatures.feature == VK_FALSE)) missingFeatures.append("\n   " version " ." #feature);
@@ -207,17 +256,134 @@ void CheckMissingDeviceFeatures(
         CHECK_FEATURE_1_3(shaderIntegerDotProduct);
         CHECK_FEATURE_1_3(maintenance4);
 #undef CHECK_FEATURE_1_3
+
+
+if (deviceFeatures14.has_value() && vkFeatures14.has_value())
+{
+#define CHECK_FEATURE_1_4(feature) CHECK_VULKAN_FEATURE(deviceFeatures14.value(), vkFeatures14.value(), feature, "1.4 ");
+    CHECK_FEATURE_1_4(globalPriorityQuery);
+    CHECK_FEATURE_1_4(shaderSubgroupRotate);
+    CHECK_FEATURE_1_4(shaderSubgroupRotateClustered);
+    CHECK_FEATURE_1_4(shaderFloatControls2);
+    CHECK_FEATURE_1_4(shaderExpectAssume);
+    CHECK_FEATURE_1_4(rectangularLines);
+    CHECK_FEATURE_1_4(bresenhamLines);
+    CHECK_FEATURE_1_4(smoothLines);
+    CHECK_FEATURE_1_4(stippledRectangularLines);
+    CHECK_FEATURE_1_4(stippledBresenhamLines);
+    CHECK_FEATURE_1_4(stippledSmoothLines);
+    CHECK_FEATURE_1_4(vertexAttributeInstanceRateDivisor);
+    CHECK_FEATURE_1_4(vertexAttributeInstanceRateZeroDivisor);
+    CHECK_FEATURE_1_4(indexTypeUint8);
+    CHECK_FEATURE_1_4(dynamicRenderingLocalRead);
+    CHECK_FEATURE_1_4(maintenance5);
+    CHECK_FEATURE_1_4(maintenance6);
+    CHECK_FEATURE_1_4(pipelineProtectedAccess);
+    CHECK_FEATURE_1_4(pipelineRobustness);
+    CHECK_FEATURE_1_4(hostImageCopy);
+    CHECK_FEATURE_1_4(pushDescriptor);
+#undef CHECK_FEATURE_1_4
+}
     if (!missingFeatures.empty())
     {
-        EOS::Logger->warn("Missing Vulkan features: {}", missingFeatures.c_str());
+        EOS::Logger->error("Missing Vulkan features:\n {}", missingFeatures.c_str());
     }
 }
 
 void SelectHardwareDevice(const std::vector<EOS::HardwareDeviceDescription>& hardwareDevices, VkPhysicalDevice& physicalDevice)
 {
-    //TODO: Do more check -> Maybe user can specify on what conditions it should be selected?
-    physicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().id);
-    EOS::Logger->info("Selected Hardware Device: {}", hardwareDevices.back().name.c_str());
+    CHECK_RETURN(hardwareDevices.empty(), "No Vulkan devices available!");
+
+    // Scoring criteria weights
+    constexpr int MIN_VIDEO_MEMORY = 1024 * 1024 * 1024; // 1GB
+
+    struct DeviceScore
+    {
+        const EOS::HardwareDeviceDescription* desc  = nullptr;
+        int score                                   = 0;
+        bool suitable                               = false;
+    };
+    std::vector<DeviceScore> scoredDevices;
+    scoredDevices.reserve(hardwareDevices.size());
+
+    // Give Score all devices
+    for (const auto& device : hardwareDevices)
+    {
+        constexpr int DEVICE_TYPE_WEIGHT = 1000;
+        const auto vkDevice = reinterpret_cast<VkPhysicalDevice>(device.id);
+        DeviceScore scoreEntry{&device};
+
+        //Check device type
+        switch (device.type)
+        {
+            case EOS::HardwareDeviceType::Discrete:
+                scoreEntry.score += DEVICE_TYPE_WEIGHT * 4;
+                break;
+            case EOS::HardwareDeviceType::Integrated:
+                scoreEntry.score += DEVICE_TYPE_WEIGHT * 3;
+                break;
+            case EOS::HardwareDeviceType::Virtual:
+                scoreEntry.score += DEVICE_TYPE_WEIGHT * 2;
+                break;
+            case EOS::HardwareDeviceType::Software:
+                scoreEntry.score += DEVICE_TYPE_WEIGHT * 1;
+                break;
+        }
+
+        //TODO: Check Vulkan features
+
+
+        // Memory check
+        VkPhysicalDeviceMemoryProperties memProps;
+        vkGetPhysicalDeviceMemoryProperties(vkDevice, &memProps);
+        uint64_t deviceLocalMemory = 0;
+        for (uint32_t i{}; i < memProps.memoryHeapCount; ++i)
+        {
+            if (memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            {
+                deviceLocalMemory += memProps.memoryHeaps[i].size;
+            }
+        }
+
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(vkDevice, &props);
+
+        // suitability check
+        scoreEntry.suitable = (deviceLocalMemory >= MIN_VIDEO_MEMORY) && (props.apiVersion >= VK_API_VERSION_1_3);
+
+        // Additional scoring
+        if (scoreEntry.suitable)
+        {
+            // Prefer newer devices
+            scoreEntry.score += props.apiVersion;
+
+            // Prefer more memory
+            scoreEntry.score += static_cast<int>(deviceLocalMemory / (1024 * 1024)); // 1 point per MB
+        }
+
+        scoredDevices.emplace_back(scoreEntry);
+    }
+
+    // Find best device
+    auto bestDevice = std::ranges::max_element(scoredDevices,[](const auto& a, const auto& b)
+    {
+        // Prioritize suitability first
+        if (a.suitable != b.suitable){ return !a.suitable; }
+
+        return a.score < b.score;
+    });
+
+    if (bestDevice != scoredDevices.end() && bestDevice->suitable)
+    {
+        physicalDevice = reinterpret_cast<VkPhysicalDevice>(bestDevice->desc->id);
+
+        EOS::Logger->info("Selected device: {} (Score: {})", bestDevice->desc->name, bestDevice->score);
+    } else
+    {
+        // Fallback to first device with warning
+        physicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().id);
+        EOS::Logger->warn("No optimal device found! Using fallback: {}", hardwareDevices.back().name);
+    }
 }
 
 void GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions,const VkPhysicalDevice& vulkanPhysicalDevice, const char* forValidationLayer)
@@ -231,36 +397,332 @@ void GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions,co
     vkEnumerateDeviceExtensionProperties(vulkanPhysicalDevice, forValidationLayer, &numExtensions, deviceExtensions.data());
 }
 
-void PrintDeviceExtensions(const VkPhysicalDevice& vulkanPhysicalDevice, std::vector<VkExtensionProperties>& allDeviceExtensions)
+void GetDeviceExtensions(const VkPhysicalDevice& vulkanPhysicalDevice, std::vector<VkExtensionProperties>& allDeviceExtensions)
 {
     std::vector<VkExtensionProperties> deviceExtensions;
     GetDeviceExtensions(deviceExtensions, vulkanPhysicalDevice);
     std::vector<VkExtensionProperties> deviceExtensionsForValidationLayer;
     GetDeviceExtensions(deviceExtensionsForValidationLayer, vulkanPhysicalDevice, validationLayer);
 
-    EOS::Logger->info("Device Extensions:\n     {}", fmt::join(deviceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
-    EOS::Logger->info("Device Extension For Validation Layer:\n     {}", fmt::join(deviceExtensionsForValidationLayer | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
-
-    //Merge the two
     allDeviceExtensions.clear();
-    allDeviceExtensions.resize(deviceExtensions.size() + deviceExtensionsForValidationLayer.size());
+    allDeviceExtensions.reserve(deviceExtensions.size() + deviceExtensionsForValidationLayer.size());  // Reserve space for efficiency
 
-    //TODO: Insert all data from deviceExtensions and deviceExtensionForValidationLayer into allDeviceExtensions
-    std::ranges::copy(deviceExtensions, allDeviceExtensions.begin());
+    // Merge the two vectors
+    allDeviceExtensions.insert(allDeviceExtensions.end(), deviceExtensions.begin(), deviceExtensions.end());
+    allDeviceExtensions.insert(allDeviceExtensions.end(), deviceExtensionsForValidationLayer.begin(),deviceExtensionsForValidationLayer.end());
+
+    EOS::Logger->debug("Device Extensions:\n     {}", fmt::join(allDeviceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
 }
 
-void GetPhysicalDeviceProperties(VkPhysicalDeviceProperties2& physicalDeviceProperties, VkPhysicalDeviceDriverProperties& physicalDeviceDriverProperties, VkPhysicalDevice physicalDevice)
+void GetPhysicalDeviceProperties(VkPhysicalDeviceProperties2& physicalDeviceProperties, VkPhysicalDeviceDriverProperties& physicalDeviceDriverProperties, VkPhysicalDevice physicalDevice, uint32_t SDKMinorVersion)
 {
-    //TODO make 1.4 compatible
     //Get properties
     physicalDeviceDriverProperties    = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES, nullptr};
-    //VkPhysicalDeviceVulkan14Properties  vkPhysicalDeviceVulkan14Properties  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES,&vkPhysicalDeviceDriverProperties,};
+    VkPhysicalDeviceVulkan14Properties  vkPhysicalDeviceVulkan14Properties  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES, nullptr,};
     VkPhysicalDeviceVulkan13Properties  vkPhysicalDeviceVulkan13Properties  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES,&physicalDeviceDriverProperties,};
     VkPhysicalDeviceVulkan12Properties  vkPhysicalDeviceVulkan12Properties  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES,&vkPhysicalDeviceVulkan13Properties,};
     VkPhysicalDeviceVulkan11Properties  vkPhysicalDeviceVulkan11Properties  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES,&vkPhysicalDeviceVulkan12Properties,};
 
     physicalDeviceProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,&vkPhysicalDeviceVulkan11Properties,VkPhysicalDeviceProperties{},};
+
+    if (SDKMinorVersion == 4)
+    {
+        vkPhysicalDeviceVulkan13Properties.pNext = &vkPhysicalDeviceVulkan14Properties;
+        vkPhysicalDeviceVulkan14Properties.pNext = &physicalDeviceDriverProperties;
+    }
+
     vkGetPhysicalDeviceProperties2(physicalDevice, &physicalDeviceProperties);
+}
+
+void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues)
+{
+    CHECK(physicalDevice == VK_NULL_HANDLE, "Cannot Create a Vulkan Device if the Physical Device is not valid");
+
+    //Device Properties
+    VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
+    VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
+
+    uint32_t SDKApiVersion{};
+    vkEnumerateInstanceVersion(&SDKApiVersion);
+    const uint32_t SDKMinor = VK_API_VERSION_MINOR(SDKApiVersion);
+
+    GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, physicalDevice, SDKMinor);
+    const uint32_t driverAPIVersion = vkPhysicalDeviceProperties2.properties.apiVersion;
+
+    EOS::Logger->info("Driver info: {} {}", vkPhysicalDeviceDriverProperties.driverName, vkPhysicalDeviceDriverProperties.driverInfo);
+    EOS::Logger->info("Driver Vulkan API Version: {}.{}.{}", VK_API_VERSION_MAJOR(driverAPIVersion), VK_API_VERSION_MINOR(driverAPIVersion), VK_API_VERSION_PATCH(driverAPIVersion));
+
+    //Check if we are < 1.3 , 1.3 or 1.4
+    enum class vkVersion : uint8_t
+    {
+        VERSION_13,
+        VERSION_14,
+    };
+
+    const uint32_t driverMinor = VK_API_VERSION_MINOR(driverAPIVersion);
+    CHECK(SDKMinor < 3 || driverMinor < 3, "For now we only support Vulkan Versions 1.3 and up.\nTry Updating your graphics drivers and/or install the latest Vulkan SDK");
+
+    vkVersion version = vkVersion::VERSION_13;
+    if (SDKMinor == 4 || driverMinor == 4){ version = vkVersion::VERSION_14; }
+
+
+
+    //Get Features
+    VkPhysicalDeviceVulkan14Features vkFeatures14       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, .pNext =  nullptr};
+    VkPhysicalDeviceVulkan13Features vkFeatures13       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = nullptr};
+    VkPhysicalDeviceVulkan12Features vkFeatures12       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vkFeatures13};
+    VkPhysicalDeviceVulkan11Features vkFeatures11       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &vkFeatures12};
+    VkPhysicalDeviceFeatures2 startOfDeviceFeaturespNextChain = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vkFeatures11};
+    if (version == vkVersion::VERSION_14) { vkFeatures13.pNext = &vkFeatures14; }
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &startOfDeviceFeaturespNextChain);
+
+    //Setup the desired features then we check if our device supports these desired features.
+    VkPhysicalDeviceFeatures deviceFeatures10 =
+    {
+        .geometryShader                 = startOfDeviceFeaturespNextChain.features.geometryShader,
+        .tessellationShader             = startOfDeviceFeaturespNextChain.features.tessellationShader,
+        .sampleRateShading              = VK_TRUE,
+        .multiDrawIndirect              = VK_TRUE,
+        .drawIndirectFirstInstance      = VK_TRUE,
+        .depthBiasClamp                 = VK_TRUE,
+        .fillModeNonSolid               = startOfDeviceFeaturespNextChain.features.fillModeNonSolid,
+        .samplerAnisotropy              = VK_TRUE,
+        .textureCompressionBC           = startOfDeviceFeaturespNextChain.features.textureCompressionBC,
+        .vertexPipelineStoresAndAtomics = startOfDeviceFeaturespNextChain.features.vertexPipelineStoresAndAtomics,
+        .fragmentStoresAndAtomics       = VK_TRUE,
+        .shaderImageGatherExtended      = VK_TRUE,
+        .shaderInt64                    = startOfDeviceFeaturespNextChain.features.shaderInt64,
+    };
+
+    VkPhysicalDeviceVulkan11Features deviceFeatures11 =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .pNext = nullptr,           //Additional DeviceExtensionFeatures can be added here
+        .storageBuffer16BitAccess   = VK_TRUE,
+        .samplerYcbcrConversion     = vkFeatures11.samplerYcbcrConversion,
+        .shaderDrawParameters       = VK_TRUE,
+    };
+
+    VkPhysicalDeviceVulkan12Features deviceFeatures12 =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &deviceFeatures11,
+        .drawIndirectCount                              = vkFeatures12.drawIndirectCount,
+        .storageBuffer8BitAccess                        = vkFeatures12.storageBuffer8BitAccess,
+        .uniformAndStorageBuffer8BitAccess              = vkFeatures12.uniformAndStorageBuffer8BitAccess,
+        .shaderFloat16                                  = vkFeatures12.shaderFloat16,
+        .descriptorIndexing                             = VK_TRUE,
+        .shaderSampledImageArrayNonUniformIndexing      = VK_TRUE,
+        .descriptorBindingSampledImageUpdateAfterBind   = VK_TRUE,
+        .descriptorBindingStorageImageUpdateAfterBind   = VK_TRUE,
+        .descriptorBindingUpdateUnusedWhilePending      = VK_TRUE,
+        .descriptorBindingPartiallyBound                = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount       = VK_TRUE,
+        .runtimeDescriptorArray                         = VK_TRUE,
+        .scalarBlockLayout                              = VK_TRUE,
+        .uniformBufferStandardLayout                    = VK_TRUE,
+        .hostQueryReset                                 = vkFeatures12.hostQueryReset,
+        .timelineSemaphore                              = VK_TRUE,
+        .bufferDeviceAddress                            = VK_TRUE,
+        .vulkanMemoryModel                              = vkFeatures12.vulkanMemoryModel,
+        .vulkanMemoryModelDeviceScope                   = vkFeatures12.vulkanMemoryModelDeviceScope,
+    };
+
+    VkPhysicalDeviceVulkan13Features deviceFeatures13 =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = &deviceFeatures12,
+        .subgroupSizeControl  = VK_TRUE,
+        .synchronization2     = VK_TRUE,
+        .dynamicRendering     = VK_TRUE,
+        .maintenance4         = VK_TRUE,
+    };
+
+
+
+
+    void* createInfoNext = nullptr;
+    if (version == vkVersion::VERSION_14)
+    {
+        VkPhysicalDeviceVulkan14Features deviceFeatures14 =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+            .pNext = &deviceFeatures13,
+            .globalPriorityQuery                    = vkFeatures14.globalPriorityQuery,
+            .shaderSubgroupRotate                   = vkFeatures14.shaderSubgroupRotate,
+            .shaderSubgroupRotateClustered          = vkFeatures14.shaderSubgroupRotateClustered,
+            .shaderFloatControls2                   = vkFeatures14.shaderFloatControls2,
+            .shaderExpectAssume                     = vkFeatures14.shaderExpectAssume,
+            .rectangularLines                       = vkFeatures14.rectangularLines,
+            .bresenhamLines                         = vkFeatures14.bresenhamLines,
+            .smoothLines                            = vkFeatures14.smoothLines,
+            .stippledRectangularLines               = vkFeatures14.stippledRectangularLines,
+            .stippledBresenhamLines                 = vkFeatures14.stippledBresenhamLines,
+            .stippledSmoothLines                    = vkFeatures14.stippledSmoothLines,
+            .vertexAttributeInstanceRateDivisor     = vkFeatures14.vertexAttributeInstanceRateDivisor,
+            .vertexAttributeInstanceRateZeroDivisor = vkFeatures14.vertexAttributeInstanceRateZeroDivisor,
+            .indexTypeUint8                         = vkFeatures14.indexTypeUint8,
+            .dynamicRenderingLocalRead              = VK_TRUE,   //Makes dynamic render passes behave like subpasses, this can increase performance, Especially on Mobile devices that use tile based rendering.
+            .maintenance5                           = VK_TRUE,   // vkCmdBindIndexBuffer2 looks interesting for clustered rendering
+            .maintenance6                           = vkFeatures14.maintenance6,
+            .pipelineProtectedAccess                = vkFeatures14.pipelineProtectedAccess,
+            .pipelineRobustness                     = vkFeatures14.pipelineRobustness,
+            .hostImageCopy                          = vkFeatures14.hostImageCopy,
+            .pushDescriptor                         = vkFeatures14.pushDescriptor,
+        };
+
+        CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13, deviceFeatures14, vkFeatures14);
+        createInfoNext = &vkFeatures14;
+    }
+    else
+    {
+        CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13);
+        createInfoNext = &vkFeatures13;
+    }
+
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .accelerationStructure                                  = VK_TRUE,
+        .accelerationStructureCaptureReplay                     = VK_FALSE,
+        .accelerationStructureIndirectBuild                     = VK_FALSE,
+        .accelerationStructureHostCommands                      = VK_FALSE,
+        .descriptorBindingAccelerationStructureUpdateAfterBind  = VK_TRUE,
+    };
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingFeatures =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .rayTracingPipeline                                     = VK_TRUE,
+        .rayTracingPipelineShaderGroupHandleCaptureReplay       = VK_FALSE,
+        .rayTracingPipelineShaderGroupHandleCaptureReplayMixed  = VK_FALSE,
+        .rayTracingPipelineTraceRaysIndirect                    = VK_TRUE,
+        .rayTraversalPrimitiveCulling                           = VK_FALSE,
+    };
+
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+        .rayQuery = VK_TRUE,
+    };
+
+    VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
+        .indexTypeUint8 = VK_TRUE,
+    };
+
+
+
+    std::vector<VkExtensionProperties> allDeviceExtensions;
+    GetDeviceExtensions(physicalDevice, allDeviceExtensions);
+    std::vector<const char*> deviceExtensionNames =
+    {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,
+        VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME,
+    };
+
+
+    auto addOptionalExtension = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name, void* features = nullptr) mutable -> bool
+    {
+        bool extensionFound = false;
+        for (const auto&[extensionName, specVersion] : allDeviceExtensions)
+        {
+            if (strcmp(extensionName, name) == 0) { extensionFound = true; }
+        }
+        if (!extensionFound)
+        {
+            EOS::Logger->warn("Device Extension: {} -> Disabled", name);
+            return false;
+        }
+
+        deviceExtensionNames.emplace_back(name);
+        if (features)
+        {
+            //Safe way to access both ->pNext members and write to it
+            std::launder(static_cast<VkBaseOutStructure*>(features))->pNext = std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
+            createInfoNext = features;
+
+            EOS::Logger->debug("Device Extension: {} -> Enabled", name);
+        }
+
+        return true;
+    };
+
+    auto addOptionalExtensions = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name1, const char* name2, void* features = nullptr) mutable -> bool
+    {
+        bool extension1Found = false;
+        bool extension2Found = false;
+        for (const auto&[extensionName, specVersion] : allDeviceExtensions)
+        {
+            if (strcmp(extensionName, name1) == 0) { extension1Found = true; }
+            if (strcmp(extensionName, name2) == 0) { extension2Found = true; }
+        }
+        if (!extension1Found || !extension2Found)
+        {
+            EOS::Logger->warn("Device Extension: {} -> Disabled", name1);
+            EOS::Logger->warn("Device Extension: {} -> Disabled", name2);
+            return false;
+        }
+
+        deviceExtensionNames.push_back(name1);
+        deviceExtensionNames.push_back(name2);
+        if (features)
+        {
+            std::launder(static_cast<VkBaseOutStructure*>(features))->pNext =  std::launder(static_cast<VkBaseOutStructure*>(createInfoNext));
+            createInfoNext = features;
+
+            EOS::Logger->debug("Device Extension: {} -> Enabled", name1);
+            EOS::Logger->debug("Device Extension: {} -> Enabled", name2);
+        }
+
+        return true;
+    };
+
+    addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
+    addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
+    addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
+
+
+    //TODO: Move Queue logic to separate function, be called from VulkanContext and pass needed info to this function. -> this doesn't really have anything to do with device creation
+    deviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
+    if (deviceQueues.Graphics.QueueFamilyIndex == DeviceQueues::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
+
+    deviceQueues.Compute.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_COMPUTE_BIT);
+    if (deviceQueues.Compute.QueueFamilyIndex == DeviceQueues::InvalidIndex) { EOS::Logger->error("VK_QUEUE_COMPUTE_BIT is not supported"); }
+
+    constexpr float queuePriority = 1.0f;
+    const VkDeviceQueueCreateInfo ciQueue[2] =
+    {
+        {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = deviceQueues.Graphics.QueueFamilyIndex,
+            .queueCount = 1,
+            .pQueuePriorities = &queuePriority,
+            },
+    {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = deviceQueues.Compute.QueueFamilyIndex,
+            .queueCount = 1,
+            .pQueuePriorities = &queuePriority,
+        },
+    };
+    const uint32_t numQueues = ciQueue[0].queueFamilyIndex == ciQueue[1].queueFamilyIndex ? 1 : 2;
+
+    const VkDeviceCreateInfo deviceCreateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &indexTypeUint8Features,
+        .queueCreateInfoCount = numQueues,
+        .pQueueCreateInfos = ciQueue,
+        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensionNames.size()),
+        .ppEnabledExtensionNames = deviceExtensionNames.data(),
+        .pEnabledFeatures = &deviceFeatures10,
+    };
+    VK_ASSERT(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
+    volkLoadDevice(device);
 }
 
 VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace)
@@ -292,7 +754,7 @@ VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& ava
     return availableFormats[0];
 }
 
-VkSemaphore CreateSemaphore(VkDevice device, const char* debugName)
+VkSemaphore CreateSemaphore(const VkDevice& device, const char* debugName)
 {
     constexpr VkSemaphoreCreateInfo createInfo =
     {

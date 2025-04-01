@@ -25,7 +25,7 @@ namespace EOS
     template<typename HandleType>
     class Handle
     {
-        public:
+    public:
         static_assert(std::is_default_constructible_v<HandleType>, "HandleType must be default constructible");
         static_assert(ValidHandle<HandleType>, "HandleType doesn't satisfy ValidHandle concept");
 

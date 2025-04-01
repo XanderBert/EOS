@@ -80,12 +80,11 @@ namespace EOS
         contextDescription.window     = static_cast<void*>(glfwGetWaylandWindow(window));
         contextDescription.display    = static_cast<void*>(glfwGetWaylandDisplay());
 #elif defined(EOS_PLATFORM_X11)
-        //TODO: Do X11
-        contextDescription.window     = static_cast<void*>(window);
-        contextDescription.display    = nullptr
+        contextDescription.window     = static_cast<void*>(glfwGetX11Window(window));
+        contextDescription.display    = static_cast<void*>(glfwGetX11Display());
 #elif defined(EOS_PLATFORM_WIN32)
-        contextDescription.window     = static_cast<void*>(window);
-        contextDescription.display    = nullptr
+        contextDescription.window     = static_cast<void*>(glfwGetWin32Window(window));
+        contextDescription.display    = nullptr;  // Not used on Windows
 #endif
 
 
