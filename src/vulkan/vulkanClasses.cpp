@@ -514,8 +514,8 @@ void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
     {
         .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
         .flags = 0,
-        .dpy = (Display*)display,
-        .window = (Window)window,
+        .dpy = static_cast<Display*>(display),
+        .window = reinterpret_cast<Window>(window),
     };
     VK_ASSERT(vkCreateXlibSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
 #elif defined(EOS_PLATFORM_WAYLAND)
