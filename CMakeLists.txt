@@ -62,8 +62,9 @@ else()
     message(FATAL_ERROR "Vulkan SDK not found. Please install the Vulkan SDK.")
 endif()
 
-
+target_compile_definitions(EOS PRIVATE VK_NO_PROTOTYPES)
 target_compile_definitions(EOS PRIVATE GLFW_INCLUDE_VULKAN)
+
 FETCH_GLFW(3.4 ${EOS_DEPENDENCIES_DIR})
 FETCH_VOLK(${VOLK_VERSION} ${EOS_DEPENDENCIES_DIR})
 FETCH_VMA(v3.2.1 ${EOS_DEPENDENCIES_DIR})
