@@ -78,7 +78,7 @@ do                                                                              
         assert(false);                                                                      \
     }                                                                                       \
 } while (0)
-#elif
+#else
 #define CHECK(assertion, ...)
 #endif
 
@@ -95,7 +95,7 @@ do                                                                              
         return;                                                                             \
     }                                                                                       \
 } while (0)
-#elif
+#else
 #define CHECK_RETURN(assertion, ...)                                                        \
     if (!(assertion))                                                                       \
     {                                                                                       \
