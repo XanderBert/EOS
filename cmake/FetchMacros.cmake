@@ -8,6 +8,9 @@
     set(GLFW_BUILD_DOCS              OFF CACHE BOOL "")
     set(GLFW_INSTALL                 OFF CACHE BOOL "")
     set(GLFW_DOCUMENT_INTERNALS      OFF CACHE BOOL "")
+    set(GLFW_VULKAN_STATIC           ON CACHE BOOL "")
+    set(GLFW_USE_EGL                 OFF CACHE BOOL "")
+
 
     set(GLFW_BUILD_WIN32 OFF)
     set(GLFW_BUILD_WAYLAND OFF)
