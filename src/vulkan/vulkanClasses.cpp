@@ -12,30 +12,9 @@ VulkanImage::VulkanImage(const ImageDescription &description)
 , ImageType(description.ImageType)
 , ImageFormat(description.ImageFormat)
 {
-    VK_ASSERT(SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
-
     //TODO: Set Levels and Layers
-    //TODO: Check if depth format
-    //TODO: Check if stencil format
-
+    VK_ASSERT(VkDebug::SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
     CreateImageView(ImageView, description.Device, Image, ImageType, ImageFormat, Levels, Layers, description.DebugName);
-}
-
-void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, const EOS::ImageType imageType,
-    const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName)
-{
-    const VkImageViewCreateInfo createInfo =
-   {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = image,
-        .viewType = ToImageViewType(imageType),
-        .format = imageFormat,
-        .components =  {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels , 0, layers},
-    };
-
-    VK_ASSERT(vkCreateImageView(device, &createInfo, nullptr, &imageView));
-    VK_ASSERT(SetDebugObjectName(device, VK_OBJECT_TYPE_IMAGE_VIEW, reinterpret_cast<uint64_t>(imageView), debugName));
 }
 
 VkImageType VulkanImage::ToImageType(const EOS::ImageType imageType)
@@ -85,15 +64,32 @@ VkImageViewType VulkanImage::ToImageViewType(EOS::ImageType imageType)
     return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
 }
 
-VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
+void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, const EOS::ImageType imageType,
+    const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName)
 {
-    const VulkanContext* vkContext = vulkanSwapChainDescription.vulkanContext;
+    const VkImageViewCreateInfo createInfo =
+   {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = ToImageViewType(imageType),
+        .format = imageFormat,
+        .components =  {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels , 0, layers},
+    };
 
+    VK_ASSERT(vkCreateImageView(device, &createInfo, nullptr, &imageView));
+    VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_IMAGE_VIEW, reinterpret_cast<uint64_t>(imageView), debugName));
+}
+
+VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
+: VkContext(vulkanSwapChainDescription.vulkanContext)
+, GraphicsQueue(vulkanSwapChainDescription.vulkanContext->VulkanDeviceQueues.Graphics.Queue)
+{
     //Get details of what we support
-    const VulkanSwapChainSupportDetails supportDetails{*vkContext};
+    const VulkanSwapChainSupportDetails supportDetails{*VkContext};
 
     //Get the Surface Format (format and color space)
-    SurfaceFormat = GetSwapChainFormat(supportDetails.formats, vkContext->Configuration.DesiredSwapChainColorSpace);
+    SurfaceFormat = VkSwapChain::GetSwapChainFormat(supportDetails.formats, VkContext->Configuration.DesiredSwapChainColorSpace);
     VkPresentModeKHR presentMode {VK_PRESENT_MODE_FIFO_KHR};
 
     // Try using Immediate mode presenting if we are running on a linux machine
@@ -113,7 +109,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
     //Get the device format properties
     VkFormatProperties properties{};
-    vkGetPhysicalDeviceFormatProperties(vkContext->VulkanPhysicalDevice, SurfaceFormat.format, &properties);
+    vkGetPhysicalDeviceFormatProperties(VkContext->VulkanPhysicalDevice, SurfaceFormat.format, &properties);
 
     // Get the imageUsageFlags
     VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -128,7 +124,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     const VkSwapchainCreateInfoKHR createInfo
     {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = vkContext->VulkanSurface,
+        .surface = VkContext->VulkanSurface,
         .minImageCount = supportDetails.capabilities.minImageCount,
         .imageFormat = SurfaceFormat.format,
         .imageColorSpace = SurfaceFormat.colorSpace,
@@ -137,26 +133,31 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
         .imageUsage = usageFlags,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 1,
-        .pQueueFamilyIndices = &vkContext->VulkanDeviceQueues.Graphics.QueueFamilyIndex,
+        .pQueueFamilyIndices = &VkContext->VulkanDeviceQueues.Graphics.QueueFamilyIndex,
         .preTransform = supportDetails.capabilities.currentTransform,
         .compositeAlpha = isCompositeAlphaSupported ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
         .presentMode = presentMode,
         .clipped = VK_TRUE,
         .oldSwapchain = VK_NULL_HANDLE,
     };
-    VK_ASSERT(vkCreateSwapchainKHR(vkContext->VulkanDevice, &createInfo, nullptr, &SwapChain);)
+    VK_ASSERT(vkCreateSwapchainKHR(VkContext->VulkanDevice, &createInfo, nullptr, &SwapChain);)
 
     //Create SwapChain Images
-    VK_ASSERT(vkGetSwapchainImagesKHR(vkContext->VulkanDevice,SwapChain, &NumberOfSwapChainImages, nullptr);)
+    VK_ASSERT(vkGetSwapchainImagesKHR(VkContext->VulkanDevice,SwapChain, &NumberOfSwapChainImages, nullptr);)
     NumberOfSwapChainImages = std::min(NumberOfSwapChainImages, MAX_IMAGES);  //Make sure we don't go over our max defined SwapChain images
     std::vector<VkImage> swapChainImages(NumberOfSwapChainImages);
-    VK_ASSERT(vkGetSwapchainImagesKHR(vkContext->VulkanDevice, SwapChain, &NumberOfSwapChainImages,swapChainImages.data()));
-    CHECK(NumberOfSwapChainImages <=  0, "Number of SwapChain images is 0");
-    CHECK(swapChainImages.empty(), "The SwapChain images didn't got created");
+    VK_ASSERT(vkGetSwapchainImagesKHR(VkContext->VulkanDevice, SwapChain, &NumberOfSwapChainImages,swapChainImages.data()));
+    CHECK(NumberOfSwapChainImages >  0, "Number of SwapChain images is 0");
+    CHECK(!swapChainImages.empty(), "The SwapChain images didn't got created");
 
-    char debugNameImage[256]{};
-    char debugNameImageView[256]{};
-    // create images, image views and framebuffers
+
+    AcquireSemaphores.clear();
+    AcquireSemaphores.reserve(NumberOfSwapChainImages);
+
+    Textures.clear();
+    Textures.reserve(NumberOfSwapChainImages);
+
+    TimelineWaitValues.resize(NumberOfSwapChainImages);
 
     ImageDescription swapChainImageDescription
     {
@@ -165,22 +166,116 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
         .Extent = VkExtent3D{.width = vulkanSwapChainDescription.width, .height = vulkanSwapChainDescription.height, .depth = 1},
         .ImageType = EOS::ImageType::SwapChain,
         .ImageFormat = SurfaceFormat.format,
-        .Device = vulkanSwapChainDescription.vulkanContext->VulkanDevice,
+        .Device = VkContext->VulkanDevice,
     };
 
+    // create images, image views and framebuffers
     for (uint32_t i{}; i < NumberOfSwapChainImages; ++i)
     {
         //Create our Acquire Semaphore for this swapChain image
-        AcquireSemaphore[i] = CreateSemaphore(vulkanSwapChainDescription.vulkanContext->VulkanDevice, "SwapChain Acquire Semaphore: " + i);
+        AcquireSemaphores.emplace_back(VkSynchronization::CreateSemaphore(vulkanSwapChainDescription.vulkanContext->VulkanDevice, "SwapChain Acquire Semaphore: " + i));
 
         //Create a image
         swapChainImageDescription.Image = swapChainImages[i];
         swapChainImageDescription.DebugName = "SwapChain Image: " + i;
         VulkanImage swapChainImage{swapChainImageDescription};
+
+        Textures.emplace_back(vulkanSwapChainDescription.vulkanContext->TexturePool.Create(std::move(swapChainImage)));
     }
 }
 
-VulkanSwapChain::VulkanSwapChainSupportDetails::VulkanSwapChainSupportDetails(const VulkanContext& vulkanContext)
+VulkanSwapChain::~VulkanSwapChain()
+{
+    for (EOS::TextureHandle& handle : Textures)
+    {
+        //TODO: Implement
+        //VkContext->Destroy(handle);
+    }
+
+    vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
+    for (const VkSemaphore semaphore : AcquireSemaphores)
+    {
+        vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
+    }
+}
+
+void VulkanSwapChain::Present(VkSemaphore waitSemaphore)
+{
+    const VkPresentInfoKHR presentInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &waitSemaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &SwapChain,
+        .pImageIndices = &CurrentImageIndex,
+    };
+
+    const VkResult result = vkQueuePresentKHR(GraphicsQueue, &presentInfo);
+    CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "Couldn't present the SwapChain image");
+
+    GetNextImage = true;
+    ++CurrentFrame;
+}
+
+VkImage VulkanSwapChain::GetCurrentImage() const
+{
+    CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
+    return VkContext->TexturePool.Get(Textures[CurrentImageIndex])->Image;
+}
+
+VkImageView VulkanSwapChain::GetCurrentImageView() const
+{
+    CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
+    return VkContext->TexturePool.Get(Textures[CurrentImageIndex])->ImageView;
+}
+
+uint32_t VulkanSwapChain::GetNumSwapChainImages() const
+{
+    return NumberOfSwapChainImages;
+}
+
+const VkSurfaceFormatKHR& VulkanSwapChain::GetFormat() const
+{
+    return SurfaceFormat;
+}
+
+EOS::TextureHandle VulkanSwapChain::GetCurrentTexture()
+{
+    GetAndWaitOnNextImage();
+
+    CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
+
+    //Returns a copy of the handle
+    return Textures[CurrentImageIndex];
+}
+
+void VulkanSwapChain::GetAndWaitOnNextImage()
+{
+    //Get The Next SwapChain Image
+    if (GetNextImage)
+    {
+        const VkSemaphoreWaitInfo waitInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+            .semaphoreCount = 1,
+            .pSemaphores = &VkContext->TimelineSemaphore,
+            .pValues = &TimelineWaitValues[CurrentImageIndex],
+        };
+
+        // when timeout is set to UINT64_MAX, we wait until the next image has been acquired
+        VK_ASSERT(vkWaitSemaphores(VkContext->VulkanDevice, &waitInfo, UINT64_MAX));
+
+        const VkSemaphore acquireSemaphore = AcquireSemaphores[CurrentImageIndex];
+        const VkResult result = vkAcquireNextImageKHR(VkContext->VulkanDevice, SwapChain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &CurrentImageIndex);
+        CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "vkAcquireNextImageKHR Failed");
+
+        GetNextImage = false;
+        VkContext->Commands->WaitSemaphore(acquireSemaphore);
+    }
+}
+
+VulkanSwapChainSupportDetails::VulkanSwapChainSupportDetails(const VulkanContext& vulkanContext)
 {
     //Get Surface Capabilities
     VK_ASSERT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vulkanContext.VulkanPhysicalDevice, vulkanContext.VulkanSurface, &capabilities));
@@ -201,10 +296,16 @@ VulkanSwapChain::VulkanSwapChainSupportDetails::VulkanSwapChainSupportDetails(co
     VK_ASSERT(vkGetPhysicalDeviceSurfacePresentModesKHR(vulkanContext.VulkanPhysicalDevice, vulkanContext.VulkanSurface, &presentModeCount, presentModes.data()));
 }
 
+void VulkanCommands::WaitSemaphore(const VkSemaphore &semaphore)
+{
+    CHECK(WaitOnSemaphore.semaphore == VK_NULL_HANDLE, "The wait Semaphore is not Empty");
+    WaitOnSemaphore.semaphore = semaphore;
+}
+
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.config)
 {
-    CHECK(volkInitialize() != VK_SUCCESS, "Failed to Initialize VOLK");
+    CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
 
     CreateVulkanInstance(contextDescription.applicationName);
     SetupDebugMessenger();
@@ -213,9 +314,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     //Select the Physical Device
     std::vector<EOS::HardwareDeviceDescription> hardwareDevices;
     GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
-    SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
+    VkContext::SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
 
-    CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
+    VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
 
 
 
@@ -228,15 +329,14 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
         .height = 80,
     };
 
-    std::unique_ptr<VulkanSwapChain> vkSwapchain = std::make_unique<VulkanSwapChain>(desc);
+    SwapChain = std::make_unique<VulkanSwapChain>(desc);
+    TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
 }
 
 void VulkanContext::CreateVulkanInstance(const char* applicationName)
 {
     uint32_t apiVersion{};
     vkEnumerateInstanceVersion(&apiVersion);
-    EOS::Logger->info("Vulkan Instance API Version: {}.{}.{}", VK_VERSION_MAJOR(apiVersion), VK_VERSION_MINOR(apiVersion), VK_VERSION_PATCH(apiVersion));
-
     const VkApplicationInfo applicationInfo
     {
         .pApplicationName   = applicationName,
@@ -388,7 +488,7 @@ void VulkanContext::SetupDebugMessenger()
        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
        .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
        .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-       .pfnUserCallback = &DebugCallback,
+       .pfnUserCallback = &VkDebug::DebugCallback,
        .pUserData = this,
    };
 
@@ -445,7 +545,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
         compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
     }
 
-    CHECK(hardwareDevices.empty(), "Couldn't find a physical hardware device!");
+    CHECK(!hardwareDevices.empty(), "Couldn't find a physical hardware device!");
 }
 
 bool VulkanContext::IsHostVisibleMemorySingleHeap() const

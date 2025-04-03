@@ -6,16 +6,15 @@
 #include "defines.h"
 #include "handle.h"
 
-
 //TODO: Make objects split up in Hot and Cold code path
 //So we don't need to pass around the whole object when we only need half of it.
 //We have function to only get the hot / cold object or both with the same handle
 //std::vector<PoolEntry> HotObjects;
 //std::vector<PoolEntry> ColdObjects;
 
+//TODO: this will perform runtime copies and move if we create things at runtime with this pool
+
 //TODO: The current free list uses a linked list, For very large pools use a stack-based free list (std::vector<uint32_t> FreeIndices) for O(1) access.
-
-
 namespace EOS
 {
     template<typename ObjectType, typename ObjectType_Impl>
@@ -50,7 +49,8 @@ namespace EOS
         void Destroy(Handle<ObjectType> handle);
 
         //Get the given implementation
-        [[nodiscard]] ObjectType_Impl* Get(Handle<ObjectType> handle) const;
+        [[nodiscard]] ObjectType_Impl* Get(const Handle<ObjectType>& handle);
+        [[nodiscard]] const ObjectType_Impl* Get(const Handle<ObjectType>& handle) const;
 
         //Get a handle to the object at position index
         [[nodiscard]] Handle<ObjectType> GetHandle(uint32_t index) const;
@@ -99,10 +99,27 @@ namespace EOS
         }
 
         //Else if the pool doesn't have a free slot
+
         else
         {
+#if defined(EOS_DEBUG)
+            size_t oldCapacity = Objects.capacity();
+#endif
             index = static_cast<uint32_t>(Objects.size());
             Objects.emplace_back(object);
+
+
+
+#if defined(EOS_DEBUG)
+            //Log only in debug, whenever we do reallocations,
+            //This can be interesting to tweak the initial pool size to avoid as much runtime reallocations as possible
+            if (Objects.capacity() != oldCapacity)
+            {
+                //TODO: What we can do is: write to a file in the destructor what the biggest capacity was of this pool.
+                //Next time we try to read from that file and initialize our pool with that size.
+                EOS::Logger->warn("Pool did reallocation, Old Capacity:{} , New Capacity:{}", oldCapacity, Objects.capacity());
+            }
+#endif
         }
 
         //increase the objects and return a handle to the Object in the pool
@@ -154,12 +171,12 @@ namespace EOS
     template<typename ObjectType, typename ObjectType_Impl>
     void Pool<ObjectType, ObjectType_Impl>::Destroy(Handle<ObjectType> handle)
     {
-        if (handle.empty()) { return; }
+        if (handle.Empty()) { return; }
 
         // (this one could already be deleted)
         CHECK(NumberOfObjects > 0, "There are no objects left in the pool");
 
-        const uint32_t index = handle.index();
+        const uint32_t index = handle.Index();
         CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
 
         //Check if the version in the pool is the same as the version we are referencing
@@ -182,11 +199,25 @@ namespace EOS
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
-    ObjectType_Impl * Pool<ObjectType, ObjectType_Impl>::Get(Handle<ObjectType> handle) const
+    ObjectType_Impl* Pool<ObjectType, ObjectType_Impl>::Get(const Handle<ObjectType>& handle)
     {
-        if (handle.empty()) { return nullptr; }
+        if (handle.Empty()) { return nullptr; }
 
-        const uint32_t index = handle.index();
+        const uint32_t index = handle.Index();
+        CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
+
+        //Check if the version in the pool is the same as the version we are referencing
+        CHECK(handle.Gen() == Objects[index].Generation, "The generation of the handle is not the same as the one in the pool");
+
+        return &Objects[index].Object;
+    }
+
+    template<typename ObjectType, typename ObjectType_Impl>
+    const ObjectType_Impl* Pool<ObjectType, ObjectType_Impl>::Get(const Handle<ObjectType>& handle) const
+    {
+        if (handle.Empty()) { return nullptr; }
+
+        const uint32_t index = handle.Index();
         CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
 
         //Check if the version in the pool is the same as the version we are referencing

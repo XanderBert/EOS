@@ -2,26 +2,45 @@
 
 namespace EOS
 {
+    template<typename ObjectType>
+    bool Handle<ObjectType>::operator==(const Handle<ObjectType> &other) const
+    {
+        return Idx == other.Idx && Generation == other.Generation;
+    }
+
+    template<typename ObjectType>
+    bool Handle<ObjectType>::operator!=(const Handle<ObjectType> &other) const
+    {
+        return Idx != other.Idx || Generation != other.Generation;
+    }
+
+    template<typename ObjectType>
+    Handle<ObjectType>::operator bool() const
+    {
+        return Generation != 0;
+    }
+
+
     template <typename HandleType>
-    Handle<HandleType>::Handle(IContext* ctx, HandleType hdl) noexcept
+    Holder<HandleType>::Holder(IContext* ctx, HandleType hdl) noexcept
     : context{ctx}
     , handle{std::move(hdl)}
     {}
 
     template <typename HandleType>
-    Handle<HandleType>::~Handle() noexcept
+    Holder<HandleType>::~Holder() noexcept
     {
         Reset();
     }
 
     template <typename HandleType>
-    Handle<HandleType>::Handle(Handle&& other) noexcept
+    Holder<HandleType>::Holder(Holder&& other) noexcept
     : context{std::exchange(other.context, nullptr)}
     , handle{std::exchange(other.handle, HandleType{})}
     {}
 
     template <typename HandleType>
-    Handle<HandleType>& Handle<HandleType>::operator=(Handle&& other) noexcept
+    Holder<HandleType>& Holder<HandleType>::operator=(Holder&& other) noexcept
     {
         if (this != &other)
         {
@@ -34,7 +53,7 @@ namespace EOS
     }
 
     template <typename HandleType>
-    void Handle<HandleType>::Reset() noexcept
+    void Holder<HandleType>::Reset() noexcept
     {
         if (context && handle.Valid())
         {
@@ -47,49 +66,49 @@ namespace EOS
     }
 
     template <typename HandleType>
-    Handle<HandleType>::operator HandleType() const noexcept
+    Holder<HandleType>::operator HandleType() const noexcept
     {
         return handle;
     }
 
     template <typename HandleType>
-    bool Handle<HandleType>::Empty() const noexcept
+    bool Holder<HandleType>::Empty() const noexcept
     {
         return handle.Empty();
     }
 
     template <typename HandleType>
-    HandleType Handle<HandleType>::Release() noexcept
+    HandleType Holder<HandleType>::Release() noexcept
     {
         return std::exchange(handle, HandleType{});
     }
 
     template <typename HandleType>
-    auto Handle<HandleType>::Gen() const noexcept
+    auto Holder<HandleType>::Gen() const noexcept
     {
         return handle.Gen();
     }
 
     template <typename HandleType>
-    auto Handle<HandleType>::Index() const noexcept
+    auto Holder<HandleType>::Index() const noexcept
     {
         return handle.Index();
     }
 
     template <typename HandleType>
-    auto Handle<HandleType>::IndexAsVoid() const noexcept
+    auto Holder<HandleType>::IndexAsVoid() const noexcept
     {
         return handle.IndexAsVoid();
     }
 
     template <typename HandleType>
-    IContext* Handle<HandleType>::Context() const noexcept
+    IContext* Holder<HandleType>::Context() const noexcept
     {
         return context;
     }
 
     template <typename HandleType>
-    const HandleType& Handle<HandleType>::Get() const noexcept
+    const HandleType& Holder<HandleType>::Get() const noexcept
     {
         return handle;
     }

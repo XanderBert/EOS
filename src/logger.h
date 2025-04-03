@@ -1,12 +1,13 @@
 #pragma once
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
-#include <spdlog/sinks/stdout_color_sinks-inl.h>
-#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/callback_sink.h>
 #include <spdlog/fmt/bundled/ranges.h>
 
 #include "defines.h"
+#include "spdlog/sinks/rotating_file_sink.h"
 
 namespace EOS
 {
@@ -28,11 +29,8 @@ namespace EOS
             consoleSink->set_level(spdlog::level::info);
 
             //Log everything to the log file
-            constexpr size_t maxSize = 1024 * 1024 * 2; // 2MB
-            constexpr size_t maxFiles = 1;
-            auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logFileName, maxSize, maxFiles);
+            auto fileSink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logFileName,true);
             fileSink->set_level(spdlog::level::trace);
-
 
             std::vector<spdlog::sink_ptr> sinks {consoleSink, fileSink};
             //Create the logger and let it log everything
@@ -69,26 +67,39 @@ namespace EOS
     extern Logger Logger;
 
 
-
+// This Check is stripped out in Release
+#if defined(EOS_DEBUG)
 #define CHECK(assertion, ...)                                                               \
 do                                                                                          \
 {                                                                                           \
-    if (assertion)                                                                          \
+    if (!(assertion))                                                                       \
     {                                                                                       \
         EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
         assert(false);                                                                      \
     }                                                                                       \
 } while (0)
+#elif
+#define CHECK(assertion, ...)
+#endif
 
-#define CHECK_RETURN(assertion, ...)\
+//The Logging and assertion is Stripped Out in release, the if check and returning stays in release.
+//Don't use this if you don't want branching in release.
+#if defined(EOS_DEBUG)
+#define CHECK_RETURN(assertion, ...)                                                        \
 do                                                                                          \
 {                                                                                           \
-    if (assertion)                                                                          \
+    if (!(assertion))                                                                       \
     {                                                                                       \
         EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
         assert(false);                                                                      \
         return;                                                                             \
     }                                                                                       \
 } while (0)
-
+#elif
+#define CHECK_RETURN(assertion, ...)                                                        \
+    if (!(assertion))                                                                       \
+    {                                                                                       \
+        return;                                                                             \
+    }
+#endif
 }

@@ -34,6 +34,16 @@ elseif (UNIX AND NOT APPLE)
     endif ()
 endif ()
 
+# For single-config builds (Ninja)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_definitions("-DEOS_DEBUG")
+else()
+    add_definitions("-DEOS_RELEASE")
+endif()
+
+# For multi-config builds (VS/Xcode)
+target_compile_definitions(EOS PRIVATE $<$<CONFIG:Debug>:EOS_DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:EOS_RELEASE=1> )
+
 
 # Check if Vulkan SDK is installed and choose VOLK version
 if(DEFINED ENV{VULKAN_SDK})
