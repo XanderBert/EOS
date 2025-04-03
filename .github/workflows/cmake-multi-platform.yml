@@ -24,6 +24,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake
           if [ "${{ matrix.display_server }}" = "Wayland" ]; then
+            # Minimal OpenGL headers for Wayland compatibility
+            sudo apt-get install -y libgl1-mesa-dev
             # Wayland-specific packages
             sudo apt-get install -y \
               libwayland-dev \
