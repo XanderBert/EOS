@@ -33,9 +33,10 @@ jobs:
     - name: Set display server environment
       run: |
         if [ "${{ matrix.display_server }}" = "Wayland" ]; then
+          echo "USE_WAYLAND=ON" >> $GITHUB_ENV
           echo "WAYLAND_DISPLAY=wayland-0" >> $GITHUB_ENV
-          echo "DISPLAY=" >> $GITHUB_ENV
         else
+          echo "USE_X11=ON" >> $GITHUB_ENV
           echo "DISPLAY=:0" >> $GITHUB_ENV
         fi
 
