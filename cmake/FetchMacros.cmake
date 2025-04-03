@@ -20,7 +20,7 @@
     elseif ()
         set(GLFW_BUILD_X11 ON)
     else ()
-        message(FATAL_ERROR "Could not detect OS fro GLFW")
+        message(FATAL_ERROR "Could not detect OS for GLFW")
     endif ()
 
 

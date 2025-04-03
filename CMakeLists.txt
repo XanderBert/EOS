@@ -46,29 +46,20 @@ target_compile_definitions(EOS PRIVATE $<$<CONFIG:Debug>:EOS_DEBUG=1> $<$<NOT:$<
 
 
 # Check if Vulkan SDK is installed and choose VOLK version
-if(DEFINED ENV{VULKAN_SDK})
-    # Extract the version number from the VULKAN_SDK environment variable
-    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" VULKAN_SDK_VERSION "$ENV{VULKAN_SDK}")
-    message(STATUS "Detected Vulkan SDK version: ${VULKAN_SDK_VERSION}")
+find_package(Vulkan REQUIRED)
+if(Vulkan_FOUND)
+    # Extract full version including possible patch version
+    string(REGEX MATCH "([0-9]+)\.([0-9]+)\.([0-9]+)(\.([0-9]+))?" _ "${Vulkan_VERSION}")
+    set(VULKAN_SDK_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+    if(CMAKE_MATCH_5)
+        set(VULKAN_SDK_VERSION "${VULKAN_SDK_VERSION}.${CMAKE_MATCH_5}")
+    endif()
 
-    # Set the VOLK_VERSION based on the detected Vulkan SDK version
-    set(VOLK_VERSION "vulkan-sdk-${VULKAN_SDK_VERSION}.0")
+    message(STATUS "Detected Vulkan SDK version: ${VULKAN_SDK_VERSION}")
+    set(VOLK_VERSION "vulkan-sdk-${VULKAN_SDK_VERSION}")
     message(STATUS "Fetching VOLK version: ${VOLK_VERSION}")
 else()
-    # If VULKAN_SDK is not defined, try to find Vulkan using find_package
-    find_package(Vulkan REQUIRED)
-
-    if(Vulkan_FOUND)
-        # Extract the version number from the Vulkan include directory
-        string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" VULKAN_SDK_VERSION "${Vulkan_VERSION}")
-        message(STATUS "Detected Vulkan SDK version: ${VULKAN_SDK_VERSION}")
-
-        # Set the VOLK_VERSION based on the detected Vulkan SDK version
-        set(VOLK_VERSION "vulkan-sdk-${VULKAN_SDK_VERSION}.0")
-        message(STATUS "Fetching VOLK version: ${VOLK_VERSION}")
-    else()
-        message(FATAL_ERROR "Vulkan SDK not found. Please install the Vulkan SDK.")
-    endif()
+    message(FATAL_ERROR "Vulkan SDK not found. Please install the Vulkan SDK.")
 endif()
 
 
