@@ -10,46 +10,49 @@ jobs:
       matrix:
         display_server: [Wayland, X11]
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-  
-    - name: Setup Vulkan SDK
-      uses: humbletim/setup-vulkan-sdk@v1.2.1
-      with:
-         vulkan-query-version: 1.4.304.1
-         vulkan-components: Vulkan-Headers, Vulkan-Loader
-         vulkan-use-cache: true
+      - uses: actions/checkout@v4
 
-    - name: Install Linux dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake
-        if [ "${{ matrix.display_server }}" = "Wayland" ]; then
-          sudo apt-get install -y libwayland-dev wayland-protocols libxkbcommon-dev
-        else
-          sudo apt-get install -y xorg-dev
-        fi
+      - name: Setup Vulkan SDK
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: 1.4.304.1
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
 
-    - name: Set display server environment
-      run: |
-        if [ "${{ matrix.display_server }}" = "Wayland" ]; then
-          echo "USE_WAYLAND=ON" >> $GITHUB_ENV
-          echo "WAYLAND_DISPLAY=wayland-0" >> $GITHUB_ENV
-        else
-          echo "USE_X11=ON" >> $GITHUB_ENV
-          echo "DISPLAY=:0" >> $GITHUB_ENV
-        fi
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+          if [ "${{ matrix.display_server }}" = "Wayland" ]; then
+            sudo apt-get install -y libwayland-dev wayland-protocols libxkbcommon-dev
+          else
+            sudo apt-get install -y xorg-dev libx11-dev libxrandr-dev libxi-dev
+          fi
 
-    - name: Configure and Build
-      run: |
-        mkdir build && cd build
-        cmake -DCMAKE_BUILD_TYPE=Release ..
-        cmake --build . --config Release
+      - name: Set CMake variables
+        run: |
+          if [ "${{ matrix.display_server }}" = "Wayland" ]; then
+            echo "USE_WAYLAND=ON" >> $GITHUB_ENV
+            echo "WAYLAND_DISPLAY=wayland-0" >> $GITHUB_ENV
+            echo "DISPLAY=" >> $GITHUB_ENV
+          else
+            echo "USE_X11=ON" >> $GITHUB_ENV
+            echo "DISPLAY=:0" >> $GITHUB_ENV
+          fi
 
-    - name: Run tests
-      run: |
-        cd build
-        ctest --output-on-failure
+      - name: Configure and Build
+        run: |
+          mkdir build && cd build
+          cmake \
+            -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }} \
+            -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }} \
+            -DCMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release --parallel 4
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
 
   windows-build:
     name: Windows

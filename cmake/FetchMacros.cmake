@@ -2,6 +2,20 @@
     set(DEPS_DIR ${depsDir})
     set(TAG ${tag})
 
+    if(NOT DEFINED USE_WAYLAND AND NOT DEFINED USE_X11 AND NOT DEFINED USE_WINDOWS)
+        if(WIN32)
+            set(USE_WINDOWS TRUE)
+        elseif(UNIX AND NOT APPLE)
+            if(DEFINED ENV{WAYLAND_DISPLAY})
+                set(USE_WAYLAND TRUE)
+            else()
+                set(USE_X11 TRUE)
+            endif()
+        endif()
+    endif()
+
+    message(STATUS "GLFW OS Detection - USE_WAYLAND: ${USE_WAYLAND}, USE_X11: ${USE_X11}, USE_WINDOWS: ${USE_WINDOWS}")
+
     # Fetch GLFW and Setup
     set(GLFW_BUILD_EXAMPLES          OFF CACHE BOOL "")
     set(GLFW_BUILD_TESTS             OFF CACHE BOOL "")
@@ -20,7 +34,7 @@
     elseif ()
         set(GLFW_BUILD_X11 ON)
     else ()
-        message(FATAL_ERROR "Could not detect OS for GLFW")
+        message(FATAL_ERROR "Could not detect OS for GLFW. Variables: USE_WAYLAND=${USE_WAYLAND}, USE_X11=${USE_X11}, USE_WINDOWS=${USE_WINDOWS}")
     endif ()
 
 
