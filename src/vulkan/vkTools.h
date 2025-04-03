@@ -39,7 +39,7 @@ namespace VkDebug
             auto formatObjectInfo = [](const VkDebugUtilsObjectNameInfoEXT& obj)
             {
                 const auto& [sType, pNext, objectType, objectHandle, pObjectName] = obj;
-                return pObjectName ? fmt::format("{} (Type: {}, Handle: {:#x})", pObjectName, ObjectToString(objectType), reinterpret_cast<uint64_t>(objectHandle)) : fmt::format("Type: {}, Handle: {:#x}", ObjectToString(objectType), reinterpret_cast<uint64_t>(objectHandle));
+                return pObjectName ? fmt::format("{} (Type: {}, Handle: {:#x})", pObjectName, ObjectToString(objectType), objectHandle) : fmt::format("Type: {}, Handle: {:#x}", ObjectToString(objectType), objectHandle);
             };
 
             std::vector<std::string> objectEntries;

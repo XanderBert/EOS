@@ -455,6 +455,7 @@ namespace VkContext
 
         EOS::Logger->info("Vulkan Driver Version: {}.{}.{}", VK_API_VERSION_MAJOR(driverAPIVersion), VK_API_VERSION_MINOR(driverAPIVersion), VK_API_VERSION_PATCH(driverAPIVersion));
         EOS::Logger->info("Vulkan SDK Version: {}.{}.{}", VK_API_VERSION_MAJOR(SDKApiVersion), VK_API_VERSION_MINOR(SDKApiVersion), VK_API_VERSION_PATCH(SDKApiVersion));
+
         EOS::Logger->info("Driver info: {} {}", vkPhysicalDeviceDriverProperties.driverName, vkPhysicalDeviceDriverProperties.driverInfo);
 
         //Check if we are < 1.3 , 1.3 or 1.4

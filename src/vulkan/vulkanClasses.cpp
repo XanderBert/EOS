@@ -107,6 +107,11 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     }
 #endif
 
+    // Check The surface and QueueFamilyIndex
+    VkBool32 queueFamilySupportsPresentation = VK_FALSE;
+    VK_ASSERT(vkGetPhysicalDeviceSurfaceSupportKHR(VkContext->VulkanPhysicalDevice, VkContext->VulkanDeviceQueues.Graphics.QueueFamilyIndex, VkContext->VulkanSurface, &queueFamilySupportsPresentation));
+    CHECK(queueFamilySupportsPresentation == VK_TRUE, "The queue family does not support presentation");
+
     //Get the device format properties
     VkFormatProperties properties{};
     vkGetPhysicalDeviceFormatProperties(VkContext->VulkanPhysicalDevice, SurfaceFormat.format, &properties);
@@ -149,7 +154,6 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     VK_ASSERT(vkGetSwapchainImagesKHR(VkContext->VulkanDevice, SwapChain, &NumberOfSwapChainImages,swapChainImages.data()));
     CHECK(NumberOfSwapChainImages >  0, "Number of SwapChain images is 0");
     CHECK(!swapChainImages.empty(), "The SwapChain images didn't got created");
-
 
     AcquireSemaphores.clear();
     AcquireSemaphores.reserve(NumberOfSwapChainImages);
