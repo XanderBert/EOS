@@ -83,7 +83,7 @@ namespace VkDebug
     }
 }
 
-//TODO: Move them back to VulkanContext but make them static and private
+//TODO: Move them back to VulkanContext -> private
 namespace VkContext
 {
     [[nodiscard]] uint32_t FindQueueFamilyIndex(const VkPhysicalDevice& physicalDevice, VkQueueFlags flags);

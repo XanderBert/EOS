@@ -55,9 +55,6 @@ namespace EOS
 
 #pragma endregion
 
-
-
-
     struct HardwareDeviceDescription
     {
         uintptr_t id{};
@@ -71,16 +68,6 @@ namespace EOS
         ColorSpace DesiredSwapChainColorSpace { ColorSpace::SRGB_Linear };
     };
 
-    class IContext
-    {
-    protected:
-        IContext() = default;
-
-    public:
-        DELETE_COPY_MOVE(IContext);
-        virtual ~IContext() = default;
-    };
-
     struct ContextCreationDescription final
     {
         ContextConfiguration    config;
@@ -89,6 +76,38 @@ namespace EOS
         void*                   window{};
         void*                   display{};
     };
+
+#pragma region INTERFACES
+
+    class ICommandBuffer
+    {
+    public:
+        DELETE_COPY_MOVE(ICommandBuffer);
+        virtual ~ICommandBuffer() = default;
+
+    protected:
+        ICommandBuffer() = default;
+    };
+
+    class IContext
+    {
+    public:
+        DELETE_COPY_MOVE(IContext);
+        virtual ~IContext() = default;
+
+        /**
+         * @brief 
+         * @return
+         */
+        virtual ICommandBuffer& AcquireCommandBuffer() = 0;
+
+    protected:
+        IContext() = default;
+    };
+
+#pragma endregion
+
+
 
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);
 }

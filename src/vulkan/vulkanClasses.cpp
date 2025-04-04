@@ -337,6 +337,13 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
 }
 
+EOS::ICommandBuffer& VulkanContext::AcquireCommandBuffer()
+{
+    CHECK(!CurrentCommandBuffer.IsValid(), "Another CommandBuffer has been acquired this frame");
+    CurrentCommandBuffer = std::move(CommandBuffer{this});
+    return CurrentCommandBuffer;
+}
+
 void VulkanContext::CreateVulkanInstance(const char* applicationName)
 {
     uint32_t apiVersion{};

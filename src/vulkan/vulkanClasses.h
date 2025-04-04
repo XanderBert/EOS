@@ -148,6 +148,32 @@ private:
     VkSemaphoreSubmitInfo WaitOnSemaphore = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .stageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
 };
 
+class CommandBuffer final : public EOS::ICommandBuffer
+{
+public:
+    CommandBuffer() = default;
+    explicit CommandBuffer(VulkanContext* vulkanContext)
+    : VkContext(vulkanContext){};
+
+    ~CommandBuffer() override = default;
+    DELETE_COPY(CommandBuffer)
+
+    CommandBuffer (CommandBuffer&&) = delete;
+    CommandBuffer& operator=(CommandBuffer&& other) noexcept
+    {
+        if (this != &other)
+        {
+            VkContext = std::exchange(other.VkContext, nullptr);
+        }
+        return *this;
+    }
+
+    bool IsValid() const { return VkContext != nullptr;}
+
+private:
+    VulkanContext* VkContext = nullptr;
+};
+
 class VulkanContext final : public EOS::IContext
 {
 public:
@@ -155,12 +181,12 @@ public:
     ~VulkanContext() override = default;
     DELETE_COPY_MOVE(VulkanContext)
 
-    std::unique_ptr<VulkanCommands> Commands = nullptr;
+    EOS::ICommandBuffer& AcquireCommandBuffer() override;
 
+    std::unique_ptr<VulkanCommands> Commands = nullptr;
     EOS::Pool<EOS::Texture, VulkanImage> TexturePool{};
 private:
-    //TODO: All of these private functions should be made static
-    //The Context Object will "only" have  non-static functions that are being used at runtime / not initial setup.
+
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
@@ -176,8 +202,10 @@ private:
     VkSemaphore TimelineSemaphore                   = VK_NULL_HANDLE;
     std::unique_ptr<VulkanSwapChain> SwapChain      = nullptr;
 
+    CommandBuffer CurrentCommandBuffer{};
+
     DeviceQueues VulkanDeviceQueues{};
-    EOS::ContextConfiguration Configuration{};
+    EOS::ContextConfiguration Configuration{}; //TODO: Should the liftime of this obj be the whole application?
 
     friend struct VulkanSwapChain;
     friend struct VulkanSwapChainSupportDetails;
