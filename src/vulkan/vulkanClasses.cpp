@@ -38,11 +38,13 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
     for (const auto&[Texture, CurrentState, NextState] : imageBarriers)
     {
         VulkanImage& currentImage = *vkContext->TexturePool.Get(Texture);
-        VkImageAspectFlags    aspectMask;
-        uint32_t              baseMipLevel;
-        uint32_t              levelCount;
-        uint32_t              baseArrayLayer;
-        uint32_t              layerCount;
+
+        VkImageAspectFlags aspectMask = VkSynchronization::ConvertToVkImageAspectFlags(CurrentState);
+        if (VulkanImage::IsDepthAttachment(currentImage))
+        {
+            aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+
         VkImageMemoryBarrier2 vkBarrier
         {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR,
@@ -54,8 +56,7 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
             .oldLayout          = VkSynchronization::ConvertToVkImageLayout(CurrentState),
             .newLayout          = VkSynchronization::ConvertToVkImageLayout(NextState),
             .image              = currentImage.Image,
-            //TODO: This will only work with color images, No Depth transitions Fix this
-            .subresourceRange   =   {VK_IMAGE_ASPECT_COLOR_BIT, 1, currentImage.Levels, 1, currentImage.Layers}
+            .subresourceRange   = {aspectMask, 1, currentImage.Levels, 1, currentImage.Layers}
         };
 
         vkImageBarriers.emplace_back(vkBarrier);

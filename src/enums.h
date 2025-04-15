@@ -30,24 +30,46 @@ namespace EOS
     enum ResourceState : uint32_t
     {
         Undefined = 0,
-        VertexAndConstantBuffer = 0x1,
-        IndexBuffer = 0x2,
-        RenderTarget = 0x4,
-        UnorderedAccess = 0x8,
-        DepthWrite = 0x10,
-        DepthRead = 0x20,
-        NonPixelShaderResource = 0x40,
-        PixelShaderResource = 0x80,
-        ShaderResource = 0x40 | 0x80,
-        StreamOut = 0x100,
-        IndirectArgument = 0x200,
-        CopyDest = 0x400,
-        CopySource = 0x800,
-        Read = (((((0x1 | 0x2) | 0x40) | 0x80) | 0x200) | 0x800),
-        Present = 0x1000,
-        Common = 0x2000,
-        AccelerationStructureRead = 0x4000,
-        AccelerationStructureWrite =  0x8000,
-        UnorderedAccessPixel = 0x10000,
+
+        // Input Assembly (Vertex/Index)
+        VertexBuffer          = 0x00000001,
+        IndexBuffer           = 0x00000002,
+
+        // Render Targets
+        RenderTarget          = 0x00000004,
+        UnorderedAccess       = 0x00000008,
+
+        // Depth/Stencil
+        DepthWrite            = 0x00000010,
+        DepthRead             = 0x00000020,
+
+        // Shader Resources
+        NonPixelShaderResource = 0x00000040,  // VS/CS/GS/DS
+        PixelShaderResource    = 0x00000080,  // PS only
+        ShaderResource         = NonPixelShaderResource | PixelShaderResource,
+
+        // Copy Operations
+        CopyDest              = 0x00000100,
+        CopySource            = 0x00000200,
+
+        // Indirect/Streamout
+        IndirectArgument      = 0x00000400,
+        StreamOut             = 0x00000800,
+
+        // Presentation
+        Present               = 0x00001000,
+
+        // Common/Generic Read
+        Common                = 0x00002000,
+        GenericRead           = VertexBuffer | IndexBuffer |
+                               NonPixelShaderResource | PixelShaderResource |
+                               IndirectArgument | CopySource,
+
+        // Raytracing
+        AccelerationStructureRead  = 0x00004000,
+        AccelerationStructureWrite = 0x00008000,
+
+        // Special Cases
+        UnorderedAccessPixel       = 0x00010000  // UAV in pixel shader
     };
 }

@@ -27,8 +27,6 @@ namespace EOS
     using QueryPoolHandle           = Handle<struct QueryPool>;
     using AccelStructHandle         = Handle<struct AccelerationStructure>;
 
-
-
     struct HardwareDeviceDescription
     {
         uintptr_t id{};
@@ -104,11 +102,7 @@ namespace EOS
          * @return 
          */
         virtual TextureHandle GetSwapChainTexture() = 0;
-
-        //TODO: would this be nice? -> automatically uses SwapChain
-        //virtual SubmitHandle SubmitToPresent(ICommandBuffer& commandBuffer) = 0;
-
-
+    
     protected:
         IContext() = default;
     };

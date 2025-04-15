@@ -118,4 +118,5 @@ namespace VkSynchronization
     VkPipelineStageFlags2 ConvertToVkPipelineStage2(const EOS::ResourceState& state);
     VkAccessFlags2 ConvertToVkAccessFlags2(const EOS::ResourceState& state);
     VkImageLayout ConvertToVkImageLayout(const EOS::ResourceState& state);
+    VkImageAspectFlags ConvertToVkImageAspectFlags(const EOS::ResourceState& state);
 }

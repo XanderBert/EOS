@@ -844,7 +844,8 @@ namespace VkSynchronization
         if (state & EOS::ResourceState::VertexAndConstantBuffer)
         {
             flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-            flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+            //TODO: Test this out if the latter flag is needed
+            //flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
         }
 
         if (state & EOS::ResourceState::PixelShaderResource)
@@ -898,7 +899,8 @@ namespace VkSynchronization
 
         //TODO: Transfer
         {
-            return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            //return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            //return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         }
 
         // Compatible with both compute and graphics queues
@@ -1022,5 +1024,26 @@ namespace VkSynchronization
             return VK_IMAGE_LAYOUT_GENERAL;
 
         return VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+
+    VkImageAspectFlags ConvertToVkImageAspectFlags(const EOS::ResourceState &state)
+    {
+        VkImageAspectFlags aspectMask = 0;
+
+        if (state & EOS::ResourceState::RenderTarget)
+        {
+            aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        }
+        else
+        {
+            aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        }
+
+        if (state & (EOS::ResourceState::DepthRead | EOS::ResourceState::DepthWrite))
+        {
+            aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+
+        return aspectMask;
     }
 }
