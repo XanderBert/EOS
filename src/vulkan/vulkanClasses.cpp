@@ -1,8 +1,84 @@
 ﻿#include "vulkanClasses.h"
-#include <string.h>
+
+#include <complex>
+#include <cstring>
 #include <ranges>
 
 #include "vulkan/vkTools.h"
+
+#pragma region GLOBAL_FUNCTIONS
+void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers)
+{
+    VulkanContext* vkContext = dynamic_cast<VulkanContext*>(renderContext);
+    CHECK(vkContext, "The Vulkan Context is not valid");
+
+
+    std::vector<VkMemoryBarrier2KHR> vkMemoryBarriers;
+    vkMemoryBarriers.reserve(globalBarriers.size());
+
+    std::vector<VkImageMemoryBarrier2KHR> vkImageBarriers;
+    vkImageBarriers.reserve(imageBarriers.size());
+
+    for (const auto& barrier : globalBarriers)
+    {
+        VkMemoryBarrier2 vkBarrier
+        {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR,
+            .pNext = nullptr,
+            .srcStageMask   = VkSynchronization::ConvertToVkPipelineStage2(barrier.CurrentState),
+            .srcAccessMask  = VkSynchronization::ConvertToVkAccessFlags2(barrier.CurrentState),
+            .dstStageMask   = VkSynchronization::ConvertToVkPipelineStage2(barrier.NextState),
+            .dstAccessMask  = VkSynchronization::ConvertToVkAccessFlags2(barrier.NextState)
+        };
+
+        vkMemoryBarriers.emplace_back(vkBarrier);
+    }
+
+
+    for (const auto&[Texture, CurrentState, NextState] : imageBarriers)
+    {
+        VulkanImage& currentImage = *vkContext->TexturePool.Get(Texture);
+        VkImageAspectFlags    aspectMask;
+        uint32_t              baseMipLevel;
+        uint32_t              levelCount;
+        uint32_t              baseArrayLayer;
+        uint32_t              layerCount;
+        VkImageMemoryBarrier2 vkBarrier
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR,
+            .pNext = nullptr,
+            .srcStageMask       = VkSynchronization::ConvertToVkPipelineStage2(CurrentState),
+            .srcAccessMask      = VkSynchronization::ConvertToVkAccessFlags2(CurrentState),
+            .dstStageMask       = VkSynchronization::ConvertToVkPipelineStage2(NextState),
+            .dstAccessMask      = VkSynchronization::ConvertToVkAccessFlags2(NextState),
+            .oldLayout          = VkSynchronization::ConvertToVkImageLayout(CurrentState),
+            .newLayout          = VkSynchronization::ConvertToVkImageLayout(NextState),
+            .image              = currentImage.Image,
+            //TODO: This will only work with color images, No Depth transitions Fix this
+            .subresourceRange   =   {VK_IMAGE_ASPECT_COLOR_BIT, 1, currentImage.Levels, 1, currentImage.Layers}
+        };
+
+        vkImageBarriers.emplace_back(vkBarrier);
+    }
+
+    const VkDependencyInfoKHR dependencyInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR,
+        .pNext = nullptr,
+        .dependencyFlags = 0,
+        .memoryBarrierCount = static_cast<uint32_t>(vkMemoryBarriers.size()),
+        .pMemoryBarriers = vkMemoryBarriers.data(),
+        .bufferMemoryBarrierCount = 0,
+        .pBufferMemoryBarriers = nullptr,
+        .imageMemoryBarrierCount = static_cast<uint32_t>(vkImageBarriers.size()),
+        .pImageMemoryBarriers = vkImageBarriers.data()
+    };
+
+    // Issue the barrier command
+    vkCmdPipelineBarrier2KHR(vkContext->GetCurrentCommandBuffer()->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
+}
+#pragma endregion
+
 
 
 VulkanImage::VulkanImage(const ImageDescription &description)
@@ -80,6 +156,7 @@ void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkIma
     VK_ASSERT(vkCreateImageView(device, &createInfo, nullptr, &imageView));
     VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_IMAGE_VIEW, reinterpret_cast<uint64_t>(imageView), debugName));
 }
+
 
 VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
 : VkContext(vulkanSwapChainDescription.vulkanContext)
@@ -275,7 +352,7 @@ void VulkanSwapChain::GetAndWaitOnNextImage()
         CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "vkAcquireNextImageKHR Failed");
 
         GetNextImage = false;
-        VkContext->Commands->WaitSemaphore(acquireSemaphore);
+        VkContext->VulkanCommandPool->WaitSemaphore(acquireSemaphore);
     }
 }
 
@@ -300,10 +377,223 @@ VulkanSwapChainSupportDetails::VulkanSwapChainSupportDetails(const VulkanContext
     VK_ASSERT(vkGetPhysicalDeviceSurfacePresentModesKHR(vulkanContext.VulkanPhysicalDevice, vulkanContext.VulkanSurface, &presentModeCount, presentModes.data()));
 }
 
-void VulkanCommands::WaitSemaphore(const VkSemaphore &semaphore)
+CommandPool::CommandPool(const VkDevice &device, uint32_t queueIndex)
+    : Device(device)
+{
+    WaitSemaphores.reserve(2);
+    SignalSemaphores.reserve(2);
+
+    vkGetDeviceQueue(device, queueIndex, 0, &Queue); //Store a copy of the Queue
+
+    const VkCommandPoolCreateInfo createInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = queueIndex,
+    };
+
+    VK_ASSERT(vkCreateCommandPool(device, &createInfo, nullptr, &VulkanCommandPool));
+    VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_COMMAND_POOL, reinterpret_cast<uint64_t>(VulkanCommandPool), "CommandPool"));
+
+    const VkCommandBufferAllocateInfo allocateInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = VulkanCommandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    //TODO:
+    //Buffers.fill();
+    for (uint32_t i{}; i < MaxCommandBuffers; ++i)
+    {
+        CommandBufferData buffer{};
+
+        buffer.Semaphore = VkSynchronization::CreateSemaphore(device, fmt::format("Semaphore of CommandBuffer: {}", i).c_str());
+        buffer.Fence = VkSynchronization::CreateFence(device, fmt::format("Fence of CommandBuffer: {}", i).c_str());
+
+
+        VK_ASSERT(vkAllocateCommandBuffers(device, &allocateInfo, &buffer.VulkanCommandBufferAllocated));
+
+
+        Buffers[i] = std::move(buffer);
+        Buffers[i].Handle.BufferIndex = i;
+    }
+
+}
+
+void CommandPool::WaitSemaphore(const VkSemaphore& semaphore)
 {
     CHECK(WaitOnSemaphore.semaphore == VK_NULL_HANDLE, "The wait Semaphore is not Empty");
     WaitOnSemaphore.semaphore = semaphore;
+}
+
+void CommandPool::Signal(const VkSemaphore& semaphore, const uint64_t& signalValue)
+{
+    CHECK(semaphore != VK_NULL_HANDLE, "The passed semaphore parameter is not valid.");
+    SignalSemaphore.semaphore = semaphore;
+    SignalSemaphore.value = signalValue;
+}
+
+VkSemaphore CommandPool::AcquireLastSubmitSemaphore()
+{
+    return std::exchange(LastSubmitSemaphore.semaphore, VK_NULL_HANDLE);;
+}
+
+EOS::SubmitHandle CommandPool::Submit(CommandBufferData& data)
+{
+    CHECK(data.isEncoding, "The buffer you want to submit is not recording.");
+    VK_ASSERT(vkEndCommandBuffer(data.VulkanCommandBuffer));
+
+    //TODO instead of keeping members and them pushing them into vectors here.
+    //Just Emplace the objects directly into the vector and remove the WaitOn Last Submit members
+    WaitSemaphores.clear(); //TODO: double check clearing doesn't reduce memory
+    if (WaitOnSemaphore.semaphore)
+    {
+        WaitSemaphores.emplace_back(WaitOnSemaphore);
+    }
+    if (LastSubmitSemaphore.semaphore)
+    {
+        WaitSemaphores.emplace_back(LastSubmitSemaphore);
+    }
+
+    SignalSemaphores.clear();
+    SignalSemaphores.emplace_back(VkSemaphoreSubmitInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = data.Semaphore,
+        .stageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    });
+
+    if (SignalSemaphore.semaphore)
+    {
+        SignalSemaphores.emplace_back(SignalSemaphore);
+    }
+
+    const VkCommandBufferSubmitInfo bufferSubmitInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = data.VulkanCommandBuffer,
+    };
+
+    const VkSubmitInfo2 submitInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .waitSemaphoreInfoCount = static_cast<uint32_t>(WaitSemaphores.size()),
+        .pWaitSemaphoreInfos = WaitSemaphores.data(),
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &bufferSubmitInfo,
+        .signalSemaphoreInfoCount = static_cast<uint32_t>(SignalSemaphores.size()),
+        .pSignalSemaphoreInfos = SignalSemaphores.data(),
+    };
+
+    CHECK(vkQueueSubmit2(Queue, 1, &submitInfo, data.Fence), "The Queue failed to submit");
+
+    LastSubmitSemaphore.semaphore = data.Semaphore;
+    LastSubmitHandle = data.Handle;
+    WaitOnSemaphore.semaphore = VK_NULL_HANDLE;
+    SignalSemaphore.semaphore = VK_NULL_HANDLE;
+
+    data.isEncoding = false;
+    ++SubmitCounter;
+
+    // skip the 0 value when uint32_t wraps around.
+    if (!SubmitCounter) { ++SubmitCounter; }
+
+    return LastSubmitHandle;
+}
+
+const CommandBufferData& CommandPool::AcquireCommandBuffer()
+{
+    //Try to free a command buffer of none are free
+    if (!NumberOfAvailableCommandBuffers)
+    {
+        TryResetCommandBuffers();
+    }
+
+    // if there is still no commandbuffer free in the pool, we will wait until one becomes available
+    while (!NumberOfAvailableCommandBuffers)
+    {
+        EOS::Logger->warn("Waiting for a command buffer that is free to use...");
+        TryResetCommandBuffers();
+    }
+
+    CommandBufferData* currentCommandBuffer = nullptr;
+
+    // we are ok with any available buffer
+    for (CommandBufferData& buffer : Buffers)
+    {
+        if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE)
+        {
+            currentCommandBuffer = &buffer;
+            break;
+        }
+    }
+    CHECK(NumberOfAvailableCommandBuffers, "No command buffers where available");
+    CHECK(currentCommandBuffer, "No command buffers where available");
+    CHECK(currentCommandBuffer->VulkanCommandBufferAllocated != VK_NULL_HANDLE, "No command buffers where available");
+
+    currentCommandBuffer->Handle.ID = SubmitCounter;
+    NumberOfAvailableCommandBuffers--;
+
+    currentCommandBuffer->VulkanCommandBuffer = currentCommandBuffer->VulkanCommandBufferAllocated;
+    currentCommandBuffer->isEncoding = true;
+
+    constexpr VkCommandBufferBeginInfo beginInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    VK_ASSERT(vkBeginCommandBuffer(currentCommandBuffer->VulkanCommandBuffer, &beginInfo));
+
+    NextSubmitHandle = currentCommandBuffer->Handle;
+
+    return *currentCommandBuffer;
+}
+
+void CommandPool::TryResetCommandBuffers()
+{
+    for (CommandBufferData& buffer : Buffers)
+    {
+        if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE || buffer.isEncoding)
+        {
+            continue;
+        }
+
+        const VkResult result = vkWaitForFences(Device, 1, &buffer.Fence, VK_TRUE, 0);
+
+        if (result == VK_SUCCESS)
+        {
+            VK_ASSERT(vkResetCommandBuffer(buffer.VulkanCommandBuffer, VkCommandBufferResetFlags{0}));
+            VK_ASSERT(vkResetFences(Device, 1, &buffer.Fence));
+            buffer.VulkanCommandBuffer = VK_NULL_HANDLE;
+            ++NumberOfAvailableCommandBuffers;
+        }
+        else if (result != VK_TIMEOUT)
+        {
+            VK_ASSERT(result);
+        }
+    }
+}
+
+CommandBuffer::CommandBuffer(VulkanContext *vulkanContext): VkContext(vulkanContext)
+{
+    //Get a available CommandBuffer from the pool
+    VkContext->VulkanCommandPool->AcquireCommandBuffer();
+}
+
+CommandBuffer & CommandBuffer::operator=(CommandBuffer &&other) noexcept
+{
+    if (this != &other)
+    {
+        VkContext = std::exchange(other.VkContext, nullptr);
+    }
+    return *this;
+}
+
+CommandBuffer::operator bool() const
+{
+    return VkContext != nullptr;
 }
 
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
@@ -320,8 +610,8 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
     VkContext::SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
 
+    //Create our Vulkan Device
     VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
-
 
 
     //Create SwapChain
@@ -334,14 +624,103 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     };
 
     SwapChain = std::make_unique<VulkanSwapChain>(desc);
+
+    //TODO: I would like to move this somewhere else. -> on Constructor of VulkanDeviceQueues
+    //Fill in our Device Queue's
+    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Compute.QueueFamilyIndex, 0, &VulkanDeviceQueues.Compute.Queue);
+    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex, 0, &VulkanDeviceQueues.Graphics.Queue);
+
+    //Create our Timeline Semaphore
     TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
+
+    //Create our CommandPool
+    VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
+
+
+    //TODO: pipeline cache
+
+    //TODO: VMA init
+
+    //TODO: Staging Device
 }
 
 EOS::ICommandBuffer& VulkanContext::AcquireCommandBuffer()
 {
-    CHECK(!CurrentCommandBuffer.IsValid(), "Another CommandBuffer has been acquired this frame");
+    CHECK(!CurrentCommandBuffer, "Another CommandBuffer has been acquired this frame");
     CurrentCommandBuffer = std::move(CommandBuffer{this});
     return CurrentCommandBuffer;
+}
+
+EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present)
+{
+    CommandBuffer* vkCmdBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+    CHECK(vkCmdBuffer, "The command buffer is not valid");
+
+    if (present)
+    {
+#if defined(EOS_DEBUG)
+        const VulkanImage& swapChainTextures = *TexturePool.Get(present);
+        CHECK(VulkanImage::IsSwapChainImage(swapChainTextures), "The passed present texture handle is not from a SwapChain");
+#endif
+
+        //TODO SwapChain transitioning should be handled by the end user to have more optimal memory barriers
+        cmdPipelineBarrier(this, {}, {{present, EOS::ResourceState::Common, EOS::ResourceState::Present}});
+    }
+
+    const bool shouldPresent = HasSwapChain() && present;
+
+    //If we a presenting a SwapChain image, signal our timeline semaphore
+    if (shouldPresent)
+    {
+        //Create a unique Signal Value
+        const uint64_t signalValue = SwapChain->CurrentFrame + SwapChain->NumberOfSwapChainImages;
+
+        //Wait for this value next time we want to acquire this SwapChain image
+        SwapChain->TimelineWaitValues[SwapChain->CurrentImageIndex] = signalValue;
+        VulkanCommandPool->Signal(TimelineSemaphore, signalValue);
+    }
+
+    vkCmdBuffer->LastSubmitHandle = VulkanCommandPool->Submit(vkCmdBuffer->CommandBufferImpl);
+
+    if (shouldPresent)
+    {
+        SwapChain->Present(VulkanCommandPool->AcquireLastSubmitSemaphore());
+    }
+
+    //TODO:
+    //ProcessDeferredTasks();
+
+    EOS::SubmitHandle handle = vkCmdBuffer->LastSubmitHandle;
+
+    //Reset the Command Buffer
+    CurrentCommandBuffer = {};
+
+    return handle;
+}
+
+EOS::TextureHandle VulkanContext::GetSwapChainTexture()
+{
+    CHECK(HasSwapChain(), "You dont have a SwapChain");
+    if (!HasSwapChain())
+    {
+        return {};
+    }
+
+    EOS::TextureHandle tx = SwapChain->GetCurrentTexture();
+    CHECK(tx.Valid(), "The SwapChain texture is not valid.");
+    CHECK(TexturePool.Get(tx)->ImageFormat != VK_FORMAT_UNDEFINED, "Invalid image format");
+
+    return tx;
+}
+
+const CommandBuffer* VulkanContext::GetCurrentCommandBuffer() const
+{
+    return &CurrentCommandBuffer;
+}
+
+bool VulkanContext::HasSwapChain() const noexcept
+{
+    return SwapChain != nullptr;
 }
 
 void VulkanContext::CreateVulkanInstance(const char* applicationName)

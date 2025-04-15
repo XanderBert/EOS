@@ -4,6 +4,7 @@
 #include <string>
 
 #include "defines.h"
+#include "enums.h"
 #include "handle.h"
 #include "window.h"
 
@@ -26,34 +27,7 @@ namespace EOS
     using QueryPoolHandle           = Handle<struct QueryPool>;
     using AccelStructHandle         = Handle<struct AccelerationStructure>;
 
-#pragma region ENUMS
-    enum class HardwareDeviceType : uint8_t
-    {
-        Integrated  = 1,
-        Discrete    = 2,
-        Virtual     = 3,
-        Software    = 4
-    };
 
-    enum class ColorSpace : uint8_t
-    {
-        SRGB_Linear,
-        SRGB_NonLinear
-    };
-
-    enum class ImageType : uint8_t
-    {
-        Image_1D        = 0,
-        Image_2D        = 1,
-        Image_3D        = 2,
-        CubeMap         = 3,
-        Image_1D_Array  = 4,
-        Image_2D_Array  = 5,
-        CubeMap_Array   = 6,
-        SwapChain       = 7,
-    };
-
-#pragma endregion
 
     struct HardwareDeviceDescription
     {
@@ -77,7 +51,25 @@ namespace EOS
         void*                   display{};
     };
 
+    //used for buffer StateTransitioning without changing the index queue
+    struct GlobalBarrier
+    {
+        const BufferHandle      Buffer;
+        const ResourceState     CurrentState;
+        const ResourceState     NextState;
+    };
+
+    struct ImageBarrier
+    {
+        const TextureHandle     Texture;
+        const ResourceState     CurrentState;
+        const ResourceState     NextState;
+    };
+
 #pragma region INTERFACES
+    //TODO: instead of interfaces use concept and a forward declare. And then every API implements 1 class of that name with the concept.
+    //CMake should handle that only 1 type of API is being used at the time.
+    //This way we can completely get rid of inheritance
 
     class ICommandBuffer
     {
@@ -96,18 +88,38 @@ namespace EOS
         virtual ~IContext() = default;
 
         /**
-         * @brief 
-         * @return
-         */
+        * @brief
+        * @return
+        */
         virtual ICommandBuffer& AcquireCommandBuffer() = 0;
+
+        /**
+        * @brief
+        * @return
+        */
+        virtual SubmitHandle Submit(ICommandBuffer& commandBuffer, TextureHandle present) = 0;
+
+        /**
+         * @brief 
+         * @return 
+         */
+        virtual TextureHandle GetSwapChainTexture() = 0;
+
+        //TODO: would this be nice? -> automatically uses SwapChain
+        //virtual SubmitHandle SubmitToPresent(ICommandBuffer& commandBuffer) = 0;
+
 
     protected:
         IContext() = default;
     };
-
 #pragma endregion
-
-
-
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);
 }
+
+#pragma region GLOBAL_FUNCTIONS
+/**
+* @brief
+* @return
+*/
+void cmdPipelineBarrier(const EOS::IContext& renderContext, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers);
+#pragma endregion

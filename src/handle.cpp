@@ -14,13 +14,6 @@ namespace EOS
         return Idx != other.Idx || Generation != other.Generation;
     }
 
-    template<typename ObjectType>
-    Handle<ObjectType>::operator bool() const
-    {
-        return Generation != 0;
-    }
-
-
     template <typename HandleType>
     Holder<HandleType>::Holder(IContext* ctx, HandleType hdl) noexcept
     : context{ctx}

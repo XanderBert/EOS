@@ -10,17 +10,20 @@
     set(GLFW_DOCUMENT_INTERNALS      OFF CACHE BOOL "")
     set(GLFW_VULKAN_STATIC           ON CACHE BOOL "")
     set(GLFW_USE_EGL                 OFF CACHE BOOL "")
-
-
     set(GLFW_BUILD_WIN32 OFF)
     set(GLFW_BUILD_WAYLAND OFF)
     set(GLFW_BUILD_X11 OFF)
 
+    target_compile_definitions(EOS PRIVATE GLFW_INCLUDE_VULKAN)
+
     if(USE_WINDOWS)
+        target_compile_definitions(EOS PRIVATE GLFW_EXPOSE_NATIVE_WIN32)
         set(GLFW_BUILD_WIN32 ON)
     elseif (USE_WAYLAND)
+        target_compile_definitions(EOS PRIVATE GLFW_EXPOSE_NATIVE_WAYLAND)
         set(GLFW_BUILD_WAYLAND ON)
     elseif (USE_X11)
+        target_compile_definitions(EOS PRIVATE GLFW_EXPOSE_NATIVE_X11)
         set(GLFW_BUILD_X11 ON)
     else ()
         message(FATAL_ERROR "Could not detect OS for GLFW")

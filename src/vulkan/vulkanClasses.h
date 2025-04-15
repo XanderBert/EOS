@@ -55,8 +55,6 @@ public:
     bool IsOwningImage                      = true;
     uint32_t Levels                         = 1;
     uint32_t Layers                         = 1;
-    mutable VkImageLayout ImageLayout       = VK_IMAGE_LAYOUT_UNDEFINED;
-
 
     // precached image views - owned by this VulkanImage
     VkImageView ImageView                                   = VK_NULL_HANDLE;       // default view with all mip-levels
@@ -71,7 +69,7 @@ struct VulkanSwapChainCreationDescription final
     uint32_t height{};
 };
 
-struct VulkanSwapChainSupportDetails
+struct VulkanSwapChainSupportDetails final
 {
     explicit VulkanSwapChainSupportDetails(const VulkanContext& vulkanContext);
 
@@ -136,42 +134,84 @@ private:
 
     VulkanContext* VkContext = nullptr;
     VkQueue GraphicsQueue{};
+
+    friend class VulkanContext;
 };
 
-class VulkanCommands final
+struct CommandBufferData
+{
+    VkCommandBuffer VulkanCommandBuffer             = VK_NULL_HANDLE;
+    VkCommandBuffer VulkanCommandBufferAllocated    = VK_NULL_HANDLE;
+    VkFence Fence                                   = VK_NULL_HANDLE;
+    VkSemaphore Semaphore                           = VK_NULL_HANDLE;
+    EOS::SubmitHandle Handle                        = {};
+    bool isEncoding                                 = false;
+};
+
+//TODO: Command Recording should be done on multiple threads
+// Each thread having its own pool
+class CommandPool final
 {
     static constexpr uint32_t MaxCommandBuffers = 64;
 public:
+    explicit CommandPool(const VkDevice& device, uint32_t queueIndex);
+    ~CommandPool() = default;
+    DELETE_COPY_MOVE(CommandPool);
+
     void WaitSemaphore(const VkSemaphore& semaphore);
+    void Signal(const VkSemaphore& semaphore,const uint64_t& signalValue);
+
+    VkSemaphore AcquireLastSubmitSemaphore();
+
+    EOS::SubmitHandle Submit(CommandBufferData& data);
 
 private:
+    // returns the current command buffer (creates one if it does not exist)
+    const CommandBufferData& AcquireCommandBuffer();
+
+    //This will go over all command buffers and try to restore them to their initial state when they are not in use.
+    void TryResetCommandBuffers();
+
+private:
+    std::array<CommandBufferData, MaxCommandBuffers> Buffers;
+    uint32_t NumberOfAvailableCommandBuffers{};
+
+    uint32_t SubmitCounter = 1;
+    EOS::SubmitHandle NextSubmitHandle{};
+    EOS::SubmitHandle LastSubmitHandle{};
+
+    std::vector<VkSemaphoreSubmitInfo> WaitSemaphores{};
+    std::vector<VkSemaphoreSubmitInfo> SignalSemaphores{};
+
     VkSemaphoreSubmitInfo WaitOnSemaphore = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .stageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+    VkSemaphoreSubmitInfo LastSubmitSemaphore = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,.stageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+    VkSemaphoreSubmitInfo SignalSemaphore = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,.stageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+    VkCommandPool VulkanCommandPool = VK_NULL_HANDLE;
+    VkDevice Device = VK_NULL_HANDLE;
+    VkQueue Queue = VK_NULL_HANDLE;
+    friend class CommandBuffer;
 };
 
 class CommandBuffer final : public EOS::ICommandBuffer
 {
 public:
     CommandBuffer() = default;
-    explicit CommandBuffer(VulkanContext* vulkanContext)
-    : VkContext(vulkanContext){};
+    explicit CommandBuffer(VulkanContext* vulkanContext);;
 
     ~CommandBuffer() override = default;
     DELETE_COPY(CommandBuffer)
 
     CommandBuffer (CommandBuffer&&) = delete;
-    CommandBuffer& operator=(CommandBuffer&& other) noexcept
-    {
-        if (this != &other)
-        {
-            VkContext = std::exchange(other.VkContext, nullptr);
-        }
-        return *this;
-    }
+    CommandBuffer& operator=(CommandBuffer&& other) noexcept;
 
-    bool IsValid() const { return VkContext != nullptr;}
+    explicit operator bool() const;
+
+    EOS::SubmitHandle LastSubmitHandle{};
+    CommandBufferData CommandBufferImpl{};
 
 private:
     VulkanContext* VkContext = nullptr;
+    VkCommandBuffer VulkanCommandBuffer = VK_NULL_HANDLE;
 };
 
 class VulkanContext final : public EOS::IContext
@@ -181,12 +221,16 @@ public:
     ~VulkanContext() override = default;
     DELETE_COPY_MOVE(VulkanContext)
 
-    EOS::ICommandBuffer& AcquireCommandBuffer() override;
+    [[nodiscard]] EOS::ICommandBuffer& AcquireCommandBuffer() override;
+    [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
+    [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
+    [[nodiscard]] const CommandBuffer* GetCurrentCommandBuffer() const;
 
-    std::unique_ptr<VulkanCommands> Commands = nullptr;
+
+    std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
     EOS::Pool<EOS::Texture, VulkanImage> TexturePool{};
 private:
-
+    [[nodiscard]] bool HasSwapChain() const noexcept;
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);

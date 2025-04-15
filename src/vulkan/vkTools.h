@@ -4,6 +4,7 @@
 #include <volk.h>
 #include <vk_mem_alloc.h>
 
+#include "enums.h"
 #include "logger.h"
 
 #define VK_ASSERT(func){ const VkResult result = func;      \
@@ -11,6 +12,7 @@
 }
 
 #pragma region ForwardDeclare
+
 struct DeviceQueues;
 namespace EOS
 {
@@ -112,5 +114,8 @@ namespace VkSynchronization
 {
     [[nodiscard]] VkSemaphore CreateSemaphore(const VkDevice& device, const char* debugName);
     [[nodiscard]] VkSemaphore CreateSemaphoreTimeline(const VkDevice& device, uint64_t initialValue, const char* debugName);
-
+    [[nodiscard]] VkFence CreateFence(const VkDevice& device, const char* debugName);
+    VkPipelineStageFlags2 ConvertToVkPipelineStage2(const EOS::ResourceState& state);
+    VkAccessFlags2 ConvertToVkAccessFlags2(const EOS::ResourceState& state);
+    VkImageLayout ConvertToVkImageLayout(const EOS::ResourceState& state);
 }

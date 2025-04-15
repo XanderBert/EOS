@@ -729,6 +729,8 @@ namespace VkContext
         };
         VK_ASSERT(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
         volkLoadDevice(device);
+
+        VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_DEVICE, reinterpret_cast<uint64_t>(device), "Device: VulkanContext::Device"));
     }
 };
 
@@ -802,5 +804,223 @@ namespace VkSynchronization
         VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_SEMAPHORE, reinterpret_cast<uint64_t>(semaphore), debugName));
 
         return semaphore;
+    }
+
+    VkFence CreateFence(const VkDevice &device, const char *debugName)
+    {
+        constexpr VkFenceCreateInfo createInfo =
+        {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = 0,
+        };
+
+        VkFence fence = VK_NULL_HANDLE;
+        VK_ASSERT(vkCreateFence(device, &createInfo, nullptr, &fence));
+        VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_FENCE, reinterpret_cast<uint64_t>(fence), debugName));
+        return fence;
+    }
+
+    VkPipelineStageFlags2 ConvertToVkPipelineStage2(const EOS::ResourceState &state)
+    {
+        VkPipelineStageFlags2 flags = 0;
+
+        // Raytracing
+        if (state & (EOS::ResourceState::AccelerationStructureRead))
+        {
+            flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+        }
+
+        if (state & (EOS::ResourceState::AccelerationStructureWrite))
+        {
+            flags |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+        }
+
+        // Graphics
+        if (state & EOS::ResourceState::IndexBuffer)
+        {
+            flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+        }
+
+        if (state & EOS::ResourceState::VertexAndConstantBuffer)
+        {
+            flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+            flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+        }
+
+        if (state & EOS::ResourceState::PixelShaderResource)
+        {
+            flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        }
+
+        if (state & EOS::ResourceState::NonPixelShaderResource)
+        {
+            flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+            flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+
+            //TODO: if (IsGeometryShaderSupported)
+            {
+                //flags |= VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT;
+            }
+
+            //TODO: if (IsTesselationSupported)
+            {
+                //flags |= VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT;
+                //flags |= VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT;
+            }
+
+            //TODO: if (IsRayTracingSupported)
+            {
+                //flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+            }
+        }
+
+        if (state & EOS::ResourceState::UnorderedAccess)
+        {
+            flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        }
+        if (state & EOS::ResourceState::UnorderedAccessPixel)
+        {
+            flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        }
+        if (state & EOS::ResourceState::RenderTarget)
+        {
+            flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        }
+        if (state & (EOS::ResourceState::DepthRead | EOS::ResourceState::DepthWrite))
+        {
+            flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        }
+
+        //TODO: Compute
+        {
+            //flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        }
+
+        //TODO: Transfer
+        {
+            return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        }
+
+        // Compatible with both compute and graphics queues
+        if (state & EOS::ResourceState::IndirectArgument)
+        {
+            flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+        }
+
+        if (state & (EOS::ResourceState::CopyDest | EOS::ResourceState::CopySource))
+        {
+            flags |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        }
+
+        if (flags == 0)
+        {
+            flags = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        }
+
+        return flags;
+    }
+
+    VkAccessFlags2 ConvertToVkAccessFlags2(const EOS::ResourceState &state)
+    {
+        VkAccessFlags flags = 0;
+
+        if (state & EOS::ResourceState::CopySource)
+        {
+            flags |= VK_ACCESS_2_TRANSFER_READ_BIT;
+        }
+
+        if (state & EOS::ResourceState::CopyDest)
+        {
+            flags |= VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        }
+
+        if (state & EOS::ResourceState::VertexAndConstantBuffer)
+        {
+            flags |= VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+        }
+
+        if (state & EOS::ResourceState::IndexBuffer)
+        {
+            flags |= VK_ACCESS_2_INDEX_READ_BIT;
+        }
+
+        if (state & (EOS::ResourceState::UnorderedAccess | EOS::ResourceState::UnorderedAccessPixel))
+        {
+            flags |= VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+        }
+
+        if (state & EOS::ResourceState::IndirectArgument)
+        {
+            flags |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+        }
+
+        if (state & EOS::ResourceState::RenderTarget)
+        {
+            flags |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        }
+
+        if (state & EOS::ResourceState::DepthWrite)
+        {
+            flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        }
+
+        if (state & EOS::ResourceState::DepthRead)
+        {
+            flags |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        }
+
+        if (state & EOS::ResourceState::ShaderResource)
+        {
+            flags |= VK_ACCESS_2_SHADER_READ_BIT;
+        }
+
+        if (state & EOS::ResourceState::Present)
+        {
+            flags |= VK_ACCESS_2_MEMORY_READ_BIT;
+        }
+
+        if (state & EOS::ResourceState::AccelerationStructureRead)
+        {
+            flags |= VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        }
+
+        if (state & EOS::ResourceState::AccelerationStructureWrite)
+        {
+            flags |= VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        }
+
+        return flags;
+    }
+
+    VkImageLayout ConvertToVkImageLayout(const EOS::ResourceState &state)
+    {
+        if (state & EOS::ResourceState::CopySource)
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+        if (state & EOS::ResourceState::CopyDest)
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+        if (state & EOS::ResourceState::RenderTarget)
+            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        if (state & EOS::ResourceState::DepthWrite)
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        if (state & EOS::DepthRead)
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        if (state & (EOS::ResourceState::UnorderedAccess | EOS::UnorderedAccessPixel))
+            return VK_IMAGE_LAYOUT_GENERAL;
+
+        if (state & EOS::ResourceState::ShaderResource)
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        if (state & EOS::ResourceState::Present)
+            return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        if (state == EOS::ResourceState::Common)
+            return VK_IMAGE_LAYOUT_GENERAL;
+
+        return VK_IMAGE_LAYOUT_UNDEFINED;
     }
 }

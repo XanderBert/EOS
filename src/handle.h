@@ -71,7 +71,10 @@ namespace EOS
 
         bool operator==(const Handle<ObjectType>& other) const;
         bool operator!=(const Handle<ObjectType>& other) const;
-        explicit operator bool() const;
+        explicit operator bool() const
+        {
+            return Generation != 0;
+        }
 
     private:
         Handle(uint32_t index, uint32_t gen) : Idx(index), Generation(gen){};
@@ -128,4 +131,31 @@ namespace EOS
         IContext* context{nullptr};
         HandleType handle{};
     };
+
+    struct SubmitHandle final
+    {
+        SubmitHandle() = default;
+        ~SubmitHandle() = default;
+        explicit SubmitHandle(const uint64_t handle)
+        : BufferIndex(static_cast<uint32_t>(handle & 0xffffffff))
+        , ID(static_cast<uint32_t>(handle >> 32))
+        {
+            CHECK(ID, "The Handle ID is not valid");
+        }
+
+        [[nodiscard]] bool Empty() const
+        {
+            return ID == 0;
+        }
+
+        [[nodiscard]] uint64_t Handle() const
+        {
+            return (static_cast<uint64_t>(ID) << 32) + BufferIndex;
+        }
+
+        uint32_t BufferIndex = 0;
+        uint32_t ID = 0;
+    };
+    static_assert(sizeof(SubmitHandle) == sizeof(uint64_t));
+
 }

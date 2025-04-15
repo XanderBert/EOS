@@ -20,6 +20,9 @@ int main()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+        EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
+        context->Submit(cmdBuffer, context->GetSwapChainTexture());
     }
 
     EOS::Window::DestroyWindow(window);
