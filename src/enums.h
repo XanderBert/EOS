@@ -32,8 +32,9 @@ namespace EOS
         Undefined = 0,
 
         // Input Assembly (Vertex/Index)
-        VertexBuffer          = 0x00000001,
-        IndexBuffer           = 0x00000002,
+        VertexAndConstantBuffer = 0x00000001,
+        VertexBuffer            = 0x00000002,
+        IndexBuffer             = 0x00000003,
 
         // Render Targets
         RenderTarget          = 0x00000004,
