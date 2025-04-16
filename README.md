@@ -1,9 +1,9 @@
 # EOS
 Eos the goddess of dawn, aka the first light of the day. a wordplay on lighting.
 
-> **Warning**
->
-> This project is still in its early stages
+> [!WARNING] 
+> This project is still in its early stages [!WARNING]
+
 
 Eos aims to be:
 
