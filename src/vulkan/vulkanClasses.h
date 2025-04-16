@@ -120,6 +120,7 @@ private:
     static constexpr uint32_t MAX_IMAGES{16};
 
     void GetAndWaitOnNextImage();
+    [[nodiscard]] VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace);
 
     VkSurfaceFormatKHR SurfaceFormat = {.format = VK_FORMAT_UNDEFINED};
     VkSwapchainKHR SwapChain{ VK_NULL_HANDLE };
@@ -211,7 +212,6 @@ public:
 
 private:
     VulkanContext* VkContext = nullptr;
-    VkCommandBuffer VulkanCommandBuffer = VK_NULL_HANDLE;
 };
 
 class VulkanContext final : public EOS::IContext

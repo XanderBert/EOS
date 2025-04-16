@@ -104,12 +104,6 @@ namespace VkContext
     void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues);
 }
 
-//TODO: Move them back to VulkanSwapChain but make them static and private
-namespace VkSwapChain
-{
-    [[nodiscard]] VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace);
-}
-
 namespace VkSynchronization
 {
     [[nodiscard]] VkSemaphore CreateSemaphore(const VkDevice& device, const char* debugName);

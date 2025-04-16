@@ -26,7 +26,7 @@ namespace EOS
         : Idx(other.Idx)
         , Generation(other.Gen())
         {
-            //TODO::remove include for this!
+            //TODO::remove this logging once i made sure it works and remove the include for the logger.
             EOS::Logger->warn("made copy of handle");
         }
 

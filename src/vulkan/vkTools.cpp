@@ -334,9 +334,6 @@ namespace VkContext
                     break;
             }
 
-            //TODO: Check Vulkan features
-
-
             // Memory check
             VkPhysicalDeviceMemoryProperties memProps;
             vkGetPhysicalDeviceMemoryProperties(vkDevice, &memProps);
@@ -359,7 +356,7 @@ namespace VkContext
             if (scoreEntry.suitable)
             {
                 // Prefer newer devices
-                scoreEntry.score += props.apiVersion;
+                scoreEntry.score += static_cast<int>(props.apiVersion);
 
                 // Prefer more memory
                 scoreEntry.score += static_cast<int>(deviceLocalMemory / (1024 * 1024)); // 1 point per MB
@@ -691,8 +688,6 @@ namespace VkContext
         addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
         addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
 
-
-        //TODO: Move Queue logic to separate function, be called from VulkanContext and pass needed info to this function. -> this doesn't really have anything to do with device creation
         deviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
         if (deviceQueues.Graphics.QueueFamilyIndex == DeviceQueueIndex::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
 
@@ -733,38 +728,6 @@ namespace VkContext
         VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_DEVICE, reinterpret_cast<uint64_t>(device), "Device: VulkanContext::Device"));
     }
 };
-
-namespace VkSwapChain
-{
-    VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace)
-    {
-        //TODO: Look into VkSurfaceFormat2KHR -> this enables Compression of the swapChain image
-        //https://docs.vulkan.org/samples/latest/samples/performance/image_compression_control/README.html
-
-        //Non Linear is the default
-        VkSurfaceFormatKHR preferred{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-        if (desiredColorSpace == EOS::ColorSpace::SRGB_Linear)
-        {
-            // VK_COLOR_SPACE_BT709_LINEAR_EXT is the closest space to linear
-            preferred  = VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_BT709_LINEAR_EXT};
-        }
-
-        //Check if we have a combination with our desired format & color space
-        for (const VkSurfaceFormatKHR& fmt : availableFormats)
-        {
-            if (fmt.format == preferred.format && fmt.colorSpace == preferred.colorSpace) { return fmt; }
-        }
-
-        // if we can't find a matching format and color space, fallback on matching only format
-        for (const VkSurfaceFormatKHR& fmt : availableFormats)
-        {
-            if (fmt.format == preferred.format) { return fmt; }
-        }
-
-        //If we still haven't found a format we just pick the first available option
-        return availableFormats[0];
-    }
-}
 
 namespace VkSynchronization
 {
@@ -844,8 +807,7 @@ namespace VkSynchronization
         if (state & EOS::ResourceState::VertexAndConstantBuffer)
         {
             flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-            //TODO: Test this out if the latter flag is needed
-            //flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+            //flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT; //TODO: Test this out if the latter flag is needed
         }
 
         if (state & EOS::ResourceState::PixelShaderResource)

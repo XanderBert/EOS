@@ -76,7 +76,7 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
     };
 
     // Issue the barrier command
-    vkCmdPipelineBarrier2KHR(vkContext->GetCurrentCommandBuffer()->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
+    vkCmdPipelineBarrier2(vkContext->GetCurrentCommandBuffer()->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
 }
 #pragma endregion
 
@@ -167,7 +167,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     const VulkanSwapChainSupportDetails supportDetails{*VkContext};
 
     //Get the Surface Format (format and color space)
-    SurfaceFormat = VkSwapChain::GetSwapChainFormat(supportDetails.formats, VkContext->Configuration.DesiredSwapChainColorSpace);
+    SurfaceFormat = GetSwapChainFormat(supportDetails.formats, VkContext->Configuration.DesiredSwapChainColorSpace);
     VkPresentModeKHR presentMode {VK_PRESENT_MODE_FIFO_KHR};
 
     // Try using Immediate mode presenting if we are running on a linux machine
@@ -357,6 +357,36 @@ void VulkanSwapChain::GetAndWaitOnNextImage()
     }
 }
 
+VkSurfaceFormatKHR VulkanSwapChain::GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace)
+{
+    //TODO: Look into VkSurfaceFormat2KHR -> this enables Compression of the swapChain image
+    //https://docs.vulkan.org/samples/latest/samples/performance/image_compression_control/README.html
+
+    //Non Linear is the default
+    VkSurfaceFormatKHR preferred{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    if (desiredColorSpace == EOS::ColorSpace::SRGB_Linear)
+    {
+        // VK_COLOR_SPACE_BT709_LINEAR_EXT is the closest space to linear
+        preferred  = VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_BT709_LINEAR_EXT};
+    }
+
+    //Check if we have a combination with our desired format & color space
+    for (const VkSurfaceFormatKHR& fmt : availableFormats)
+    {
+        if (fmt.format == preferred.format && fmt.colorSpace == preferred.colorSpace) { return fmt; }
+    }
+
+    // if we can't find a matching format and color space, fallback on matching only format
+    for (const VkSurfaceFormatKHR& fmt : availableFormats)
+    {
+        if (fmt.format == preferred.format) { return fmt; }
+    }
+
+    //If we still haven't found a format we just pick the first available option
+    return availableFormats[0];
+}
+
+
 VulkanSwapChainSupportDetails::VulkanSwapChainSupportDetails(const VulkanContext& vulkanContext)
 {
     //Get Surface Capabilities
@@ -415,9 +445,10 @@ CommandPool::CommandPool(const VkDevice &device, uint32_t queueIndex)
 
         VK_ASSERT(vkAllocateCommandBuffers(device, &allocateInfo, &buffer.VulkanCommandBufferAllocated));
 
-
         Buffers[i] = std::move(buffer);
         Buffers[i].Handle.BufferIndex = i;
+
+        ++NumberOfAvailableCommandBuffers;
     }
 
 }
@@ -577,10 +608,10 @@ void CommandPool::TryResetCommandBuffers()
     }
 }
 
-CommandBuffer::CommandBuffer(VulkanContext *vulkanContext): VkContext(vulkanContext)
+CommandBuffer::CommandBuffer(VulkanContext *vulkanContext)
+: CommandBufferImpl(vulkanContext->VulkanCommandPool->AcquireCommandBuffer())
+, VkContext(vulkanContext)
 {
-    //Get a available CommandBuffer from the pool
-    VkContext->VulkanCommandPool->AcquireCommandBuffer();
 }
 
 CommandBuffer & CommandBuffer::operator=(CommandBuffer &&other) noexcept
@@ -588,6 +619,8 @@ CommandBuffer & CommandBuffer::operator=(CommandBuffer &&other) noexcept
     if (this != &other)
     {
         VkContext = std::exchange(other.VkContext, nullptr);
+        CommandBufferImpl = std::exchange(other.CommandBufferImpl, {});
+        LastSubmitHandle = std::exchange(other.LastSubmitHandle, {});
     }
     return *this;
 }
