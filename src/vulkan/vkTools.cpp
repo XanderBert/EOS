@@ -468,19 +468,44 @@ namespace VkContext
         vkVersion version = vkVersion::VERSION_13;
         if (SDKMinor == 4 || driverMinor == 4){ version = vkVersion::VERSION_14; }
 
+        //Setup Device Queues
+        deviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
+        if (deviceQueues.Graphics.QueueFamilyIndex == DeviceQueueIndex::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
+
+        deviceQueues.Compute.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_COMPUTE_BIT);
+        if (deviceQueues.Compute.QueueFamilyIndex == DeviceQueueIndex::InvalidIndex) { EOS::Logger->error("VK_QUEUE_COMPUTE_BIT is not supported"); }
+
+        constexpr float queuePriority = 1.0f;
+        const VkDeviceQueueCreateInfo ciQueue[2] =
+        {
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .queueFamilyIndex = deviceQueues.Graphics.QueueFamilyIndex,
+                .queueCount = 1,
+                .pQueuePriorities = &queuePriority,
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .queueFamilyIndex = deviceQueues.Compute.QueueFamilyIndex,
+                .queueCount = 1,
+                .pQueuePriorities = &queuePriority,
+            },
+        };
+        const uint32_t numQueues = ciQueue[0].queueFamilyIndex == ciQueue[1].queueFamilyIndex ? 1 : 2;
+
 
 
         //Get Features
         VkPhysicalDeviceVulkan14Features vkFeatures14       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, .pNext =  nullptr};
-        VkPhysicalDeviceVulkan13Features vkFeatures13       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = nullptr};
+        VkPhysicalDeviceVulkan13Features vkFeatures13       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .pNext = &vkFeatures14};
         VkPhysicalDeviceVulkan12Features vkFeatures12       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vkFeatures13};
         VkPhysicalDeviceVulkan11Features vkFeatures11       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &vkFeatures12};
         VkPhysicalDeviceFeatures2 startOfDeviceFeaturespNextChain = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vkFeatures11};
-        if (version == vkVersion::VERSION_14) { vkFeatures13.pNext = &vkFeatures14; }
+
         vkGetPhysicalDeviceFeatures2(physicalDevice, &startOfDeviceFeaturespNextChain);
 
         //Setup the desired features then we check if our device supports these desired features.
-        VkPhysicalDeviceFeatures deviceFeatures10 =
+        VkPhysicalDeviceFeatures deviceFeatures10
         {
             .geometryShader                 = startOfDeviceFeaturespNextChain.features.geometryShader,
             .tessellationShader             = startOfDeviceFeaturespNextChain.features.tessellationShader,
@@ -497,7 +522,7 @@ namespace VkContext
             .shaderInt64                    = startOfDeviceFeaturespNextChain.features.shaderInt64,
         };
 
-        VkPhysicalDeviceVulkan11Features deviceFeatures11 =
+        VkPhysicalDeviceVulkan11Features deviceFeatures11
         {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
             .pNext = nullptr,           //Additional DeviceExtensionFeatures can be added here
@@ -541,49 +566,6 @@ namespace VkContext
             .maintenance4         = VK_TRUE,
         };
 
-
-
-
-        void* createInfoNext = nullptr;
-        if (version == vkVersion::VERSION_14)
-        {
-            VkPhysicalDeviceVulkan14Features deviceFeatures14 =
-            {
-                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
-                .pNext = &deviceFeatures13,
-                .globalPriorityQuery                    = vkFeatures14.globalPriorityQuery,
-                .shaderSubgroupRotate                   = vkFeatures14.shaderSubgroupRotate,
-                .shaderSubgroupRotateClustered          = vkFeatures14.shaderSubgroupRotateClustered,
-                .shaderFloatControls2                   = vkFeatures14.shaderFloatControls2,
-                .shaderExpectAssume                     = vkFeatures14.shaderExpectAssume,
-                .rectangularLines                       = vkFeatures14.rectangularLines,
-                .bresenhamLines                         = vkFeatures14.bresenhamLines,
-                .smoothLines                            = vkFeatures14.smoothLines,
-                .stippledRectangularLines               = vkFeatures14.stippledRectangularLines,
-                .stippledBresenhamLines                 = vkFeatures14.stippledBresenhamLines,
-                .stippledSmoothLines                    = vkFeatures14.stippledSmoothLines,
-                .vertexAttributeInstanceRateDivisor     = vkFeatures14.vertexAttributeInstanceRateDivisor,
-                .vertexAttributeInstanceRateZeroDivisor = vkFeatures14.vertexAttributeInstanceRateZeroDivisor,
-                .indexTypeUint8                         = vkFeatures14.indexTypeUint8,
-                .dynamicRenderingLocalRead              = VK_TRUE,   //Makes dynamic render passes behave like subpasses, this can increase performance, Especially on Mobile devices that use tile based rendering.
-                .maintenance5                           = VK_TRUE,   // vkCmdBindIndexBuffer2 looks interesting for clustered rendering
-                .maintenance6                           = vkFeatures14.maintenance6,
-                .pipelineProtectedAccess                = vkFeatures14.pipelineProtectedAccess,
-                .pipelineRobustness                     = vkFeatures14.pipelineRobustness,
-                .hostImageCopy                          = vkFeatures14.hostImageCopy,
-                .pushDescriptor                         = vkFeatures14.pushDescriptor,
-            };
-
-            CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13, deviceFeatures14, vkFeatures14);
-            createInfoNext = &vkFeatures14;
-        }
-        else
-        {
-            CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13);
-            createInfoNext = &vkFeatures13;
-        }
-
-
         VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures =
         {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
@@ -610,13 +592,54 @@ namespace VkContext
             .rayQuery = VK_TRUE,
         };
 
-        VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
+        //TODO:: if not 1.4
+        //VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
+        //{
+        //    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
+        //   .indexTypeUint8 = VK_TRUE,
+        //};
+
+
+        void* createInfoNext = nullptr;
+        VkPhysicalDeviceVulkan14Features deviceFeatures14{}; //TODO: Check if VkPhysicalDeviceVulkan14Features will work in 1.3
+        if (version == vkVersion::VERSION_14)
         {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
-            .indexTypeUint8 = VK_TRUE,
-        };
+            deviceFeatures14 =
+            {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+                .pNext = &deviceFeatures13,
+                .globalPriorityQuery                    = vkFeatures14.globalPriorityQuery,
+                .shaderSubgroupRotate                   = vkFeatures14.shaderSubgroupRotate,
+                .shaderSubgroupRotateClustered          = vkFeatures14.shaderSubgroupRotateClustered,
+                .shaderFloatControls2                   = vkFeatures14.shaderFloatControls2,
+                .shaderExpectAssume                     = vkFeatures14.shaderExpectAssume,
+                .rectangularLines                       = vkFeatures14.rectangularLines,
+                .bresenhamLines                         = vkFeatures14.bresenhamLines,
+                .smoothLines                            = vkFeatures14.smoothLines,
+                .stippledRectangularLines               = vkFeatures14.stippledRectangularLines,
+                .stippledBresenhamLines                 = vkFeatures14.stippledBresenhamLines,
+                .stippledSmoothLines                    = vkFeatures14.stippledSmoothLines,
+                .vertexAttributeInstanceRateDivisor     = vkFeatures14.vertexAttributeInstanceRateDivisor,
+                .vertexAttributeInstanceRateZeroDivisor = vkFeatures14.vertexAttributeInstanceRateZeroDivisor,
+                .indexTypeUint8                         = vkFeatures14.indexTypeUint8,
+                .dynamicRenderingLocalRead              = vkFeatures14.dynamicRenderingLocalRead,   //Makes dynamic render passes behave like subpasses, this can increase performance, Especially on Mobile devices that use tile based rendering.
+                .maintenance5                           = vkFeatures14.maintenance5,                // vkCmdBindIndexBuffer2 looks interesting for clustered rendering
+                .maintenance6                           = vkFeatures14.maintenance6,
+                .pipelineProtectedAccess                = vkFeatures14.pipelineProtectedAccess,
+                .pipelineRobustness                     = vkFeatures14.pipelineRobustness,
+                .hostImageCopy                          = vkFeatures14.hostImageCopy,
+                .pushDescriptor                         = vkFeatures14.pushDescriptor,
+            };
+            CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13, deviceFeatures14, vkFeatures14);
 
-
+            deviceFeatures14.pNext = &deviceFeatures13;
+            createInfoNext = &deviceFeatures14;
+        }
+        else
+        {
+            CheckMissingDeviceFeatures(deviceFeatures10, startOfDeviceFeaturespNextChain, deviceFeatures11, vkFeatures11, deviceFeatures12, vkFeatures12, deviceFeatures13, vkFeatures13);
+            createInfoNext = &deviceFeatures13;
+        }
 
         std::vector<VkExtensionProperties> allDeviceExtensions;
         GetDeviceExtensions(physicalDevice, allDeviceExtensions);
@@ -624,9 +647,7 @@ namespace VkContext
         {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
             VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,
-            VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME,
         };
-
 
         auto addOptionalExtension = [&allDeviceExtensions, &deviceExtensionNames, &createInfoNext](const char* name, void* features = nullptr) mutable -> bool
         {
@@ -680,42 +701,19 @@ namespace VkContext
                 EOS::Logger->debug("Device Extension: {} -> Enabled", name1);
                 EOS::Logger->debug("Device Extension: {} -> Enabled", name2);
             }
-
             return true;
         };
 
         addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
         addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
         addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
-
-        deviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
-        if (deviceQueues.Graphics.QueueFamilyIndex == DeviceQueueIndex::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
-
-        deviceQueues.Compute.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_COMPUTE_BIT);
-        if (deviceQueues.Compute.QueueFamilyIndex == DeviceQueueIndex::InvalidIndex) { EOS::Logger->error("VK_QUEUE_COMPUTE_BIT is not supported"); }
-
-        constexpr float queuePriority = 1.0f;
-        const VkDeviceQueueCreateInfo ciQueue[2] =
-        {
-            {
-                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                .queueFamilyIndex = deviceQueues.Graphics.QueueFamilyIndex,
-                .queueCount = 1,
-                .pQueuePriorities = &queuePriority,
-                },
-        {
-                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                .queueFamilyIndex = deviceQueues.Compute.QueueFamilyIndex,
-                .queueCount = 1,
-                .pQueuePriorities = &queuePriority,
-            },
-        };
-        const uint32_t numQueues = ciQueue[0].queueFamilyIndex == ciQueue[1].queueFamilyIndex ? 1 : 2;
+        //addOptionalExtension(VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME, &indexTypeUint8Features); //TODO: If not 1.4 -> Also then pass this in device creation pNext
 
         const VkDeviceCreateInfo deviceCreateInfo =
         {
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pNext = &indexTypeUint8Features,
+            //.pNext = &rayQueryFeatures, TODO: Fix so that my optional extensions are enabled -> Check the pNextChain of RayQueryFeatures
+            .pNext = createInfoNext,
             .queueCreateInfoCount = numQueues,
             .pQueueCreateInfos = ciQueue,
             .enabledExtensionCount = static_cast<uint32_t>(deviceExtensionNames.size()),
