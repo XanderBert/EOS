@@ -56,7 +56,7 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
             .oldLayout          = VkSynchronization::ConvertToVkImageLayout(CurrentState),
             .newLayout          = VkSynchronization::ConvertToVkImageLayout(NextState),
             .image              = currentImage.Image,
-            .subresourceRange   = {aspectMask, 1, currentImage.Levels, 1, currentImage.Layers}
+            .subresourceRange   = {aspectMask, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}
         };
 
         vkImageBarriers.emplace_back(vkBarrier);
@@ -75,6 +75,7 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
         .pImageMemoryBarriers = vkImageBarriers.data()
     };
 
+    //TODO: The end user should select the cmdBuffer -> Multithreaded environment
     // Issue the barrier command
     vkCmdPipelineBarrier2(vkContext->GetCurrentCommandBuffer()->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
 }
@@ -163,6 +164,10 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 : VkContext(vulkanSwapChainDescription.vulkanContext)
 , GraphicsQueue(vulkanSwapChainDescription.vulkanContext->VulkanDeviceQueues.Graphics.Queue)
 {
+    CHECK(VkContext, "VulkanContext is not valid.");
+    CHECK(GraphicsQueue, "GraphicsQueue is not valid.");
+
+
     //Get details of what we support
     const VulkanSwapChainSupportDetails supportDetails{*VkContext};
 
@@ -518,7 +523,7 @@ EOS::SubmitHandle CommandPool::Submit(CommandBufferData& data)
         .pSignalSemaphoreInfos = SignalSemaphores.data(),
     };
 
-    CHECK(vkQueueSubmit2(Queue, 1, &submitInfo, data.Fence), "The Queue failed to submit");
+    VK_ASSERT(vkQueueSubmit2(Queue, 1, &submitInfo, data.Fence));
 
     LastSubmitSemaphore.semaphore = data.Semaphore;
     LastSubmitHandle = data.Handle;
@@ -648,6 +653,12 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
 
 
+    //TODO: I would like to move this somewhere else. -> on Constructor of VulkanDeviceQueues
+    //Fill in our Device Queue's
+    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Compute.QueueFamilyIndex, 0, &VulkanDeviceQueues.Compute.Queue);
+    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex, 0, &VulkanDeviceQueues.Graphics.Queue);
+
+
     //Create SwapChain
     //TODO: will it need a description struct?
     VulkanSwapChainCreationDescription desc
@@ -659,10 +670,6 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     SwapChain = std::make_unique<VulkanSwapChain>(desc);
 
-    //TODO: I would like to move this somewhere else. -> on Constructor of VulkanDeviceQueues
-    //Fill in our Device Queue's
-    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Compute.QueueFamilyIndex, 0, &VulkanDeviceQueues.Compute.Queue);
-    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex, 0, &VulkanDeviceQueues.Graphics.Queue);
 
     //Create our Timeline Semaphore
     TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
@@ -696,9 +703,6 @@ EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS:
         const VulkanImage& swapChainTextures = *TexturePool.Get(present);
         CHECK(VulkanImage::IsSwapChainImage(swapChainTextures), "The passed present texture handle is not from a SwapChain");
 #endif
-
-        //TODO SwapChain transitioning should be handled by the end user to have more optimal memory barriers
-        cmdPipelineBarrier(this, {}, {{present, EOS::ResourceState::Common, EOS::ResourceState::Present}});
     }
 
     const bool shouldPresent = HasSwapChain() && present;
@@ -858,7 +862,7 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
     VkBool32 unique_handles{VK_TRUE};
     VkBool32 object_lifetime{VK_TRUE};
     VkBool32 stateless_param{VK_TRUE};
-    std::vector<const char*> debug_action{"VK_DBG_LAYER_ACTION_LOG_MSG"};  // "VK_DBG_LAYER_ACTION_DEBUG_OUTPUT", "VK_DBG_LAYER_ACTION_BREAK"
+    std::vector<const char*> debug_action{"VK_DBG_LAYER_ACTION_LOG_MSG", "VK_DBG_LAYER_ACTION_BREAK"};  // "VK_DBG_LAYER_ACTION_DEBUG_OUTPUT", //TODO: Make Creation Option to break on error
     std::vector<const char*> report_flags{"error"};
     std::vector<VkLayerSettingEXT> layerSettings
     {

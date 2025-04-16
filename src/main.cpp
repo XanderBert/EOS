@@ -22,7 +22,16 @@ int main()
         glfwPollEvents();
 
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
+
+
+        cmdPipelineBarrier(context.get(), {}, {{context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::Present}});
+
+
         context->Submit(cmdBuffer, context->GetSwapChainTexture());
+
+
+
+
     }
 
     EOS::Window::DestroyWindow(window);

@@ -468,6 +468,8 @@ namespace VkContext
         vkVersion version = vkVersion::VERSION_13;
         if (SDKMinor == 4 || driverMinor == 4){ version = vkVersion::VERSION_14; }
 
+
+
         //Setup Device Queues
         deviceQueues.Graphics.QueueFamilyIndex = FindQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
         if (deviceQueues.Graphics.QueueFamilyIndex == DeviceQueueIndex::InvalidIndex) { EOS::Logger->error("VK_QUEUE_GRAPHICS_BIT is not supported"); }
@@ -492,8 +494,6 @@ namespace VkContext
             },
         };
         const uint32_t numQueues = ciQueue[0].queueFamilyIndex == ciQueue[1].queueFamilyIndex ? 1 : 2;
-
-
 
         //Get Features
         VkPhysicalDeviceVulkan14Features vkFeatures14       = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, .pNext =  nullptr};
@@ -592,13 +592,12 @@ namespace VkContext
             .rayQuery = VK_TRUE,
         };
 
-        //TODO:: if not 1.4
-        //VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
-        //{
-        //    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
-        //   .indexTypeUint8 = VK_TRUE,
-        //};
-
+        //Will only be tried to enable on 1.3 Vulkan
+        VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT,
+           .indexTypeUint8 = VK_TRUE,
+        };
 
         void* createInfoNext = nullptr;
         VkPhysicalDeviceVulkan14Features deviceFeatures14{}; //TODO: Check if VkPhysicalDeviceVulkan14Features will work in 1.3
@@ -707,12 +706,16 @@ namespace VkContext
         addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
         addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
         addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
-        //addOptionalExtension(VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME, &indexTypeUint8Features); //TODO: If not 1.4 -> Also then pass this in device creation pNext
+
+        if (version == vkVersion::VERSION_13)
+        {
+            addOptionalExtension(VK_KHR_INDEX_TYPE_UINT8_EXTENSION_NAME, &indexTypeUint8Features);
+        }
+
 
         const VkDeviceCreateInfo deviceCreateInfo =
         {
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            //.pNext = &rayQueryFeatures, TODO: Fix so that my optional extensions are enabled -> Check the pNextChain of RayQueryFeatures
             .pNext = createInfoNext,
             .queueCreateInfoCount = numQueues,
             .pQueueCreateInfos = ciQueue,
@@ -720,9 +723,9 @@ namespace VkContext
             .ppEnabledExtensionNames = deviceExtensionNames.data(),
             .pEnabledFeatures = &deviceFeatures10,
         };
+
         VK_ASSERT(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
         volkLoadDevice(device);
-
         VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_DEVICE, reinterpret_cast<uint64_t>(device), "Device: VulkanContext::Device"));
     }
 };

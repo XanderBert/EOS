@@ -115,5 +115,5 @@ namespace EOS
 * @brief
 * @return
 */
-void cmdPipelineBarrier(const EOS::IContext& renderContext, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers);
+void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers);
 #pragma endregion
