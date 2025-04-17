@@ -33,11 +33,10 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
         vkMemoryBarriers.emplace_back(vkBarrier);
     }
     VulkanTexturePool&  texturePool = cmdBuffer->VkContext->TexturePool;
-    VulkanImage currentImage{};
 
     for (const auto&[Texture, CurrentState, NextState] : imageBarriers)
     {
-        currentImage = *texturePool.Get(Texture);
+        const VulkanImage& currentImage = *texturePool.Get(Texture);
 
         VkImageAspectFlags aspectMask = VkSynchronization::ConvertToVkImageAspectFlags(CurrentState);
         if (VulkanImage::IsDepthAttachment(currentImage))
@@ -275,7 +274,7 @@ VulkanSwapChain::~VulkanSwapChain()
     CHECK(SwapChain != VK_NULL_HANDLE, "The VkSwapChain is no longer valid");
     CHECK(VkContext->VulkanDevice != VK_NULL_HANDLE, "The VulkanDevice is no longer valid");
 
-    for (EOS::TextureHandle& handle : Textures)
+    for (EOS::TextureHandle handle : Textures)
     {
         //TODO: Implement
         //VkContext->Destroy(handle);
@@ -737,7 +736,7 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
     CHECK(HasSwapChain(), "You dont have a SwapChain");
     if (!HasSwapChain())
     {
-        return {};
+       EOS::Logger->error("No SwapChain Found");
     }
 
     EOS::TextureHandle tx = SwapChain->GetCurrentTexture();

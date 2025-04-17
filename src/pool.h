@@ -32,8 +32,6 @@ namespace EOS
         };
 
     public:
-        static_assert(std::is_nothrow_move_constructible_v<ObjectType_Impl>, "ObjectType_Impl must be noexcept movable");
-
         explicit Pool(uint32_t initialReserve = 10);
         ~Pool() = default;
         DELETE_COPY_MOVE(Pool)
@@ -49,8 +47,8 @@ namespace EOS
         void Destroy(Handle<ObjectType> handle);
 
         //Get the given implementation
-        [[nodiscard]] ObjectType_Impl* Get(const Handle<ObjectType>& handle);
-        [[nodiscard]] const ObjectType_Impl* Get(const Handle<ObjectType>& handle) const;
+        [[nodiscard]] ObjectType_Impl* Get(const Handle<ObjectType> handle);
+        [[nodiscard]] const ObjectType_Impl* Get(const Handle<ObjectType> handle) const;
 
         //Get a handle to the object at position index
         [[nodiscard]] Handle<ObjectType> GetHandle(uint32_t index) const;
@@ -199,7 +197,7 @@ namespace EOS
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
-    ObjectType_Impl* Pool<ObjectType, ObjectType_Impl>::Get(const Handle<ObjectType>& handle)
+    ObjectType_Impl* Pool<ObjectType, ObjectType_Impl>::Get(const Handle<ObjectType> handle)
     {
         if (handle.Empty()) { return nullptr; }
 
@@ -213,7 +211,7 @@ namespace EOS
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
-    const ObjectType_Impl* Pool<ObjectType, ObjectType_Impl>::Get(const Handle<ObjectType>& handle) const
+    const ObjectType_Impl* Pool<ObjectType, ObjectType_Impl>::Get(const Handle<ObjectType> handle) const
     {
         if (handle.Empty()) { return nullptr; }
 

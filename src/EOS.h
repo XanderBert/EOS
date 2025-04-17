@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "defines.h"
 #include "enums.h"
@@ -59,7 +60,7 @@ namespace EOS
 
     struct ImageBarrier
     {
-        const TextureHandle     Texture;
+        const TextureHandle    Texture;
         const ResourceState     CurrentState;
         const ResourceState     NextState;
     };

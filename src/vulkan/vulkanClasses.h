@@ -36,6 +36,10 @@ public:
 
     explicit VulkanImage(const ImageDescription& description);
     VulkanImage() = default;
+    DELETE_COPY(VulkanImage);
+
+    VulkanImage (VulkanImage&& other) noexcept = default;
+    VulkanImage& operator=(VulkanImage&& other) noexcept = default;
 
     [[nodiscard]] static inline bool IsSampledImage(const VulkanImage& image) { return (image.UsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) > 0; }
     [[nodiscard]] static inline bool IsStorageImage(const VulkanImage& image) { return (image.UsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) > 0; }
@@ -118,8 +122,8 @@ public:
     [[nodiscard]] VkImage GetCurrentImage() const;
     [[nodiscard]] VkImageView GetCurrentImageView() const;
     [[nodiscard]] uint32_t GetNumSwapChainImages() const;
-    [[nodiscard]] const VkSurfaceFormatKHR& GetFormat() const;  //Return by const-ref because VkSurfaceFormatKHR is not a handle
-    [[nodiscard]] EOS::TextureHandle GetCurrentTexture();       //Also Gets the Next Image when needed
+    [[nodiscard]] const VkSurfaceFormatKHR& GetFormat() const;
+    [[nodiscard]] EOS::TextureHandle GetCurrentTexture();
 
 private:
     static constexpr uint32_t MAX_IMAGES{16};

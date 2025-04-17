@@ -25,10 +25,7 @@ namespace EOS
         Handle(const Handle& other)
         : Idx(other.Idx)
         , Generation(other.Gen())
-        {
-            //TODO::remove this logging once i made sure it works and remove the include for the logger.
-            EOS::Logger->warn("made copy of handle");
-        }
+        {}
 
         Handle(Handle&& other) noexcept
         : Idx(std::exchange(other.Idx, 0))
