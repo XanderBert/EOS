@@ -21,7 +21,6 @@ int main()
     {
         glfwPollEvents();
 
-        
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
 
         cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::Present}});

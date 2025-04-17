@@ -125,7 +125,7 @@ private:
     static constexpr uint32_t MAX_IMAGES{16};
 
     void GetAndWaitOnNextImage();
-    [[nodiscard]] VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace);
+    [[nodiscard]] static VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace);
 
     VkSurfaceFormatKHR SurfaceFormat = {.format = VK_FORMAT_UNDEFINED};
     VkSwapchainKHR SwapChain{ VK_NULL_HANDLE };
@@ -146,6 +146,9 @@ private:
 
 struct CommandBufferData
 {
+    CommandBufferData() = default;
+    DELETE_COPY_MOVE(CommandBufferData);
+
     VkCommandBuffer VulkanCommandBuffer             = VK_NULL_HANDLE;
     VkCommandBuffer VulkanCommandBufferAllocated    = VK_NULL_HANDLE;
     VkFence Fence                                   = VK_NULL_HANDLE;
@@ -173,7 +176,7 @@ public:
 
 private:
     // returns the current command buffer (creates one if it does not exist)
-    const CommandBufferData& AcquireCommandBuffer();
+    CommandBufferData* AcquireCommandBuffer();
 
     //This will go over all command buffers and try to restore them to their initial state when they are not in use.
     void TryResetCommandBuffers();
@@ -213,7 +216,7 @@ public:
     explicit operator bool() const;
 
     EOS::SubmitHandle LastSubmitHandle{};
-    CommandBufferData CommandBufferImpl{};
+    CommandBufferData* CommandBufferImpl;
     VulkanContext* VkContext = nullptr;
 };
 
@@ -227,8 +230,6 @@ public:
     [[nodiscard]] EOS::ICommandBuffer& AcquireCommandBuffer() override;
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
-    [[nodiscard]] const CommandBuffer* GetCurrentCommandBuffer() const;
-
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
     VulkanTexturePool TexturePool{};
@@ -240,6 +241,8 @@ private:
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 
+    //TODO: This needs to become a map or vector for multithreaded recording.
+    CommandBuffer CurrentCommandBuffer;
 private:
     VkInstance VulkanInstance                       = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT VulkanDebugMessenger   = VK_NULL_HANDLE;
@@ -248,8 +251,6 @@ private:
     VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
     VkSemaphore TimelineSemaphore                   = VK_NULL_HANDLE;
     std::unique_ptr<VulkanSwapChain> SwapChain      = nullptr;
-
-    CommandBuffer CurrentCommandBuffer{};
 
     DeviceQueues VulkanDeviceQueues{};
     EOS::ContextConfiguration Configuration{}; //TODO: Should the liftime of this obj be the whole application?

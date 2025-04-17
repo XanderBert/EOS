@@ -1,4 +1,4 @@
-﻿#include "vulkanClasses.h"
+#include "vulkanClasses.h"
 
 #include <complex>
 #include <cstring>
@@ -75,7 +75,7 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
         .pImageMemoryBarriers = vkImageBarriers.data()
     };
 
-    vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
+    vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
 }
 #pragma endregion
 
@@ -271,6 +271,10 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
 VulkanSwapChain::~VulkanSwapChain()
 {
+    CHECK(VkContext, "VkContext is no longer valid");
+    CHECK(SwapChain != VK_NULL_HANDLE, "The VkSwapChain is no longer valid");
+    CHECK(VkContext->VulkanDevice != VK_NULL_HANDLE, "The VulkanDevice is no longer valid");
+
     for (EOS::TextureHandle& handle : Textures)
     {
         //TODO: Implement
@@ -278,7 +282,7 @@ VulkanSwapChain::~VulkanSwapChain()
     }
 
     vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
-    for (const VkSemaphore semaphore : AcquireSemaphores)
+    for (const VkSemaphore& semaphore : AcquireSemaphores)
     {
         vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
     }
@@ -351,7 +355,7 @@ void VulkanSwapChain::GetAndWaitOnNextImage()
         // when timeout is set to UINT64_MAX, we wait until the next image has been acquired
         VK_ASSERT(vkWaitSemaphores(VkContext->VulkanDevice, &waitInfo, UINT64_MAX));
 
-        const VkSemaphore acquireSemaphore = AcquireSemaphores[CurrentImageIndex];
+        VkSemaphore& acquireSemaphore = AcquireSemaphores[CurrentImageIndex];
         const VkResult result = vkAcquireNextImageKHR(VkContext->VulkanDevice, SwapChain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &CurrentImageIndex);
         CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "vkAcquireNextImageKHR Failed");
 
@@ -436,24 +440,17 @@ CommandPool::CommandPool(const VkDevice &device, uint32_t queueIndex)
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
-    //TODO:
-    //Buffers.fill();
+
+    //Allocate buffers for each buffer in our pool
     for (uint32_t i{}; i < MaxCommandBuffers; ++i)
     {
-        CommandBufferData buffer{};
-
-        buffer.Semaphore = VkSynchronization::CreateSemaphore(device, fmt::format("Semaphore of CommandBuffer: {}", i).c_str());
-        buffer.Fence = VkSynchronization::CreateFence(device, fmt::format("Fence of CommandBuffer: {}", i).c_str());
-
-
-        VK_ASSERT(vkAllocateCommandBuffers(device, &allocateInfo, &buffer.VulkanCommandBufferAllocated));
-
-        Buffers[i] = std::move(buffer);
+        VK_ASSERT(vkAllocateCommandBuffers(device, &allocateInfo, &Buffers[i].VulkanCommandBufferAllocated));
+        Buffers[i].Semaphore = VkSynchronization::CreateSemaphore(device, fmt::format("Semaphore of CommandBuffer: {}", i).c_str());
+        Buffers[i].Fence = VkSynchronization::CreateFence(device, fmt::format("Fence of CommandBuffer: {}", i).c_str());
         Buffers[i].Handle.BufferIndex = i;
 
         ++NumberOfAvailableCommandBuffers;
     }
-
 }
 
 void CommandPool::WaitSemaphore(const VkSemaphore& semaphore)
@@ -537,7 +534,7 @@ EOS::SubmitHandle CommandPool::Submit(CommandBufferData& data)
     return LastSubmitHandle;
 }
 
-const CommandBufferData& CommandPool::AcquireCommandBuffer()
+CommandBufferData* CommandPool::AcquireCommandBuffer()
 {
     //Try to free a command buffer of none are free
     if (!NumberOfAvailableCommandBuffers)
@@ -559,6 +556,7 @@ const CommandBufferData& CommandPool::AcquireCommandBuffer()
     {
         if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE)
         {
+            //TODO: This needs to be a copy, otherwise it will be moved out of the Buffers
             currentCommandBuffer = &buffer;
             break;
         }
@@ -583,7 +581,7 @@ const CommandBufferData& CommandPool::AcquireCommandBuffer()
 
     NextSubmitHandle = currentCommandBuffer->Handle;
 
-    return *currentCommandBuffer;
+    return currentCommandBuffer;
 }
 
 void CommandPool::TryResetCommandBuffers()
@@ -612,7 +610,7 @@ void CommandPool::TryResetCommandBuffers()
 }
 
 CommandBuffer::CommandBuffer(VulkanContext *vulkanContext)
-: CommandBufferImpl(vulkanContext->VulkanCommandPool->AcquireCommandBuffer())
+: CommandBufferImpl((vulkanContext->VulkanCommandPool->AcquireCommandBuffer()))
 , VkContext(vulkanContext)
 {
 }
@@ -716,7 +714,7 @@ EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS:
         VulkanCommandPool->Signal(TimelineSemaphore, signalValue);
     }
 
-    vkCmdBuffer->LastSubmitHandle = VulkanCommandPool->Submit(vkCmdBuffer->CommandBufferImpl);
+    vkCmdBuffer->LastSubmitHandle = VulkanCommandPool->Submit(*vkCmdBuffer->CommandBufferImpl);
 
     if (shouldPresent)
     {
@@ -749,10 +747,6 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
     return tx;
 }
 
-const CommandBuffer* VulkanContext::GetCurrentCommandBuffer() const
-{
-    return &CurrentCommandBuffer;
-}
 
 bool VulkanContext::HasSwapChain() const noexcept
 {
