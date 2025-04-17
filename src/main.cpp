@@ -20,10 +20,11 @@ int main()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+
+        
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
 
-        //TODO: End user should only pass the cmdBuffer they want to use and no context
-        cmdPipelineBarrier(context.get(), {}, {{context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::Present}});
+        cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::Present}});
 
         context->Submit(cmdBuffer, context->GetSwapChainTexture());
     }

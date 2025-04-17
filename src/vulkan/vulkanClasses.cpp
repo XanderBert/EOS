@@ -7,11 +7,10 @@
 #include "vulkan/vkTools.h"
 
 #pragma region GLOBAL_FUNCTIONS
-void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers)
+void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers)
 {
-    VulkanContext* vkContext = dynamic_cast<VulkanContext*>(renderContext);
-    CHECK(vkContext, "The Vulkan Context is not valid");
-
+    const CommandBuffer* cmdBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    CHECK(cmdBuffer, "The commandBuffer is not valid");
 
     std::vector<VkMemoryBarrier2KHR> vkMemoryBarriers;
     vkMemoryBarriers.reserve(globalBarriers.size());
@@ -33,11 +32,12 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
 
         vkMemoryBarriers.emplace_back(vkBarrier);
     }
-
+    VulkanTexturePool&  texturePool = cmdBuffer->VkContext->TexturePool;
+    VulkanImage currentImage{};
 
     for (const auto&[Texture, CurrentState, NextState] : imageBarriers)
     {
-        VulkanImage& currentImage = *vkContext->TexturePool.Get(Texture);
+        currentImage = *texturePool.Get(Texture);
 
         VkImageAspectFlags aspectMask = VkSynchronization::ConvertToVkImageAspectFlags(CurrentState);
         if (VulkanImage::IsDepthAttachment(currentImage))
@@ -75,9 +75,7 @@ void cmdPipelineBarrier(EOS::IContext* renderContext, const std::vector<EOS::Glo
         .pImageMemoryBarriers = vkImageBarriers.data()
     };
 
-    //TODO: The end user should select the cmdBuffer -> Multithreaded environment
-    // Issue the barrier command
-    vkCmdPipelineBarrier2(vkContext->GetCurrentCommandBuffer()->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
+    vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl.VulkanCommandBuffer, &dependencyInfo);
 }
 #pragma endregion
 
@@ -333,7 +331,7 @@ EOS::TextureHandle VulkanSwapChain::GetCurrentTexture()
 
     CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
 
-    //Returns a copy of the handle
+    //TODO: Returns a copy of the handle is this exactly what we want? this will happen at least every frame
     return Textures[CurrentImageIndex];
 }
 

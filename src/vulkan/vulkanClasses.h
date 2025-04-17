@@ -9,7 +9,11 @@
 #include "pool.h"
 
 //Forward Declares
+struct VulkanImage;
 class VulkanContext;
+
+using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
+
 static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 
 struct ImageDescription final
@@ -31,6 +35,7 @@ private:
 public:
 
     explicit VulkanImage(const ImageDescription& description);
+    VulkanImage() = default;
 
     [[nodiscard]] static inline bool IsSampledImage(const VulkanImage& image) { return (image.UsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) > 0; }
     [[nodiscard]] static inline bool IsStorageImage(const VulkanImage& image) { return (image.UsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) > 0; }
@@ -209,8 +214,6 @@ public:
 
     EOS::SubmitHandle LastSubmitHandle{};
     CommandBufferData CommandBufferImpl{};
-
-private:
     VulkanContext* VkContext = nullptr;
 };
 
@@ -228,7 +231,7 @@ public:
 
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
-    EOS::Pool<EOS::Texture, VulkanImage> TexturePool{};
+    VulkanTexturePool TexturePool{};
 private:
     [[nodiscard]] bool HasSwapChain() const noexcept;
     void CreateVulkanInstance(const char* applicationName);
