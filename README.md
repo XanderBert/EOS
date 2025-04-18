@@ -15,6 +15,7 @@ Eos aims to be:
 - [VOLK](https://github.com/zeux/volk)
 - [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [SPDLOG](https://github.com/gabime/spdlog)
+- [SLANG](https://github.com/shader-slang/slang)
 
 # Building
 This project is being build with CMake
