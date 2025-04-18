@@ -26,7 +26,7 @@ This project is built using CMake and Ninja.
 1.  **CMake:** Ensure CMake is installed and accessible from your command line/terminal. ([Download CMake](https://cmake.org/download/))
 2.  **Ninja:** Ensure Ninja is installed and accessible. ([Download Ninja](https://github.com/ninja-build/ninja/releases))
 3.  **C++ Compiler:**
-    * **Linux:** A modern C++ compiler like GCC or Clang. (e.g., `sudo apt update && sudo apt install build-essential g++` on Debian/Ubuntu).
+    * **Linux:** A C++ compiler like GCC or Clang. (e.g., `sudo apt update && sudo apt install build-essential g++` on Debian/Ubuntu).
     * **Windows:** Microsoft Visual C++ (MSVC), usually installed with Visual Studio. Make sure the "Desktop development with C++" workload is installed.
 4.  **Vulkan SDK:** Install the Vulkan SDK for your platform. ([Download Vulkan SDK](https://vulkan.lunarg.com/sdk/home))
 
@@ -52,6 +52,6 @@ This project is heavily inspired by LVK and The Forge
 
 # Rules
 - AvoidC-style Casts
-- Use [[nodiscard]] whenever you return a value
-- For each dependency a separate Fetch macro will be made in FetchMacros.cmake for ease of use and separation 
-- Whenever possible .reserve(n) must be called on std::vector's and other dynamic array like objects
+- Use `[[nodiscard]]` whenever you return a value
+- For each dependency a separate Fetch macro will be made in `FetchMacros.cmake` for ease of use and separation 
+- Whenever possible `.reserve(n)` must be called on std::vector's and other dynamic array like objects
