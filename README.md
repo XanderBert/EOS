@@ -17,7 +17,8 @@ Eos aims to be:
 - [SPDLOG](https://github.com/gabime/spdlog)
 - [SLANG](https://github.com/shader-slang/slang)
 
-*Note: These dependencies are fetched automatically by CMake during the configuration step using FetchContent (or similar macros defined in `cmake/FetchMacros.cmake`).*
+> [!NOTE] 
+> These dependencies are fetched automatically by CMake during the configuration step using FetchContent (or similar macros defined in `cmake/FetchMacros.cmake`).
 
 # Building
 This project is built using CMake and Ninja.
