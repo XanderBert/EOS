@@ -11,18 +11,23 @@ Eos aims to be:
 - only targets Windows and Linux.
 
 # Dependencies
+> [!NOTE] 
+> These dependencies are fetched automatically by CMake during the configuration step using FetchContent
+>
+
+ 
 - [GLFW](https://github.com/glfw/glfw)
 - [VOLK](https://github.com/zeux/volk)
 - [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [SPDLOG](https://github.com/gabime/spdlog)
 - [SLANG](https://github.com/shader-slang/slang)
 
-> [!NOTE] 
-> These dependencies are fetched automatically by CMake during the configuration step using FetchContent
+
 # Building
 This project is built using CMake and Ninja.
 
-**Prerequisites:**
+
+## **Prerequisites:**
 1.  **CMake:** Ensure CMake is installed and accessible from your command line/terminal. ([Download CMake](https://cmake.org/download/))
 2.  **Ninja:** Ensure Ninja is installed and accessible. ([Download Ninja](https://github.com/ninja-build/ninja/releases))
 3.  **C++ Compiler:**
@@ -30,7 +35,8 @@ This project is built using CMake and Ninja.
     * **Windows:** Microsoft Visual C++ (MSVC), usually installed with Visual Studio. Make sure the "Desktop development with C++" workload is installed.
 4.  **Vulkan SDK:** Install the Vulkan SDK for your platform. ([Download Vulkan SDK](https://vulkan.lunarg.com/sdk/home))
 
-**Build Steps:**
+
+## **Build Steps:**
 
 1.  **Clone the repository:**
     ```bash
@@ -42,8 +48,11 @@ This project is built using CMake and Ninja.
     * Linux: `build.sh` script in the root directory of the project.
     * Windows: `build.bat` script in the root directory of the project.
 
+
+
 # Future
 Once this projects ages enough it will be converted to a separate Rendering library, and main loop will be moved to a separate project.
+
 
 
 # Inspiration
