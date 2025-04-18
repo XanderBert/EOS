@@ -98,37 +98,6 @@ namespace EOS
         { t.IndexAsVoid() } -> std::convertible_to<void*>;
     };
 
-    template<typename HandleType>
-    class Holder
-    {
-    public:
-        static_assert(std::is_default_constructible_v<HandleType>, "HandleType must be default constructible");
-        static_assert(ValidHolder<HandleType>, "HandleType doesn't satisfy ValidHolder concept");
-
-        Holder() = default;
-        Holder(IContext* ctx, HandleType hdl) noexcept;
-        ~Holder() noexcept;
-
-        DELETE_COPY(Holder)
-        [[nodiscard]] Holder(Holder&& other) noexcept;
-        [[nodiscard]] Holder& operator=(Holder&& other) noexcept;
-
-        void Reset() noexcept;
-
-        [[nodiscard]] explicit operator HandleType() const noexcept;
-        [[nodiscard]] bool Empty() const noexcept;
-        [[nodiscard]] HandleType Release() noexcept;
-        [[nodiscard]] auto Gen() const noexcept;
-        [[nodiscard]] auto Index() const noexcept;
-        [[nodiscard]] auto IndexAsVoid() const noexcept;
-        [[nodiscard]] IContext* Context() const noexcept;
-        [[nodiscard]] const HandleType& Get() const noexcept;
-
-    private:
-        IContext* context{nullptr};
-        HandleType handle{};
-    };
-
     struct SubmitHandle final
     {
         SubmitHandle() = default;

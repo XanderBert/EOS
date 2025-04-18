@@ -103,6 +103,12 @@ namespace EOS
          * @return 
          */
         virtual TextureHandle GetSwapChainTexture() = 0;
+
+        /**
+        * @brief
+        * @return
+        */
+        virtual void Destroy(TextureHandle handle) = 0;
     
     protected:
         IContext() = default;

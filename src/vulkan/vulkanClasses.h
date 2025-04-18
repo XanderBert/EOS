@@ -1,5 +1,7 @@
 ﻿#pragma once
+#include <deque>
 #include <EOS.h>
+#include <future>
 #include <vector>
 
 #include <volk.h>
@@ -23,6 +25,8 @@ struct ImageDescription final
     VkExtent3D Extent{};
     EOS::ImageType ImageType{EOS::ImageType::Image_2D};
     VkFormat ImageFormat{};
+    uint32_t Levels = 1;
+    uint32_t Layers = 1;
     const char* DebugName{};
     VkDevice Device{};
 };
@@ -30,13 +34,13 @@ struct ImageDescription final
 //TODO: split up in hot and cold data for the pool
 struct VulkanImage final
 {
-private:
-    static constexpr uint32_t MaxMipLevels = 6;
 public:
 
     explicit VulkanImage(const ImageDescription& description);
     VulkanImage() = default;
     DELETE_COPY(VulkanImage);
+
+    static constexpr uint32_t MaxMipLevels = 6;
 
     VulkanImage (VulkanImage&& other) noexcept = default;
     VulkanImage& operator=(VulkanImage&& other) noexcept = default;
@@ -168,15 +172,19 @@ class CommandPool final
     static constexpr uint32_t MaxCommandBuffers = 64;
 public:
     explicit CommandPool(const VkDevice& device, uint32_t queueIndex);
-    ~CommandPool() = default;
+    ~CommandPool();
     DELETE_COPY_MOVE(CommandPool);
 
     void WaitSemaphore(const VkSemaphore& semaphore);
+    void WaitAll();
+    void Wait(const EOS::SubmitHandle handle);
     void Signal(const VkSemaphore& semaphore,const uint64_t& signalValue);
+    [[nodiscard]] bool IsReady(EOS::SubmitHandle handle, bool fastCheck = false) const;
 
     VkSemaphore AcquireLastSubmitSemaphore();
 
-    EOS::SubmitHandle Submit(CommandBufferData& data);
+    [[nodiscard]] EOS::SubmitHandle Submit(CommandBufferData& data);
+    [[nodiscard]] EOS::SubmitHandle GetNextSubmitHandle() const;
 
 private:
     // returns the current command buffer (creates one if it does not exist)
@@ -224,16 +232,30 @@ public:
     VulkanContext* VkContext = nullptr;
 };
 
+struct DeferredTask
+{
+    DeferredTask(std::packaged_task<void()>&& task, EOS::SubmitHandle handle) : Task(std::move(task)), Handle(handle) {}
+    DELETE_COPY_MOVE(DeferredTask);
+
+    std::packaged_task<void()> Task;
+    EOS::SubmitHandle Handle;
+};
+
 class VulkanContext final : public EOS::IContext
 {
 public:
     explicit VulkanContext(const EOS::ContextCreationDescription& contextDescription);
-    ~VulkanContext() override = default;
+    ~VulkanContext() override;
     DELETE_COPY_MOVE(VulkanContext)
 
     [[nodiscard]] EOS::ICommandBuffer& AcquireCommandBuffer() override;
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
+    void Destroy(EOS::TextureHandle handle) override;
+
+    void ProcessDeferredTasks() const;
+    void Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle = {}) const;
+
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
     VulkanTexturePool TexturePool{};
@@ -243,10 +265,9 @@ private:
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
+    void WaitOnDeferredTasks();
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 
-    //TODO: This needs to become a map or vector for multithreaded recording.
-    CommandBuffer CurrentCommandBuffer;
 private:
     VkInstance VulkanInstance                       = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT VulkanDebugMessenger   = VK_NULL_HANDLE;
@@ -255,11 +276,12 @@ private:
     VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
     VkSemaphore TimelineSemaphore                   = VK_NULL_HANDLE;
     std::unique_ptr<VulkanSwapChain> SwapChain      = nullptr;
+    mutable std::deque<DeferredTask> DeferredTasks;
 
+    CommandBuffer CurrentCommandBuffer;         //TODO: This needs to become a map or vector for multithreaded recording.
     DeviceQueues VulkanDeviceQueues{};
-    EOS::ContextConfiguration Configuration{}; //TODO: Should the liftime of this obj be the whole application?
+    EOS::ContextConfiguration Configuration{}; //TODO: Should the lifetime of this obj be the whole application?
 
     friend struct VulkanSwapChain;
     friend struct VulkanSwapChainSupportDetails;
 };
-

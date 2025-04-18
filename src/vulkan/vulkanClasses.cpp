@@ -9,7 +9,7 @@
 #pragma region GLOBAL_FUNCTIONS
 void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers)
 {
-    const CommandBuffer* cmdBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    const CommandBuffer* cmdBuffer = static_cast<const CommandBuffer*>(&commandBuffer);
     CHECK(cmdBuffer, "The commandBuffer is not valid");
 
     std::vector<VkMemoryBarrier2KHR> vkMemoryBarriers;
@@ -86,8 +86,9 @@ VulkanImage::VulkanImage(const ImageDescription &description)
 , Extent(description.Extent)
 , ImageType(description.ImageType)
 , ImageFormat(description.ImageFormat)
+, Levels(description.Levels)
+, Layers(description.Layers)
 {
-    //TODO: Set Levels and Layers
     VK_ASSERT(VkDebug::SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
     CreateImageView(ImageView, description.Device, Image, ImageType, ImageFormat, Levels, Layers, description.DebugName);
 }
@@ -261,7 +262,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
         //Create a image
         swapChainImageDescription.Image = swapChainImages[i];
-        swapChainImageDescription.DebugName = "SwapChain Image: " + i;
+        swapChainImageDescription.DebugName = fmt::format("SwapChain Image: {}", i).c_str();
         VulkanImage swapChainImage{swapChainImageDescription};
 
         Textures.emplace_back(vulkanSwapChainDescription.vulkanContext->TexturePool.Create(std::move(swapChainImage)));
@@ -276,15 +277,16 @@ VulkanSwapChain::~VulkanSwapChain()
 
     for (EOS::TextureHandle handle : Textures)
     {
-        //TODO: Implement
-        //VkContext->Destroy(handle);
+        VkContext->Destroy(handle);
     }
 
     vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
+
     for (const VkSemaphore& semaphore : AcquireSemaphores)
     {
         vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
     }
+
 }
 
 void VulkanSwapChain::Present(VkSemaphore waitSemaphore)
@@ -331,10 +333,7 @@ const VkSurfaceFormatKHR& VulkanSwapChain::GetFormat() const
 EOS::TextureHandle VulkanSwapChain::GetCurrentTexture()
 {
     GetAndWaitOnNextImage();
-
     CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
-
-    //TODO: Returns a copy of the handle is this exactly what we want? this will happen at least every frame
     return Textures[CurrentImageIndex];
 }
 
@@ -452,10 +451,73 @@ CommandPool::CommandPool(const VkDevice &device, uint32_t queueIndex)
     }
 }
 
+CommandPool::~CommandPool()
+{
+    //Wait until everything is processed
+    WaitAll();
+
+    //Destroy all data of the buffers
+    for (CommandBufferData& buffer : Buffers)
+    {
+        vkDestroyFence(Device, buffer.Fence, nullptr);
+        vkDestroySemaphore(Device, buffer.Semaphore, nullptr);
+    }
+
+    //Destroy the internal pool itself
+    vkDestroyCommandPool(Device, VulkanCommandPool, nullptr);
+}
+
 void CommandPool::WaitSemaphore(const VkSemaphore& semaphore)
 {
     CHECK(WaitOnSemaphore.semaphore == VK_NULL_HANDLE, "The wait Semaphore is not Empty");
     WaitOnSemaphore.semaphore = semaphore;
+}
+
+void CommandPool::WaitAll()
+{
+    VkFence fences[MaxCommandBuffers];
+    uint32_t numFences = 0;
+
+    for (const CommandBufferData& buffer : Buffers)
+    {
+        if (buffer.VulkanCommandBuffer != VK_NULL_HANDLE && !buffer.isEncoding)
+        {
+            fences[numFences++] = buffer.Fence;
+        }
+    }
+
+    if (numFences)
+    {
+        VK_ASSERT(vkWaitForFences(Device, numFences, fences, VK_TRUE, UINT64_MAX));
+    }
+
+    TryResetCommandBuffers();
+}
+
+void CommandPool::Wait(const EOS::SubmitHandle handle)
+{
+    if (handle.Empty())
+    {
+        vkDeviceWaitIdle(Device);
+        return;
+    }
+
+    if (IsReady(handle))
+    {
+        return;
+    }
+
+    const bool isEncoding = Buffers[handle.BufferIndex].isEncoding;
+    CHECK(!isEncoding, "The buffer is not submitted yet, this should not be possible");
+    if (isEncoding)
+    {
+        //This buffer has never been submitted, this should not be possible at this point.
+        return;
+    }
+
+    VK_ASSERT(vkWaitForFences(Device, 1, &Buffers[handle.BufferIndex].Fence, VK_TRUE, UINT64_MAX));
+
+    TryResetCommandBuffers();
 }
 
 void CommandPool::Signal(const VkSemaphore& semaphore, const uint64_t& signalValue)
@@ -463,6 +525,39 @@ void CommandPool::Signal(const VkSemaphore& semaphore, const uint64_t& signalVal
     CHECK(semaphore != VK_NULL_HANDLE, "The passed semaphore parameter is not valid.");
     SignalSemaphore.semaphore = semaphore;
     SignalSemaphore.value = signalValue;
+}
+
+bool CommandPool::IsReady(EOS::SubmitHandle handle, bool fastCheck) const
+{
+    //If its a empty handle then its "ready"
+    if (handle.Empty())
+    {
+        return true;
+    }
+
+    CHECK(handle.BufferIndex < MaxCommandBuffers, "The buffer index of the given handle is bigger then the MaxCommandBuffers.");
+
+    const CommandBufferData& buffer = Buffers[handle.BufferIndex];
+
+    //If the buffer is not in use.
+    if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE)
+    {
+        return true;
+    }
+
+    //If the handle to the buffer is no longer in use by the command buffer is was created for
+    if (buffer.Handle.ID != handle.ID)
+    {
+        return true;
+    }
+
+    // Don't check the fence.
+    if (fastCheck)
+    {
+        return false;
+    }
+
+    return vkWaitForFences(Device, 1, &buffer.Fence, VK_TRUE, 0) == VK_SUCCESS;
 }
 
 VkSemaphore CommandPool::AcquireLastSubmitSemaphore()
@@ -531,6 +626,11 @@ EOS::SubmitHandle CommandPool::Submit(CommandBufferData& data)
     if (!SubmitCounter) { ++SubmitCounter; }
 
     return LastSubmitHandle;
+}
+
+EOS::SubmitHandle CommandPool::GetNextSubmitHandle() const
+{
+    return NextSubmitHandle;
 }
 
 CommandBufferData* CommandPool::AcquireCommandBuffer()
@@ -680,6 +780,34 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     //TODO: Staging Device
 }
 
+VulkanContext::~VulkanContext()
+{
+    //Wait unit all work has been done
+    VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
+
+    SwapChain.reset(nullptr);
+
+    vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
+
+    if (TexturePool.NumObjects())
+    {
+        EOS::Logger->error("{} Leaked textures", TexturePool.NumObjects());
+    }
+    TexturePool.Clear();
+
+    WaitOnDeferredTasks();
+
+    VulkanCommandPool.reset(nullptr);
+
+    vkDestroySurfaceKHR(VulkanInstance, VulkanSurface, nullptr);
+
+    //vmaDestroyAllocator(Vma);
+
+    vkDestroyDevice(VulkanDevice, nullptr);
+    vkDestroyDebugUtilsMessengerEXT(VulkanInstance, VulkanDebugMessenger, nullptr);
+    vkDestroyInstance(VulkanInstance, nullptr);
+}
+
 EOS::ICommandBuffer& VulkanContext::AcquireCommandBuffer()
 {
     CHECK(!CurrentCommandBuffer, "Another CommandBuffer has been acquired this frame");
@@ -720,10 +848,9 @@ EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS:
         SwapChain->Present(VulkanCommandPool->AcquireLastSubmitSemaphore());
     }
 
-    //TODO:
-    //ProcessDeferredTasks();
+    ProcessDeferredTasks();
 
-    EOS::SubmitHandle handle = vkCmdBuffer->LastSubmitHandle;
+    const EOS::SubmitHandle handle = vkCmdBuffer->LastSubmitHandle;
 
     //Reset the Command Buffer
     CurrentCommandBuffer = {};
@@ -739,11 +866,97 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
        EOS::Logger->error("No SwapChain Found");
     }
 
-    EOS::TextureHandle tx = SwapChain->GetCurrentTexture();
-    CHECK(tx.Valid(), "The SwapChain texture is not valid.");
-    CHECK(TexturePool.Get(tx)->ImageFormat != VK_FORMAT_UNDEFINED, "Invalid image format");
+    EOS::TextureHandle swapChainTexture = SwapChain->GetCurrentTexture();
+    CHECK(swapChainTexture.Valid(), "The SwapChain texture is not valid.");
+    CHECK(TexturePool.Get(swapChainTexture)->ImageFormat != VK_FORMAT_UNDEFINED, "Invalid image format");
 
-    return tx;
+    return swapChainTexture;
+}
+
+void VulkanContext::Destroy(EOS::TextureHandle handle)
+{
+    VulkanImage* image = TexturePool.Get(handle);
+    CHECK(image, "Trying to destroy a already destroyed vulkan image");
+    if (!image)
+    {
+        return;
+    }
+
+    Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = image->ImageView]() { vkDestroyImageView(device, imageView, nullptr); }));
+
+    if (image->ImageViewStorage)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = image->ImageViewStorage]() { vkDestroyImageView(device, imageView, nullptr); }));
+    }
+
+    for (size_t i{}; i != VulkanImage::MaxMipLevels; ++i)
+    {
+        for (size_t j = 0; j != ARRAY_COUNT(image->ImageViewForFramebuffer[0]); ++j)
+        {
+            VkImageView v = image->ImageViewForFramebuffer[i][j];
+            if (v != VK_NULL_HANDLE)
+            {
+                Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = v]() { vkDestroyImageView(device, imageView, nullptr); }));
+            }
+        }
+    }
+
+    if (!image->IsOwningImage)
+    {
+        TexturePool.Destroy(handle);
+        return;
+    }
+
+    //TODO: Add once VMA is setup and image has allocations on the GPU
+    //if (image->MappedPtr)
+    //{
+    //    vmaUnmapMemory(static_cast<VmaAllocator>(GetVmaAllocator()), image->Allocation);
+    //}
+
+    //Defer(std::packaged_task<void()>([vma = GetVmaAllocator(), image = image->Image, allocation = image->VmaAllocation]() {vmaDestroyImage(static_cast<VmaAllocator>(vma), image, allocation);}));
+    //Defer(std::packaged_task<void()>([device = VulkanDevice, image = image->Image, memory0 = image->VkMemory[0], memory1 = image->VkMemory[1], memory2 = image->VkMemory[2]]()
+    //{
+    //    vkDestroyImage(device, image, nullptr);
+    //    if (memory0 != VK_NULL_HANDLE)
+    //    {
+    //        vkFreeMemory(device, memory0, nullptr);
+    //    }
+
+    //    if (memory1 != VK_NULL_HANDLE)
+    //    {
+    //        vkFreeMemory(device, memory1, nullptr);
+    //    }
+
+    //    if (memory2 != VK_NULL_HANDLE)
+    //    {
+    //        vkFreeMemory(device, memory2, nullptr);
+    //    }
+    //}));
+
+    TexturePool.Destroy(handle);
+}
+
+void VulkanContext::ProcessDeferredTasks() const
+{
+    while (!DeferredTasks.empty() && VulkanCommandPool->IsReady(DeferredTasks.front().Handle, true))
+    {
+        //Execute the deferred task
+        DeferredTasks.front().Task();
+
+        //Delete the deferred task
+        DeferredTasks.pop_front();
+    }
+}
+
+//Defer something until after a commandBuffer was submitted to the GPU
+void VulkanContext::Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle) const
+{
+    if (handle.Empty())
+    {
+        handle = VulkanCommandPool->GetNextSubmitHandle();
+    }
+
+    DeferredTasks.emplace_back(std::move(task), handle);
 }
 
 
@@ -965,6 +1178,17 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
     }
 
     CHECK(!hardwareDevices.empty(), "Couldn't find a physical hardware device!");
+}
+
+void VulkanContext::WaitOnDeferredTasks()
+{
+    for (auto& task : DeferredTasks)
+    {
+        VulkanCommandPool->Wait(task.Handle);
+        task.Task();
+    }
+
+    DeferredTasks.clear();
 }
 
 bool VulkanContext::IsHostVisibleMemorySingleHeap() const
