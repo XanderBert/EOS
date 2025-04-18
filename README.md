@@ -16,6 +16,7 @@ Eos aims to be:
 - [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [SPDLOG](https://github.com/gabime/spdlog)
 - [SLANG](https://github.com/shader-slang/slang)
+
 *Note: These dependencies are fetched automatically by CMake during the configuration step using FetchContent (or similar macros defined in `cmake/FetchMacros.cmake`).*
 
 # Building
@@ -40,29 +41,6 @@ This project is built using CMake and Ninja.
 2.  **Run the appropriate build script:**
     * Linux: `build.sh` script in the root directory of the project.
     * Windows: `build.bat` script in the root directory of the project.
-
-## Linux
-
-1.  **Make the script executable:**
-    ```bash
-    chmod +x build.sh
-    ```
-2.  **Run the build script:**
-    ```bash
-    ./build.sh
-    ```
-    This will create a `build` directory, configure the project using CMake and Ninja.
-
-## Windows
-
-1.  **Open Command Prompt or PowerShell.**
-2.  **Navigate** to the root directory of the cloned project.
-3.  **Run the build script:**
-    ```batch
-    build.bat
-    ```
-    This performs the same steps as the Linux script: creates a `build` directory, configures with CMake/Ninja.
-
 
 # Future
 Once this projects ages enough it will be converted to a separate Rendering library, and main loop will be moved to a separate project.
