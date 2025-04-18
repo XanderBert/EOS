@@ -18,8 +18,7 @@ Eos aims to be:
 - [SLANG](https://github.com/shader-slang/slang)
 
 > [!NOTE] 
-> These dependencies are fetched automatically by CMake during the configuration step using FetchContent (or similar macros defined in `cmake/FetchMacros.cmake`).
-
+> These dependencies are fetched automatically by CMake during the configuration step using FetchContent
 # Building
 This project is built using CMake and Ninja.
 
