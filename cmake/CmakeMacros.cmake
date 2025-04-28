@@ -17,7 +17,7 @@ macro(CREATE_APP name)
 
     file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false src/*.c??)
     file(GLOB_RECURSE HEADER_FILES LIST_DIRECTORIES false src/*.h)
-    file(GLOB_RECURSE SHADER_FILES LIST_DIRECTORIES false src/*.vert src/*.frag src/*.geom src/*.sp src/*.comp src/*.tesc src/*.tese)
+    file(GLOB_RECURSE SHADER_FILES LIST_DIRECTORIES false src/*.slang)
 
     message(STATUS "SRC_FILES: ${SRC_FILES}")
     message(STATUS "HEADER_FILES: ${HEADER_FILES}")

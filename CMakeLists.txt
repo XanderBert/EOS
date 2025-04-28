@@ -34,8 +34,10 @@ endif ()
 # Set Debug or Release Define
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(EOS PRIVATE EOS_DEBUG)
+    set(DEBUG TRUE)
 else()
     target_compile_definitions(EOS PRIVATE EOS_RELEASE)
+    set(DEBUG FALSE)
 endif()
 target_compile_definitions(EOS PRIVATE $<$<CONFIG:Debug>:EOS_DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:EOS_RELEASE=1> )
 
@@ -43,7 +45,7 @@ target_compile_definitions(EOS PRIVATE $<$<CONFIG:Debug>:EOS_DEBUG=1> $<$<NOT:$<
 # When we want to use Vulkan
 if(EOS_VULKAN)
     target_compile_definitions(EOS PRIVATE EOS_VULKAN)
-    target_compile_definitions(EOS PRIVATE VK_NO_PROTOTYPES)
+    target_compile_definitions(EOS PRIVATE VK_NO_PROTOTYPES) # Needed for VOLK
 
     if(USE_WINDOWS)
         target_compile_definitions(EOS PRIVATE VK_USE_PLATFORM_WIN32_KHR)
@@ -71,17 +73,11 @@ if(EOS_VULKAN)
     endif()
 
     FETCH_VOLK(${VOLK_VERSION} ${EOS_DEPENDENCIES_DIR})
-    FETCH_VMA(v3.2.1 ${EOS_DEPENDENCIES_DIR})
-
-    target_link_libraries(EOS PRIVATE volk_headers)
-    target_link_libraries(EOS PRIVATE GPUOpen::VulkanMemoryAllocator)
+    FETCH_VMA(${EOS_DEPENDENCIES_DIR})
 elseif ()
     message(FATAL_ERROR "No Usable Graphics API Found")
 endif ()
 
-
-FETCH_GLFW(3.4 ${EOS_DEPENDENCIES_DIR})
+FETCH_GLFW(${EOS_DEPENDENCIES_DIR})
 FETCH_SPDLOG(${EOS_DEPENDENCIES_DIR})
-
-target_link_libraries(EOS PUBLIC glfw)
-target_link_libraries(EOS PRIVATE spdlog)
+FETCH_SLANG(${EOS_DEPENDENCIES_DIR})

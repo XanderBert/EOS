@@ -286,7 +286,6 @@ VulkanSwapChain::~VulkanSwapChain()
     {
         vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
     }
-
 }
 
 void VulkanSwapChain::Present(VkSemaphore waitSemaphore)
@@ -746,13 +745,6 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     //Create our Vulkan Device
     VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
-
-
-    //TODO: I would like to move this somewhere else. -> on Constructor of VulkanDeviceQueues
-    //Fill in our Device Queue's
-    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Compute.QueueFamilyIndex, 0, &VulkanDeviceQueues.Compute.Queue);
-    vkGetDeviceQueue(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex, 0, &VulkanDeviceQueues.Graphics.Queue);
-
 
     //Create SwapChain
     //TODO: will it need a description struct?

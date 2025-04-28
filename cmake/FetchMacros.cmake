@@ -1,6 +1,5 @@
-﻿macro(FETCH_GLFW tag depsDir)
+﻿macro(FETCH_GLFW depsDir)
     set(DEPS_DIR ${depsDir})
-    set(TAG ${tag})
 
     # Fetch GLFW and Setup
     set(GLFW_BUILD_EXAMPLES          OFF CACHE BOOL "")
@@ -34,10 +33,11 @@
     FetchContent_Populate(
             glfw
             GIT_REPOSITORY https://github.com/glfw/glfw
-            GIT_TAG        ${TAG}
+            GIT_TAG        3.4
             SOURCE_DIR     ${GLFW_ROOT_DIR}
     )
     add_subdirectory(${GLFW_ROOT_DIR})
+    target_link_libraries(EOS PUBLIC glfw)
 endmacro()
 
 macro(FETCH_VOLK tag, depsDir)
@@ -53,28 +53,49 @@ macro(FETCH_VOLK tag, depsDir)
     )
 
     add_subdirectory(${VOLK_ROOT_DIR})
+    target_link_libraries(EOS PRIVATE volk_headers)
 endmacro()
 
-macro(FETCH_VMA tag, depsDir)
+macro(FETCH_VMA depsDir)
     set(DEPS_DIR ${depsDir})
-    set(TAG ${tag})
 
     set(VMA_ROOT_DIR ${DEPS_DIR}/src/vma)
     FetchContent_Populate(
             vma
             GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
-            GIT_TAG        ${TAG}
+            GIT_TAG        v3.2.1
             SOURCE_DIR     ${VMA_ROOT_DIR}
     )
 
     add_subdirectory(${VMA_ROOT_DIR})
+    target_link_libraries(EOS PRIVATE GPUOpen::VulkanMemoryAllocator)
 endmacro()
 
-macro(FETCH_SLANG tag, depsDir)
+macro(FETCH_SPDLOG depsDir)
     set(DEPS_DIR ${depsDir})
-    set(TAG ${tag})
 
-    #Disable Slang tests and examples
+    set(SPDLOG_ROOT_DIR ${DEPS_DIR}/src/spdlog)
+    FetchContent_Populate(
+            spdlog
+            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+            GIT_TAG        v1.15.2
+            SOURCE_DIR     ${SPDLOG_ROOT_DIR}
+    )
+    add_subdirectory(${SPDLOG_ROOT_DIR})
+    target_link_libraries(EOS PRIVATE spdlog)
+endmacro()
+
+macro(FETCH_SLANG depsDir)
+    set(DEPS_DIR ${depsDir})
+    if(DEBUG)
+        if(USE_WAYLAND OR USE_X11)
+            set(SLANG_ENABLE_ASAN ON CACHE BOOL "")
+        endif ()
+        set(SLANG_ENABLE_FULL_IR_VALIDATION ON CACHE BOOL "")
+        set(SLANG_ENABLE_IR_BREAK_ALLOC ON CACHE BOOL "")
+    endif ()
+
+
     set(SLANG_ENABLE_CUDA          OFF CACHE BOOL "")
     set(SLANG_ENABLE_OPTIX         OFF CACHE BOOL "")
     set(SLANG_ENABLE_NVAPI         OFF CACHE BOOL "")
@@ -89,30 +110,15 @@ macro(FETCH_SLANG tag, depsDir)
     set(SLANG_ENABLE_EXAMPLES      OFF CACHE BOOL "")
     set(SLANG_ENABLE_REPLAYER      OFF CACHE BOOL "")
     set(SLANG_ENABLE_PREBUILT_BINARIES OFF CACHE BOOL "")
+    set(SLANG_ENABLE_SLANG_RHI OFF CACHE BOOL "")
 
     set(SLANG_ROOT_DIR ${DEPS_DIR}/src/slang)
-    FetchContent_Populate(
+    FetchContent_Declare(
             slang
-            GIT_REPOSITORY https://github.com/shader-slang/slang.git
-            GIT_TAG        ${TAG}
-            SOURCE_DIR     ${SLANG_ROOT_DIR}
+            GIT_REPOSITORY https://github.com/XanderBert/slang.git
+            GIT_SHALLOW 1
     )
-    add_subdirectory(${SLANG_ROOT_DIR})
-endmacro()
 
-
-
-#TODO: When passing tag here, i get the first ever pre release of this library.
-#Why is that? when i manually set the git tag it gets the correct version
-macro(FETCH_SPDLOG depsDir)
-    set(DEPS_DIR ${depsDir})
-
-    set(SPDLOG_ROOT_DIR ${DEPS_DIR}/src/spdlog)
-    FetchContent_Populate(
-            spdlog
-            GIT_REPOSITORY https://github.com/gabime/spdlog.git
-            GIT_TAG        v1.15.2
-            SOURCE_DIR     ${SPDLOG_ROOT_DIR}
-    )
-    add_subdirectory(${SPDLOG_ROOT_DIR})
+    FetchContent_MakeAvailable(slang)
+    target_link_libraries(EOS PRIVATE slang)
 endmacro()

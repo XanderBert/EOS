@@ -727,6 +727,10 @@ namespace VkContext
         VK_ASSERT(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
         volkLoadDevice(device);
         VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_DEVICE, reinterpret_cast<uint64_t>(device), "Device: VulkanContext::Device"));
+
+        //Fill in our Device Queue's
+        vkGetDeviceQueue(device, deviceQueues.Compute.QueueFamilyIndex, 0, &deviceQueues.Compute.Queue);
+        vkGetDeviceQueue(device, deviceQueues.Graphics.QueueFamilyIndex, 0, &deviceQueues.Graphics.Queue);
     }
 };
 
