@@ -85,40 +85,8 @@ macro(FETCH_SPDLOG depsDir)
     target_link_libraries(EOS PRIVATE spdlog)
 endmacro()
 
-macro(FETCH_SLANG depsDir)
-    set(DEPS_DIR ${depsDir})
-    if(DEBUG)
-        if(USE_WAYLAND OR USE_X11)
-            set(SLANG_ENABLE_ASAN ON CACHE BOOL "")
-        endif ()
-        set(SLANG_ENABLE_FULL_IR_VALIDATION ON CACHE BOOL "")
-        set(SLANG_ENABLE_IR_BREAK_ALLOC ON CACHE BOOL "")
-    endif ()
-
-
-    set(SLANG_ENABLE_CUDA          OFF CACHE BOOL "")
-    set(SLANG_ENABLE_OPTIX         OFF CACHE BOOL "")
-    set(SLANG_ENABLE_NVAPI         OFF CACHE BOOL "")
-    set(SLANG_ENABLE_XLIB          OFF CACHE BOOL "")
-    set(SLANG_ENABLE_AFTERMATH     OFF CACHE BOOL "")
-    set(SLANG_ENABLE_DX_ON_VK      OFF CACHE BOOL "")
-    set(SLANG_ENABLE_GFX           OFF CACHE BOOL "")
-    set(SLANG_ENABLE_SLANGC        OFF CACHE BOOL "")
-    set(SLANG_ENABLE_SLANGRT       ON  CACHE BOOL "")
-    set(SLANG_ENABLE_SLANG_GLSLANG OFF CACHE BOOL "")
-    set(SLANG_ENABLE_TESTS         OFF CACHE BOOL "")
-    set(SLANG_ENABLE_EXAMPLES      OFF CACHE BOOL "")
-    set(SLANG_ENABLE_REPLAYER      OFF CACHE BOOL "")
-    set(SLANG_ENABLE_PREBUILT_BINARIES OFF CACHE BOOL "")
-    set(SLANG_ENABLE_SLANG_RHI OFF CACHE BOOL "")
-
-    set(SLANG_ROOT_DIR ${DEPS_DIR}/src/slang)
-    FetchContent_Declare(
-            slang
-            GIT_REPOSITORY https://github.com/XanderBert/slang.git
-            GIT_SHALLOW 1
-    )
-
-    FetchContent_MakeAvailable(slang)
-    target_link_libraries(EOS PRIVATE slang)
+macro(FETCH_SLANG)
+    find_library(SLANG_LIBRARY slang PATHS "${CMAKE_SOURCE_DIR}/dependencies/src/slang/lib" NO_DEFAULT_PATH)
+    target_link_libraries(EOS PRIVATE ${SLANG_LIBRARY})
+    include_directories(${CMAKE_SOURCE_DIR}/dependencies/src/slang/include)
 endmacro()

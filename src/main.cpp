@@ -1,8 +1,12 @@
-﻿#include "EOS.h"
+#include "EOS.h"
 #include "logger.h"
+#include "shaders/shaderUtils.h"
 
 int main()
 {
+    ShaderCompiler compiler{"."};
+    compiler.CompileShaders({"test", "computeMain"});
+
     EOS::ContextCreationDescription contextDescr
     {
         .config =

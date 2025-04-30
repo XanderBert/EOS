@@ -23,15 +23,12 @@ macro(CREATE_APP name)
     message(STATUS "HEADER_FILES: ${HEADER_FILES}")
     message(STATUS "SHADER_FILES: ${SHADER_FILES}")
 
-
     include_directories(${CMAKE_SOURCE_DIR}/src)
     add_executable(${PROJECT_NAME} ${SRC_FILES} ${HEADER_FILES} ${SHADER_FILES})
 
     SETUP_GROUPS("${SRC_FILES}")
     SETUP_GROUPS("${HEADER_FILES}")
     SOURCE_GROUP(shaders FILES "${SHADER_FILES}")
-
-
 
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_DEBUG ${PROJECT_NAME}_Debug)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_RELEASE ${PROJECT_NAME}_Release)
