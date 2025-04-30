@@ -86,7 +86,31 @@ macro(FETCH_SPDLOG depsDir)
 endmacro()
 
 macro(FETCH_SLANG)
-    find_library(SLANG_LIBRARY slang PATHS "${CMAKE_SOURCE_DIR}/dependencies/binaries/slang/lib" NO_DEFAULT_PATH)
-    target_link_libraries(EOS PRIVATE ${SLANG_LIBRARY})
-    include_directories(${CMAKE_SOURCE_DIR}/dependencies/binaries/slang/include)
+    # Set the base path for Slang
+    set(SLANG_BASE_PATH "${CMAKE_SOURCE_DIR}/dependencies/binaries/slang")
+
+    # Find the library
+    find_library(SLANG_LIBRARY
+            NAMES slang libslang
+            PATHS "${SLANG_BASE_PATH}/lib"
+            NO_DEFAULT_PATH
+    )
+
+    # Check if library was found
+    if(NOT SLANG_LIBRARY)
+        message(WARNING "Slang library not found at ${SLANG_BASE_PATH}/lib")
+        # You could add a fallback here, like downloading it automatically
+    else()
+
+        message(STATUS "Found Slang library: ${SLANG_LIBRARY}")
+        target_link_libraries(EOS PRIVATE ${SLANG_LIBRARY})
+
+        # Add include directory if it exists
+        if(EXISTS "${SLANG_BASE_PATH}/include")
+            include_directories("${SLANG_BASE_PATH}/include")
+            message(STATUS "Added Slang include directory: ${SLANG_BASE_PATH}/include")
+        else()
+            message(WARNING "Slang include directory not found at ${SLANG_BASE_PATH}/include")
+        endif()
+    endif()
 endmacro()
