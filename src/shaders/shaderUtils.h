@@ -1,5 +1,8 @@
 #pragma once
+
+#include <slang.h>
 #include <slang-com-ptr.h>
+
 #include <filesystem>
 #include "defines.h"
 
@@ -22,7 +25,7 @@ public:
 private:
     Slang::ComPtr<slang::IGlobalSession> GlobalSession;
     Slang::ComPtr<slang::ISession> Session;
-    Slang::ComPtr<slang::IBlob> Diagnostics;
+    Slang::ComPtr<ISlangBlob> Diagnostics;
 
 
     std::filesystem::path ShaderFolder;

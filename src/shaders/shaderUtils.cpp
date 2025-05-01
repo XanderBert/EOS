@@ -1,13 +1,10 @@
 #include "shaderUtils.h"
-//https://shader-slang.org/slang/user-guide/compiling.html#using-the-compilation-api
-
 #include <fstream>
+#include <slang-com-helper.h>
 
 #include "logger.h"
-#include <slang.h>
-#include <slang-com-helper.h>
-#include <slang-com-ptr.h>
 
+//https://shader-slang.org/slang/user-guide/compiling.html#using-the-compilation-api
 using namespace slang;
 ShaderCompiler::ShaderCompiler(const std::filesystem::path& shaderFolder)
 : ShaderFolder(shaderFolder)
@@ -66,7 +63,7 @@ void ShaderCompiler::CompileShaders(const ShaderCompilationDescription& shaderCo
 
     constexpr int entryPointIndex = 0;    // only one entry point
     constexpr int targetIndex = 0;        // only one target
-    Slang::ComPtr<IBlob> kernelBlob;
+    Slang::ComPtr<ISlangBlob> kernelBlob;
     linkedProgram->getEntryPointCode(entryPointIndex, targetIndex, kernelBlob.writeRef(), Diagnostics.writeRef());
     Diagnostics.setNull();
 
