@@ -11,6 +11,8 @@ jobs:
         display_server: [Wayland, X11]
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true  # Ensures LFS files are pulled
 
       - name: Setup Vulkan SDK
         uses: humbletim/setup-vulkan-sdk@v1.2.1
@@ -35,6 +37,13 @@ jobs:
             sudo apt-get install -y xorg-dev
           fi
 
+      - name: Fix libslang.so permissions
+        run: |
+          chmod +x /home/runner/work/EOS/EOS/dependencies/binaries/slang/lib/libslang.so
+          ls -la /home/runner/work/EOS/EOS/dependencies/binaries/slang/lib/
+          sudo apt-get install git-lfs
+          git lfs install --skip-repo
+      
       - name: Set CMake variables
         run: |
           if [ "${{ matrix.display_server }}" = "Wayland" ]; then
