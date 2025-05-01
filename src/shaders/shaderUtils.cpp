@@ -1,6 +1,5 @@
 #include "shaderUtils.h"
 #include <fstream>
-#include <slang-com-helper.h>
 
 #include "logger.h"
 

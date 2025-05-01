@@ -1,7 +1,11 @@
 #pragma once
 
+#pragma push_macro("None")
+#undef None  // Undefine X11's 'None' macro
 #include <slang.h>
 #include <slang-com-ptr.h>
+#include <slang-com-helper.h>
+#pragma pop_macro("None") // Restore the 'None' macro for X11
 
 #include <filesystem>
 #include "defines.h"
