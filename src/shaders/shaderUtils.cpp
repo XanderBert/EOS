@@ -25,7 +25,7 @@ void ShaderCompiler::CompileShaders(const ShaderCompilationDescription& shaderCo
     .profile = GlobalSession->findProfile("glsl_450"),
     };
 
-    const char* path = ShaderFolder.c_str();
+    const char* path = ShaderFolder.string().c_str();
     SessionDesc sessionDesc
     {
         .targets = &targetDesc,
