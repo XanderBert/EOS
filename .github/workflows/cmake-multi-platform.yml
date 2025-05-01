@@ -35,6 +35,11 @@ jobs:
             sudo apt-get install -y xorg-dev
           fi
 
+      - name: Fix libslang.so permissions
+        run: |
+          chmod +x /home/runner/work/EOS/EOS/dependencies/binaries/slang/lib/libslang.so
+          ls -la /home/runner/work/EOS/EOS/dependencies/binaries/slang/lib/
+      
       - name: Set CMake variables
         run: |
           if [ "${{ matrix.display_server }}" = "Wayland" ]; then
