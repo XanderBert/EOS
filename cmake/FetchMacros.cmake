@@ -91,7 +91,7 @@ macro(FETCH_SLANG)
 
     # Find the library
     find_library(SLANG_LIBRARY
-            NAMES slang libslang
+            NAMES slang libslang slang.lib
             PATHS "${SLANG_BASE_PATH}/lib"
             NO_DEFAULT_PATH
     )

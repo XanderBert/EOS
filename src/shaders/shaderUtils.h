@@ -1,16 +1,5 @@
 #pragma once
-
-//X11 has some things defined that Slang uses in enums, here we fix those name collisions
-#pragma push_macro("None")
-#undef None
-#pragma push_macro("Bool")
-#undef Bool
-#include <slang.h>
-#include <slang-com-ptr.h>
-#include <slang-com-helper.h>
-#pragma pop_macro("Bool")
-#pragma pop_macro("None")
-
+#include <slang-include.h>
 #include <filesystem>
 #include "defines.h"
 
