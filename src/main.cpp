@@ -4,9 +4,6 @@
 
 int main()
 {
-    ShaderCompiler compiler{"."};
-    compiler.CompileShaders({"test", "computeMain"});
-
     EOS::ContextCreationDescription contextDescr
     {
         .config =
@@ -19,7 +16,11 @@ int main()
 
     uint32_t width{}, height{};
     GLFWwindow* window = EOS::Window::InitWindow(contextDescr, width, height);
+
     std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
+    std::unique_ptr<ShaderCompiler> shaderCompiler = EOS::CreateShaderCompiler("./");
+
+    //EOS::Holder<EOS::ShaderModuleHandle> shaderHandle = LoadShader(context, "test.slang");
 
     while (!glfwWindowShouldClose(window))
     {

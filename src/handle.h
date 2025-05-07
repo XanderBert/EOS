@@ -61,7 +61,7 @@ namespace EOS
             return Generation;
         }
 
-        [[nodiscard]] inline void* indexAsVoid() const
+        [[nodiscard]] inline void* IndexAsVoid() const
         {
             return reinterpret_cast<void*>(static_cast<ptrdiff_t>(Idx));
         }
@@ -83,20 +83,6 @@ namespace EOS
         uint32_t Generation = 0;
     };
     static_assert(sizeof(Handle<class Foo>) == sizeof(uint64_t));
-
-
-
-
-    // Concept for required HandleType operations
-    template<typename T>
-    concept ValidHolder = requires(T t)
-    {
-        { t.Valid() } -> std::convertible_to<bool>;
-        { t.Empty() } -> std::convertible_to<bool>;
-        { t.Gen() } -> std::convertible_to<uint32_t>;
-        { t.Index() } -> std::convertible_to<uint32_t>;
-        { t.IndexAsVoid() } -> std::convertible_to<void*>;
-    };
 
     struct SubmitHandle final
     {
@@ -123,5 +109,4 @@ namespace EOS
         uint32_t ID = 0;
     };
     static_assert(sizeof(SubmitHandle) == sizeof(uint64_t));
-
 }

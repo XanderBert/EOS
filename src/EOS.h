@@ -9,6 +9,8 @@
 #include "handle.h"
 #include "window.h"
 
+#include "shaders/shaderUtils.h"
+
 namespace EOS
 {
     //TODO: Almost everything here will need Doxygen documentation, as the end user will work with these functions
@@ -109,18 +111,144 @@ namespace EOS
         * @return
         */
         virtual void Destroy(TextureHandle handle) = 0;
-    
+
+
+        /**
+        * @brief
+        * @return
+        */
+        virtual void Destroy(ShaderModuleHandle handle) = 0;
+
     protected:
         IContext() = default;
     };
 #pragma endregion
+
+
+
+    // Concept for required HandleType operations
+    template<typename T>
+    concept ValidHolder = requires(T t)
+    {
+        { t.Valid() } -> std::convertible_to<bool>;
+        { t.Empty() } -> std::convertible_to<bool>;
+        { t.Gen() } -> std::convertible_to<uint32_t>;
+        { t.Index() } -> std::convertible_to<uint32_t>;
+        { t.IndexAsVoid() } -> std::convertible_to<void*>;
+    };
+
+    template<typename HandleType>
+    requires ValidHolder<HandleType>
+    class Holder final
+    {
+    public:
+        Holder() = default;
+        Holder(EOS::IContext* context, HandleType handle) : HolderContext(context), Handle(handle) {}
+        ~Holder()
+        {
+            CHECK(HolderContext, "the context of the holder is no longer valid in the destruction of the holder");
+            if (HolderContext)
+            {
+                HolderContext->Destroy(Handle);
+            }
+        }
+
+        DELETE_COPY(Holder);
+
+        Holder(Holder&& other) noexcept : HolderContext(other.HolderContext), Handle(other.Handle)
+        {
+            other.HolderContext = nullptr;
+            other.Handle = HandleType{};
+        }
+        Holder& operator=(Holder&& other) noexcept
+        {
+            std::swap(HolderContext, other.HolderContext);
+            std::swap(Handle, other.Handle);
+            return *this;
+        }
+
+        Holder& operator=(std::nullptr_t)
+        {
+            this->Reset();
+            return *this;
+        }
+
+        operator HandleType() const
+        {
+            return Handle;
+        }
+
+        bool Valid() const
+        {
+            return Handle.Valid();
+        }
+
+        bool Empty() const
+        {
+            return Handle.Empty();
+        }
+
+        void Reset()
+        {
+            CHECK(HolderContext, "the context of the holder is no longer valid while resetting the holder");
+            if (HolderContext)
+            {
+                HolderContext->Destroy(Handle);
+            }
+
+            HolderContext = nullptr;
+            Handle = HandleType{};
+        }
+
+        HandleType Release()
+        {
+            HolderContext = nullptr;
+            return std::exchange(Handle, HandleType{});
+        }
+
+        uint32_t Gen() const
+        {
+            return Handle.Gen();
+        }
+
+        uint32_t Index() const
+        {
+            return Handle.Index();
+        }
+
+        void* IndexAsVoid() const
+        {
+            return Handle.IndexAsVoid();
+        }
+
+    private:
+        EOS::IContext* HolderContext = nullptr;
+        HandleType Handle = {};
+    };
+    static_assert(sizeof(Holder<Handle<class Foo>>) == sizeof(uint64_t) + PTR_SIZE);
+
+
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);
+    std::unique_ptr<ShaderCompiler> CreateShaderCompiler(const std::filesystem::path& shaderFolder);
 }
 
+
+
+
+
+
 #pragma region GLOBAL_FUNCTIONS
+
 /**
 * @brief
 * @return
 */
 void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers);
+
+/**
+* @brief
+* @return
+*/
+EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const char* fileName);
+
 #pragma endregion

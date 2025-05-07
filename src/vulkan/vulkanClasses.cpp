@@ -76,6 +76,11 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
 
     vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
 }
+
+EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const char* fileName)
+{
+    return {};
+}
 #pragma endregion
 
 
@@ -787,6 +792,12 @@ VulkanContext::~VulkanContext()
     }
     TexturePool.Clear();
 
+    if (ShaderModulePool.NumObjects())
+    {
+        EOS::Logger->error("{} Leaked Shader Modules", ShaderModulePool.NumObjects());
+    }
+    ShaderModulePool.Clear();
+
     WaitOnDeferredTasks();
 
     VulkanCommandPool.reset(nullptr);
@@ -926,6 +937,20 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
     //}));
 
     TexturePool.Destroy(handle);
+}
+
+void VulkanContext::Destroy(EOS::ShaderModuleHandle handle)
+{
+    const VulkanShaderModuleState* state = ShaderModulePool.Get(handle);
+
+    if (!state) { return; }
+
+    if (state->ShaderModule != VK_NULL_HANDLE)
+    {
+        vkDestroyShaderModule(VulkanDevice, state->ShaderModule, nullptr);
+    }
+
+    ShaderModulePool.Destroy(handle);
 }
 
 void VulkanContext::ProcessDeferredTasks() const

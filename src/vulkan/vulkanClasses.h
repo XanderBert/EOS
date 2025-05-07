@@ -10,13 +10,23 @@
 #include "vkTools.h"
 #include "pool.h"
 
+
 //Forward Declares
+struct VulkanShaderModuleState;
 struct VulkanImage;
 class VulkanContext;
 
+static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
+
+using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleState>;
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
 
-static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
+//TODO: split up in hot and cold data for the pool
+struct VulkanShaderModuleState final
+{
+    VkShaderModule ShaderModule = VK_NULL_HANDLE;
+    uint32_t PushConstantsSize = 0;
+};
 
 struct ImageDescription final
 {
@@ -252,12 +262,14 @@ public:
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
     void Destroy(EOS::TextureHandle handle) override;
+    void Destroy(EOS::ShaderModuleHandle handle) override;
 
     void ProcessDeferredTasks() const;
     void Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle = {}) const;
 
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
+    VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
 private:
     [[nodiscard]] bool HasSwapChain() const noexcept;
