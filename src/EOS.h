@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,15 +10,33 @@
 #include "handle.h"
 #include "window.h"
 
-#include "shaders/shaderUtils.h"
+
 
 namespace EOS
 {
+    class ShaderCompiler;
     //TODO: Almost everything here will need Doxygen documentation, as the end user will work with these functions
     //I would also like to return my own type of VkResult on functions for the end user.
 
+    /**
+    * @brief Concept for the required HandleType operations.
+    */
+    template<typename T>
+    concept ValidHolder = requires(T t)
+    {
+        { t.Valid() } -> std::convertible_to<bool>;
+        { t.Empty() } -> std::convertible_to<bool>;
+        { t.Gen() } -> std::convertible_to<uint32_t>;
+        { t.Index() } -> std::convertible_to<uint32_t>;
+        { t.IndexAsVoid() } -> std::convertible_to<void*>;
+    };
+
     //Forward declare
     class IContext;
+
+    template<typename HandleType>
+    requires ValidHolder<HandleType>
+    class Holder;
 
     //Create our Handle structures
     using ComputePipelineHandle     = Handle<struct ComputePipeline>;
@@ -30,7 +49,7 @@ namespace EOS
     using QueryPoolHandle           = Handle<struct QueryPool>;
     using AccelStructHandle         = Handle<struct AccelerationStructure>;
 
-    struct HardwareDeviceDescription
+    struct HardwareDeviceDescription final
     {
         uintptr_t id{};
         HardwareDeviceType type { HardwareDeviceType::Integrated} ;
@@ -52,19 +71,29 @@ namespace EOS
         void*                   display{};
     };
 
-    //used for buffer StateTransitioning without changing the index queue
-    struct GlobalBarrier
+    /**
+     * @brief Used for buffer StateTransitioning without changing the index queue
+     */
+    struct GlobalBarrier final
     {
         const BufferHandle      Buffer;
         const ResourceState     CurrentState;
         const ResourceState     NextState;
     };
 
-    struct ImageBarrier
+    struct ImageBarrier final
     {
         const TextureHandle    Texture;
         const ResourceState     CurrentState;
         const ResourceState     NextState;
+    };
+
+    struct ShaderInfo final
+    {
+        std::vector<uint32_t> spirv;
+        EOS::ShaderStage shaderStage;
+        uint32_t pushConstantSize;
+        const char* debugName;
     };
 
 #pragma region INTERFACES
@@ -89,33 +118,42 @@ namespace EOS
         virtual ~IContext() = default;
 
         /**
-        * @brief
-        * @return
+        * @brief Fetches a free commandbuffer, one gets freed if needed (this can be blocking if none are free) and starts recording.
+        * @return A free commandbuffer that is already recording.
         */
         virtual ICommandBuffer& AcquireCommandBuffer() = 0;
 
         /**
-        * @brief
-        * @return
+        * @brief Submits the commandbuffer, Presents the swapchain if desired and processes all tasks that have been defered until after submition (like resource destruction).
+        * @param commandBuffer The commandbuffer we want to submit to the GPU.
+        * @param present A swapchain texture where it should be presented to.
+        * @return A Handle for this submission.
         */
         virtual SubmitHandle Submit(ICommandBuffer& commandBuffer, TextureHandle present) = 0;
 
         /**
-         * @brief 
-         * @return 
+         * @brief Gets the handle to the currently in use SwapChain.
+         * @return The handle of the currently in use SwapChain.
          */
         virtual TextureHandle GetSwapChainTexture() = 0;
 
         /**
-        * @brief
-        * @return
+        * @brief Creates shader module from a compiled shader.
+        * @param shaderInfo information about the shader such as its code and stage.
+        * @return A Holder Handle to a shader module.
+        */
+        virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) = 0;
+
+        /**
+        * @brief Handles the destruction of a TextureHandle and what it holds.
+        * @param handle The handle to the texture you want to destroy.
         */
         virtual void Destroy(TextureHandle handle) = 0;
 
 
         /**
-        * @brief
-        * @return
+        * @brief Handles the destruction of a ShaderModuleHandle and what it holds.
+        * @param handle The handle to the shaderModule you want to destroy.
         */
         virtual void Destroy(ShaderModuleHandle handle) = 0;
 
@@ -123,19 +161,6 @@ namespace EOS
         IContext() = default;
     };
 #pragma endregion
-
-
-
-    // Concept for required HandleType operations
-    template<typename T>
-    concept ValidHolder = requires(T t)
-    {
-        { t.Valid() } -> std::convertible_to<bool>;
-        { t.Empty() } -> std::convertible_to<bool>;
-        { t.Gen() } -> std::convertible_to<uint32_t>;
-        { t.Index() } -> std::convertible_to<uint32_t>;
-        { t.IndexAsVoid() } -> std::convertible_to<void*>;
-    };
 
     template<typename HandleType>
     requires ValidHolder<HandleType>
@@ -228,27 +253,28 @@ namespace EOS
     static_assert(sizeof(Holder<Handle<class Foo>>) == sizeof(uint64_t) + PTR_SIZE);
 
 
+    /**
+    * @brief Creates a context for the used Graphics API and after that it creates a Swapchain for it.
+    * @param contextCreationDescription The settings with which we want to create our Context.
+    * @returns A unique pointer to the created Context interface.
+    */
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);
+
+    /**
+    * @brief Creates a ShaderCompiler.
+    * @param shaderFolder The folder where our non-compiled shaders are stored.
+    * @returns A unique pointer to the created shader compiler.
+    */
     std::unique_ptr<ShaderCompiler> CreateShaderCompiler(const std::filesystem::path& shaderFolder);
 }
-
-
-
-
-
 
 #pragma region GLOBAL_FUNCTIONS
 
 /**
-* @brief
-* @return
+* @brief Inserts a pipeline barrier in the commandbuffer.
+* @param commandBuffer The commandbuffer we want to insert the barrier into.
+* @param globalBarriers The globalBarriers we want to insert used for Buffer barriers.
+* @param imageBarriers The imageBarriers we want to insert
 */
 void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers);
-
-/**
-* @brief
-* @return
-*/
-EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const char* fileName);
-
 #pragma endregion

@@ -73,4 +73,23 @@ namespace EOS
         // Special Cases
         UnorderedAccessPixel       = 0x00010000  // UAV in pixel shader
     };
+
+    enum class ShaderStage : uint8_t
+    {
+        None,
+        Vertex,
+        Hull,
+        Domain,
+        Geometry,
+        Fragment,
+        Compute,
+        RayGen,
+        Intersection,
+        AnyHit,
+        ClosestHit,
+        Miss,
+        Callable,
+        Mesh,
+        Amplification
+    };
 }

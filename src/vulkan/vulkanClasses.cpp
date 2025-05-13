@@ -76,11 +76,6 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
 
     vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
 }
-
-EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const char* fileName)
-{
-    return {};
-}
 #pragma endregion
 
 
@@ -659,7 +654,7 @@ CommandBufferData* CommandPool::AcquireCommandBuffer()
     {
         if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE)
         {
-            //TODO: This needs to be a copy, otherwise it will be moved out of the Buffers
+            //TODO: This needs to be a copy, otherwise it will be moved out of the Buffers?
             currentCommandBuffer = &buffer;
             break;
         }
@@ -823,13 +818,13 @@ EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS:
     CommandBuffer* vkCmdBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
     CHECK(vkCmdBuffer, "The command buffer is not valid");
 
+#if defined(EOS_DEBUG)
     if (present)
     {
-#if defined(EOS_DEBUG)
         const VulkanImage& swapChainTextures = *TexturePool.Get(present);
         CHECK(VulkanImage::IsSwapChainImage(swapChainTextures), "The passed present texture handle is not from a SwapChain");
-#endif
     }
+#endif
 
     const bool shouldPresent = HasSwapChain() && present;
 
@@ -874,6 +869,31 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
     CHECK(TexturePool.Get(swapChainTexture)->ImageFormat != VK_FORMAT_UNDEFINED, "Invalid image format");
 
     return swapChainTexture;
+}
+
+EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS::ShaderInfo &shaderInfo)
+{
+    VkShaderModule vkShaderModule = VK_NULL_HANDLE;
+
+    const VkShaderModuleCreateInfo createInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = shaderInfo.spirv.size() * sizeof(uint32_t),
+        .pCode = shaderInfo.spirv.data(),
+    };
+
+    VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &vkShaderModule);)
+    CHECK(vkShaderModule != VK_NULL_HANDLE, "Failed to create shader module from ShaderInfo");
+
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(vkShaderModule), shaderInfo.debugName));
+
+    VulkanShaderModuleState state
+    {
+        .ShaderModule = vkShaderModule,
+        .PushConstantsSize = shaderInfo.pushConstantSize
+    };
+
+    return {this, ShaderModulePool.Create(std::move(state))};
 }
 
 void VulkanContext::Destroy(EOS::TextureHandle handle)

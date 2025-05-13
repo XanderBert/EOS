@@ -2,6 +2,7 @@
 
 #include "logger.h"
 #include "vulkan/vulkanClasses.h"
+#include "shaders/shaderUtils.h"
 
 namespace EOS
 {
@@ -16,6 +17,6 @@ namespace EOS
 
     std::unique_ptr<ShaderCompiler> CreateShaderCompiler(const std::filesystem::path& shaderFolder)
     {
-        return std::move(std::make_unique<ShaderCompiler>(shaderFolder));
+        return std::move(std::make_unique<EOS::ShaderCompiler>(shaderFolder));
     }
 }
