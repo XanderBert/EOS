@@ -27,6 +27,8 @@ elseif (UNIX AND NOT APPLE)
     else ()
         message(STATUS "X11 session detected")
         target_compile_definitions(EOS PRIVATE EOS_PLATFORM_X11)
+        add_compile_definitions(None=)  # Undefines None
+        add_compile_definitions(Bool=)  # Undefines Bool
         set(USE_X11 TRUE)
     endif ()
 endif ()
