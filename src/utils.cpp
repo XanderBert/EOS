@@ -15,8 +15,7 @@ namespace EOS
         // Check if the file opened successfully
         if (!file.is_open())
         {
-            const char* cPath = filePath.c_str();
-            EOS::Logger->error("I/O error. Cannot open file '{}'", cPath);
+            EOS::Logger->error("I/O error. Cannot open file '{}'", filePath.string().c_str());
             return std::string();
         }
 

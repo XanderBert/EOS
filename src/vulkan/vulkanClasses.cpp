@@ -245,7 +245,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     const VkRect2D scissor
     {
         VkOffset2D{static_cast<int32_t>(viewport.X), static_cast<int32_t>(viewport.Y)},
-        VkExtent2D{static_cast<uint>(viewport.Width), static_cast<uint>(viewport.Height)},
+        VkExtent2D{static_cast<unsigned int>(viewport.Width), static_cast<unsigned int>(viewport.Height)},
     };
     vkCmdSetScissor(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &scissor);
 
