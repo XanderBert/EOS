@@ -5,11 +5,12 @@
 #include <string>
 #include <vector>
 
+#include "window.h"
 #include "defines.h"
 #include "enums.h"
 #include "handle.h"
 #include "utils.h"
-#include "window.h"
+
 
 namespace EOS
 {
