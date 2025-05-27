@@ -1,4 +1,11 @@
 #pragma once
+
+#if defined(EOS_PLATFORM_X11)
+#pragma push_macro("None")
+#undef None
+#endif
+
+
 namespace EOS
 {
     enum class HardwareDeviceType : uint8_t
@@ -306,3 +313,7 @@ namespace EOS
         None,
     };
 }
+
+#if defined(EOS_PLATFORM_X11)
+#pragma pop_macro("None")
+#endif
