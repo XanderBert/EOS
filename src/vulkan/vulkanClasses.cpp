@@ -1707,9 +1707,6 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
         VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(renderPipelineState.PipelineLayout), fmt::format("Pipeline Layout: {}", renderPipelineDescription.DebugName).c_str()));
     }
 
-    //TODO: Store?
-    VkPipelineCache cache;
-
     VK_ASSERT(VulkanPipelineBuilder()
     .DynamicState(VK_DYNAMIC_STATE_VIEWPORT)
     .DynamicState(VK_DYNAMIC_STATE_SCISSOR)
@@ -1752,7 +1749,7 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
       .DepthAttachmentFormat(VkContext::FormatTovkFormat(renderPipelineDescription.DepthFormat))
       .StencilAttachmentFormat(VkContext::FormatTovkFormat(renderPipelineDescription.StencilFormat))
       .PatchControlPoints(renderPipelineDescription.PatchControlPoints)
-      .Build(VulkanDevice, cache, renderPipelineState.PipelineLayout, &renderPipelineState.Pipeline, renderPipelineDescription.DebugName));
+      .Build(VulkanDevice, nullptr, renderPipelineState.PipelineLayout, &renderPipelineState.Pipeline, renderPipelineDescription.DebugName)); //TODO: Store the pipeline Cache
 
     return {this, RenderPipelinePool.Create(std::move(renderPipelineState))};
 }

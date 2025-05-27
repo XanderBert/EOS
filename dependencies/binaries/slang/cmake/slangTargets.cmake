@@ -19,7 +19,7 @@ set(CMAKE_IMPORT_FILE_VERSION 1)
 set(_cmake_targets_defined "")
 set(_cmake_targets_not_defined "")
 set(_cmake_expected_targets "")
-foreach(_cmake_expected_target IN ITEMS slang::slang-llvm slang::slang-glslang slang::slangd slang::gfx slang::slang-glsl-module slang::slang slang::slangc)
+foreach(_cmake_expected_target IN ITEMS slang::slang-llvm slang::slang-glslang slang::slangd slang::slangi slang::gfx slang::slang-glsl-module slang::slang slang::slangc)
   list(APPEND _cmake_expected_targets "${_cmake_expected_target}")
   if(TARGET "${_cmake_expected_target}")
     list(APPEND _cmake_targets_defined "${_cmake_expected_target}")
@@ -65,6 +65,9 @@ add_library(slang::slang-glslang MODULE IMPORTED)
 
 # Create imported target slang::slangd
 add_executable(slang::slangd IMPORTED)
+
+# Create imported target slang::slangi
+add_executable(slang::slangi IMPORTED)
 
 # Create imported target slang::gfx
 add_library(slang::gfx SHARED IMPORTED)
