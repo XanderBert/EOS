@@ -99,7 +99,6 @@ macro(FETCH_SLANG)
     # Check if library was found
     if(NOT SLANG_LIBRARY)
         message(WARNING "Slang library not found at ${SLANG_BASE_PATH}/lib")
-        # You could add a fallback here, like downloading it automatically
     else()
 
         message(STATUS "Found Slang library: ${SLANG_LIBRARY}")

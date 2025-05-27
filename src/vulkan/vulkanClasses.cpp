@@ -986,7 +986,7 @@ void CommandPool::TryResetCommandBuffers()
         }
         else if (result != VK_TIMEOUT)
         {
-            VK_ASSERT(result);
+            CHECK(result == VK_SUCCESS, "Failed Waiting for Fences");
         }
     }
 }
