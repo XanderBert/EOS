@@ -47,7 +47,7 @@ namespace EOS
         std::ofstream out( filePath, std::ios::out | std::ios::binary);
         if (!out.is_open())
         {
-            EOS::Logger->error("I/O error. Cannot Open File '{}'", filePath.c_str());
+            EOS::Logger->error("I/O error. Cannot Open File '{}'", filePath.string().c_str());
         }
 
         out.write(reinterpret_cast<const char*>(content.data()), content.size());
