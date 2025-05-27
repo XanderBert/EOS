@@ -10,16 +10,36 @@
 #include "vkTools.h"
 #include "pool.h"
 
-
-//Forward Declares
+struct VulkanRenderPipelineState;
 struct VulkanShaderModuleState;
 struct VulkanImage;
 class VulkanContext;
 
 static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 
+using VulkanRenderPipelinePool = EOS::Pool<EOS::RenderPipeline, VulkanRenderPipelineState>;
 using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleState>;
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
+
+//TODO: split up in hot and cold data for the pool
+struct VulkanRenderPipelineState final
+{
+    EOS::RenderPipelineDescription Description;
+    uint32_t NumberOfBindings = 0;
+    uint32_t NumberOfAttributes = 0;
+
+    VkVertexInputBindingDescription Bindings[EOS::VertexInputData::MAX_BUFFERS] = {};
+    VkVertexInputAttributeDescription Attributes[EOS::VertexInputData::MAX_ATTRIBUTES] = {};
+
+    // non-owning, the last seen VkDescriptorSetLayout from VulkanContext::VulkanDescriptorSetLayout (if the context has a new layout, invalidate all VkPipeline objects)
+    VkDescriptorSetLayout LastDescriptorSetLayout = VK_NULL_HANDLE;
+
+    VkShaderStageFlags ShaderStageFlags = 0;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+
+    void* SpecConstantDataStorage = nullptr;
+};
 
 //TODO: split up in hot and cold data for the pool
 struct VulkanShaderModuleState final
@@ -50,8 +70,6 @@ public:
     VulkanImage() = default;
     DELETE_COPY(VulkanImage);
 
-    static constexpr uint32_t MaxMipLevels = 6;
-
     VulkanImage (VulkanImage&& other) noexcept = default;
     VulkanImage& operator=(VulkanImage&& other) noexcept = default;
 
@@ -65,6 +83,9 @@ public:
     [[nodiscard]] static VkImageViewType ToImageViewType(EOS::ImageType imageType);
 
     static void CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, EOS::ImageType imageType, const VkFormat& imageFormat, uint32_t levels, uint32_t layers ,const char* debugName);
+
+    [[nodiscard]] VkImageView GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer);
+
 public:
     VkImage Image                           = VK_NULL_HANDLE;
     VkImageUsageFlags UsageFlags            = 0;
@@ -78,11 +99,12 @@ public:
     bool IsOwningImage                      = true;
     uint32_t Levels                         = 1;
     uint32_t Layers                         = 1;
+    const char* DebugName                   = {};
 
-    // precached image views - owned by this VulkanImage
+    // precached image views
     VkImageView ImageView                                   = VK_NULL_HANDLE;       // default view with all mip-levels
     VkImageView ImageViewStorage                            = VK_NULL_HANDLE;       // default view with identity swizzle (all mip-levels)
-    VkImageView ImageViewForFramebuffer[MaxMipLevels][6]  = {};                   // max 6 faces for cubemap rendering
+    VkImageView ImageViewForFramebuffer[EOS_MAX_MIP_LEVELS][6]  = {};                   // max 6 faces for cubemap rendering
 };
 
 struct VulkanSwapChainCreationDescription final
@@ -162,7 +184,7 @@ private:
     friend class VulkanContext;
 };
 
-struct CommandBufferData
+struct CommandBufferData final
 {
     CommandBufferData() = default;
     DELETE_COPY_MOVE(CommandBufferData);
@@ -240,15 +262,73 @@ public:
     EOS::SubmitHandle LastSubmitHandle{};
     CommandBufferData* CommandBufferImpl;
     VulkanContext* VkContext = nullptr;
+
+    bool IsRendering = false;
+    EOS::RenderPipelineHandle CurrentGraphicsPipeline{};
+    EOS::ComputePipelineHandle CurrentComputePipeline{};
+    EOS::RayTracingPipelineHandle CurrentRayTracingPipeline{};
+
+    VkPipeline LastPipelineBound = VK_NULL_HANDLE;
+    EOS::Framebuffer VulkanFrameBuffer{};
 };
 
-struct DeferredTask
+struct DeferredTask final
 {
     DeferredTask(std::packaged_task<void()>&& task, EOS::SubmitHandle handle) : Task(std::move(task)), Handle(handle) {}
     DELETE_COPY_MOVE(DeferredTask);
 
     std::packaged_task<void()> Task;
     EOS::SubmitHandle Handle;
+};
+
+class VulkanPipelineBuilder final
+{
+public:
+    explicit VulkanPipelineBuilder();
+    ~VulkanPipelineBuilder() = default;
+    DELETE_COPY_MOVE(VulkanPipelineBuilder)
+
+
+    VulkanPipelineBuilder& DynamicState(VkDynamicState state);
+    VulkanPipelineBuilder& PrimitiveTypology(VkPrimitiveTopology topology);
+    VulkanPipelineBuilder& RasterizationSamples(VkSampleCountFlagBits samples, float minSampleShading);
+    VulkanPipelineBuilder& ShaderStage(const VkPipelineShaderStageCreateInfo &stage);
+    VulkanPipelineBuilder& CullMode(VkCullModeFlags mode);
+    VulkanPipelineBuilder& StencilStateOps(VkStencilFaceFlags faceMask, VkStencilOp failOp, VkStencilOp passOp, VkStencilOp depthFailOp, VkCompareOp compareOp);
+    VulkanPipelineBuilder& StencilMasks(VkStencilFaceFlags faceMask, uint32_t compareMask, uint32_t writeMask, uint32_t reference);
+    VulkanPipelineBuilder& FrontFace(VkFrontFace mode);
+    VulkanPipelineBuilder& PolygonMode(VkPolygonMode mode);
+    VulkanPipelineBuilder& VertexInputState(const VkPipelineVertexInputStateCreateInfo& state);
+    VulkanPipelineBuilder& ColorAttachments(const VkPipelineColorBlendAttachmentState* states, const VkFormat* formats, uint32_t numColorAttachments);
+    VulkanPipelineBuilder& DepthAttachmentFormat(VkFormat format);
+    VulkanPipelineBuilder& StencilAttachmentFormat(VkFormat format);
+
+    VulkanPipelineBuilder& PatchControlPoints(uint32_t numPoints);
+
+    [[nodiscard]] VkResult Build(VkDevice device, VkPipelineCache pipelineCache, VkPipelineLayout pipelineLayout, VkPipeline* outPipeline, const char* debugName = nullptr) noexcept;
+
+private:
+    static constexpr int32_t MaxDynamicStates = 128;
+    uint32_t NumberOfDynamicStates = 0;
+    uint32_t NumberOfShaderStages = 0;
+    uint32_t NumberOfColorAttachments = 0;
+
+    VkPipelineVertexInputStateCreateInfo VertexInputStateInfo;
+    VkPipelineInputAssemblyStateCreateInfo InputAssemblyState;
+    VkPipelineRasterizationStateCreateInfo RasterizationState;
+    VkPipelineMultisampleStateCreateInfo MultisampleState;
+    VkPipelineDepthStencilStateCreateInfo DepthStencilState;
+    VkPipelineTessellationStateCreateInfo TesselationState;
+
+    VkDynamicState DynamicStates[MaxDynamicStates]{};
+    VkPipelineShaderStageCreateInfo ShaderStages[static_cast<int>(EOS::ShaderStage::Fragment) + 1]{};
+    VkPipelineColorBlendAttachmentState ColorBlendAttachmentStates[EOS_MAX_COLOR_ATTACHMENTS]{};
+
+    VkFormat ColorAttachmentFormats[EOS_MAX_COLOR_ATTACHMENTS]{};
+    VkFormat DepthAttachmentFormatInfo = VK_FORMAT_UNDEFINED;
+    VkFormat StencilAttachmentFormatInfo = VK_FORMAT_UNDEFINED;
+
+    static inline uint32_t NumberOfCreatedPipelines = 0;
 };
 
 class VulkanContext final : public EOS::IContext
@@ -258,19 +338,30 @@ public:
     ~VulkanContext() override;
     DELETE_COPY_MOVE(VulkanContext)
 
+    //Implements EOS::IContext
+
     [[nodiscard]] EOS::ICommandBuffer& AcquireCommandBuffer() override;
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
+    [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo &shaderInfo) override;
+    [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription &renderPipelineDescription) override;
 
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderModuleHandle handle) override;
+    void Destroy(EOS::RenderPipelineHandle handle) override;
 
+    //Deferred Tasks
     void ProcessDeferredTasks() const;
     void Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle = {}) const;
 
+    void GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
+    void BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const;
+    [[nodiscard]] VkDevice GetDevice() const;
+
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
+    VulkanRenderPipelinePool RenderPipelinePool{};
     VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
 private:
@@ -279,7 +370,7 @@ private:
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
-    void WaitOnDeferredTasks();
+    void WaitOnDeferredTasks() const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 
 private:
@@ -291,10 +382,21 @@ private:
     VkSemaphore TimelineSemaphore                   = VK_NULL_HANDLE;
     std::unique_ptr<VulkanSwapChain> SwapChain      = nullptr;
     mutable std::deque<DeferredTask> DeferredTasks;
+        
+    VkDescriptorSetLayout DescriptorSetLayout       = VK_NULL_HANDLE;
+    VkDescriptorPool DescriptorPool                 = VK_NULL_HANDLE;
+    VkDescriptorSet DescriptorSet                   = VK_NULL_HANDLE;
 
-    CommandBuffer CurrentCommandBuffer;         //TODO: This needs to become a map or vector for multithreaded recording.
+    uint32_t CurrentMaxTextures;
+    uint32_t CurrentMaxSamplers;
+    uint32_t CurrentMaxAccelStructs;
+
+    bool HasAccelerationStructure                   = false; //TOOD: Just check size of the pipeline pool for raytracing
+    bool HasRaytracingPipeline                      = false; //TOOD: Just check size of the pipeline pool for raytracing
+
+    CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.
     DeviceQueues VulkanDeviceQueues{};
-    EOS::ContextConfiguration Configuration{}; //TODO: Should the lifetime of this obj be the whole application?
+    EOS::ContextConfiguration Configuration{};              //TODO: Should the lifetime of this obj be the whole application?
 
     friend struct VulkanSwapChain;
     friend struct VulkanSwapChainSupportDetails;

@@ -86,8 +86,8 @@ namespace EOS
             size_t spirvElementCount = bufferSizeInBytes / sizeof(uint32_t);
 
             // Populate outShaderInfo.spirv
-            outShaderInfo.spirv.clear();
-            outShaderInfo.spirv.assign(spirvWordData, spirvWordData + spirvElementCount);
+            outShaderInfo.Spirv.clear();
+            outShaderInfo.Spirv.assign(spirvWordData, spirvWordData + spirvElementCount);
 
             // Write the SPIR-V to disk if requested
             if (shaderCompilationDescription.WriteToDisk)
@@ -106,8 +106,8 @@ namespace EOS
                 std::filesystem::path outputPath = outputDir / (baseName + ".spirv");
 
                 // create a std::string that contains the raw binary data from outShaderInfo.spirv.
-                const char* rawDataBytes = reinterpret_cast<const char*>(outShaderInfo.spirv.data());
-                size_t rawDataSizeBytes = outShaderInfo.spirv.size() * sizeof(uint32_t);
+                const char* rawDataBytes = reinterpret_cast<const char*>(outShaderInfo.Spirv.data());
+                size_t rawDataSizeBytes = outShaderInfo.Spirv.size() * sizeof(uint32_t);
                 std::string contentToWrite(rawDataBytes, rawDataSizeBytes);
 
                 //Write to disk
@@ -118,23 +118,26 @@ namespace EOS
         //Store all the needed information that we need from the shader
         slang::ProgramLayout* reflection = linkedProgram->getLayout();
         slang::EntryPointReflection* entryPointLayout = reflection->getEntryPointByIndex(0);
-        outShaderInfo.shaderStage = ToShaderStage(entryPointLayout);
+        outShaderInfo.ShaderStage = ToShaderStage(entryPointLayout);
 
-
+        size_t lastOffset = 0;
         for (int i{}; i < entryPointLayout->getParameterCount(); ++i)
         {
             VariableLayoutReflection* variableLayout = entryPointLayout->getParameterByIndex(i);
+            const size_t offset = variableLayout->getOffset();
+
+            //This is asumed to be a push constnat
             if (variableLayout->getCategory() == slang::Uniform)
             {
-                //This is asumed to be a push constnat
-                size_t offset = variableLayout->getOffset();
                 TypeReflection* type = variableLayout->getVariable()->getType();
-
-                outShaderInfo.pushConstantSize += offset;
+                outShaderInfo.PushConstantSize += offset - lastOffset;
+                assert(false && "Needs to have a better implementation");
             }
+
+            lastOffset = offset;
         }
 
-        outShaderInfo.debugName = shaderCompilationDescription.Name;
+        outShaderInfo.DebugName = shaderCompilationDescription.Name;
     }
 
     EOS::ShaderStage ShaderCompiler::ToShaderStage(slang::EntryPointReflection *entryPointReflection)

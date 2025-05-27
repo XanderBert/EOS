@@ -76,8 +76,7 @@ namespace EOS
 
     enum class ShaderStage : uint8_t
     {
-        None,
-        Vertex,
+        Vertex = 0,
         Hull,
         Domain,
         Geometry,
@@ -90,6 +89,220 @@ namespace EOS
         Miss,
         Callable,
         Mesh,
-        Amplification
+        Amplification,
+        None,
+    };
+
+    enum class VertexFormat : uint8_t
+    {
+        Invalid = 0,
+
+        Float1,
+        Float2,
+        Float3,
+        Float4,
+
+        Byte1,
+        Byte2,
+        Byte3,
+        Byte4,
+
+        UByte1,
+        UByte2,
+        UByte3,
+        UByte4,
+
+        Short1,
+        Short2,
+        Short3,
+        Short4,
+
+        UShort1,
+        UShort2,
+        UShort3,
+        UShort4,
+
+        Byte2Norm,
+        Byte4Norm,
+
+        UByte2Norm,
+        UByte4Norm,
+
+        Short2Norm,
+        Short4Norm,
+
+        UShort2Norm,
+        UShort4Norm,
+
+        Int1,
+        Int2,
+        Int3,
+        Int4,
+
+        UInt1,
+        UInt2,
+        UInt3,
+        UInt4,
+
+        HalfFloat1,
+        HalfFloat2,
+        HalfFloat3,
+        HalfFloat4,
+    };
+
+    enum class Topology : uint8_t
+    {
+        Point,
+        Line,
+        LineStrip,
+        Triangle,
+        TriangleStrip,
+        Patch,
+    };
+
+    enum class CullMode : uint8_t
+    {
+        None,
+        Front,
+        Back,
+    };
+
+    enum class WindingMode : uint8_t
+    {
+        CounterClockWise,
+        ClockWise
+    };
+
+    enum class Format : uint8_t
+    {
+        Invalid = 0,
+
+        R_UN8,
+        R_UI16,
+        R_UI32,
+        R_UN16,
+        R_F16,
+        R_F32,
+
+        RG_UN8,
+        RG_UI16,
+        RG_UI32,
+        RG_UN16,
+        RG_F16,
+        RG_F32,
+
+        RGBA_UN8,
+        RGBA_UI32,
+        RGBA_F16,
+        RGBA_F32,
+        RGBA_SRGB8,
+        BGRA_UN8,
+
+        BGRA_SRGB8,
+
+        ETC2_RGB8,
+        ETC2_SRGB8,
+
+        BC7_RGBA,
+
+        Z_UN16,
+        Z_UN24,
+        Z_F32,
+        Z_UN24_S_UI8,
+        Z_F32_S_UI8,
+
+        YUV_NV12,
+        YUV_420p,
+    };
+
+
+    enum class BlendOp : uint8_t
+    {
+        Add = 0,
+        Subtract,
+        ReverseSubtract,
+        Min,
+        Max
+    };
+
+    enum class BlendFactor : uint8_t
+    {
+        Zero = 0,
+        One,
+        SrcColor,
+        OneMinusSrcColor,
+        SrcAlpha,
+        OneMinusSrcAlpha,
+        DstColor,
+        OneMinusDstColor,
+        DstAlpha,
+        OneMinusDstAlpha,
+        SrcAlphaSaturated,
+        BlendColor,
+        OneMinusBlendColor,
+        BlendAlpha,
+        OneMinusBlendAlpha,
+        Src1Color,
+        OneMinusSrc1Color,
+        Src1Alpha,
+        OneMinusSrc1Alpha
+    };
+
+    enum class PolygonMode : uint8_t
+    {
+        Fill,
+        Line
+    };
+
+    enum class StencilOp : uint8_t
+    {
+        Keep = 0,
+        Zero,
+        Replace,
+        IncrementClamp,
+        DecrementClamp,
+        Invert,
+        IncrementWrap,
+        DecrementWrap
+    };
+
+    enum class CompareOp : uint8_t
+    {
+        Never = 0,
+        Less,
+        Equal,
+        LessEqual,
+        Greater,
+        NotEqual,
+        GreaterEqual,
+        AlwaysPass
+    };
+
+    // These bindings should match SLANG declarations
+    //TODO: We can inject these bindings into the shadermodule
+    enum Bindings : uint8_t
+    {
+        Textures = 0,
+        Samplers = 1,
+        StorageImages = 2,
+        AccelerationStructures = 2,
+        Count = 4,
+      };
+
+    enum class LoadOp : uint8_t
+    {
+        Invalid = 0,
+        DontCare,
+        Load,
+        Clear,
+        None,
+    };
+
+    enum class StoreOp : uint8_t
+    {
+        DontCare = 0,
+        Store,
+        MsaaResolve,
+        None,
     };
 }

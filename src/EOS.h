@@ -8,9 +8,8 @@
 #include "defines.h"
 #include "enums.h"
 #include "handle.h"
+#include "utils.h"
 #include "window.h"
-
-
 
 namespace EOS
 {
@@ -51,24 +50,26 @@ namespace EOS
 
     struct HardwareDeviceDescription final
     {
-        uintptr_t id{};
-        HardwareDeviceType type { HardwareDeviceType::Integrated} ;
-        std::string name{};
+        uintptr_t ID{};
+        HardwareDeviceType Type { HardwareDeviceType::Integrated} ;
+        std::string Name{};
     };
 
     struct ContextConfiguration final
     {
-        bool enableValidationLayers{ true };
+        bool EnableValidationLayers{ true };
         ColorSpace DesiredSwapChainColorSpace { ColorSpace::SRGB_Linear };
     };
 
     struct ContextCreationDescription final
     {
-        ContextConfiguration    config;
-        HardwareDeviceType      preferredHardwareType{HardwareDeviceType::Discrete};
-        const char*             applicationName{};
-        void*                   window{};
-        void*                   display{};
+        ContextConfiguration    Config;
+        HardwareDeviceType      PreferredHardwareType{HardwareDeviceType::Discrete};
+        const char*             ApplicationName{};
+        void*                   Window{};
+        void*                   Display{};
+        int                     Width{};
+        int                     Height{};
     };
 
     /**
@@ -90,10 +91,184 @@ namespace EOS
 
     struct ShaderInfo final
     {
-        std::vector<uint32_t> spirv;
-        EOS::ShaderStage shaderStage;
-        uint32_t pushConstantSize;
-        const char* debugName;
+        std::vector<uint32_t> Spirv;
+        EOS::ShaderStage ShaderStage;
+        uint32_t PushConstantSize;
+        const char* DebugName;
+    };
+
+    struct VertexInputData final
+    {
+        static constexpr uint32_t MAX_ATTRIBUTES = 16;
+        static constexpr uint32_t MAX_BUFFERS = 16;
+
+        struct VertexAttribute final
+        {
+            uint32_t Location = 0; // a buffer which contains this attribute stream
+            uint32_t Binding = 0;
+            VertexFormat Format = VertexFormat::Invalid; // per-element format
+            uintptr_t Offset = 0; // an offset where the first element of this attribute stream starts
+        } Attributes[MAX_ATTRIBUTES];
+
+        struct VertexInputBinding final
+        {
+            uint32_t Stride = 0;
+        } InputBindings[MAX_BUFFERS];
+
+
+        uint32_t GetNumAttributes() const;
+        uint32_t GetNumInputBindings() const;
+        uint32_t GetVertexSize() const;
+
+        //TODO: This is c-style
+        bool operator==(const VertexInputData& other) const
+        {
+            return memcmp(this, &other, sizeof(VertexInputData)) == 0;
+        }
+    };
+
+    struct SpecializationConstantEntry final
+    {
+        uint32_t ID = 0;
+        uint32_t Offset = 0; // offset within SpecializationConstantDescription::Data
+        size_t Size = 0;
+    };
+
+    struct SpecializationConstantDescription final
+    {
+        static constexpr uint8_t MaxSecializationConstants = 16;
+        SpecializationConstantEntry Entries[MaxSecializationConstants] = {};
+
+        const void* Data = nullptr;
+        size_t DataSize = 0;
+
+        uint32_t GetNumberOfSpecializationConstants() const;
+    };
+
+    struct ColorAttachment final
+    {
+        Format ColorFormat = Format::Invalid;
+        bool BlendEnabled = false;
+
+        BlendOp RGBBlendOp = BlendOp::Add;
+        BlendOp AlphaBlendOp = BlendOp::Add;
+
+        BlendFactor SrcRGBBlendFactor = BlendFactor::One;
+        BlendFactor SrcAlphaBlendFactor = BlendFactor::One;
+        BlendFactor DstRGBBlendFactor = BlendFactor::Zero;
+        BlendFactor DstAlphaBlendFactor = BlendFactor::Zero;
+    };
+
+    struct StencilState final
+    {
+        StencilOp StencilFailureOp = StencilOp::Keep;
+        StencilOp DepthFailureOp = StencilOp::Keep;
+        StencilOp DepthStencilPassOp = StencilOp::Keep;
+        CompareOp StencilCompareOp = CompareOp::AlwaysPass;
+
+        uint32_t ReadMask = 0;
+        uint32_t WriteMask = 0;
+    };
+
+    struct DepthState final
+    {
+        CompareOp CompareOpState = CompareOp::AlwaysPass;
+        bool IsDepthWriteEnabled = false;
+    };
+
+    struct RenderPipelineDescription final
+    {
+        Topology PipelineTopology = Topology::Triangle;
+        VertexInputData VertexInput;
+
+        ShaderModuleHandle VertexShader;
+        ShaderModuleHandle TessellationControlShader;
+        ShaderModuleHandle TesselationShader;
+        ShaderModuleHandle GeometryShader;
+        ShaderModuleHandle TaskShader;
+        ShaderModuleHandle MeshShader;
+        ShaderModuleHandle FragmentShader;
+
+        SpecializationConstantDescription SpecInfo = {};
+
+        const char* EntryPointVert = "main";
+        const char* EntryPointTesc = "main";
+        const char* EntryPointTese = "main";
+        const char* EntryPointGeom = "main";
+        const char* EntryPointTask = "main";
+        const char* EntryPointMesh = "main";
+        const char* EntryPointFrag = "main";
+
+        ColorAttachment ColorAttachments[EOS_MAX_COLOR_ATTACHMENTS] = {};
+        Format DepthFormat = Format::Invalid;
+        Format StencilFormat = Format::Invalid;
+
+        CullMode PipelineCullMode = CullMode::Back;
+        WindingMode FrontFaceWinding = WindingMode::CounterClockWise;
+        PolygonMode PolygonModeDescription = PolygonMode::Fill;
+
+        StencilState BackFaceStencil = {};
+        StencilState FrontFaceStencil = {};
+
+        uint32_t SamplesCount = 1;
+        uint32_t PatchControlPoints = 0;
+        float MinSampleShading = 0.0f;
+
+        const char* DebugName = "";
+
+        uint32_t GetNumColorAttachments() const;
+    };
+
+    struct RenderPass final
+    {
+        struct AttachmentDesc final
+        {
+            LoadOp LoadOpState = LoadOp::Invalid;
+            StoreOp StoreOpState = StoreOp::Store;
+            uint8_t Layer = 0;
+            uint8_t Level = 0;
+            float ClearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            float ClearDepth = 1.0f;
+            uint32_t ClearStencil = 0;
+        };
+
+        AttachmentDesc Color[EOS_MAX_COLOR_ATTACHMENTS]{};
+        AttachmentDesc Depth = {.LoadOpState = LoadOp::DontCare, .StoreOpState = StoreOp::DontCare};
+        AttachmentDesc Stencil = {.LoadOpState = LoadOp::Invalid, .StoreOpState = StoreOp::DontCare};
+
+        uint32_t GetNumColorAttachments() const;
+    };
+
+    struct Framebuffer final
+    {
+        struct AttachmentDesc final
+        {
+            TextureHandle Texture;
+            TextureHandle ResolveTexture;
+        };
+
+        AttachmentDesc Color[EOS_MAX_COLOR_ATTACHMENTS]{};
+        AttachmentDesc DepthStencil{};
+        const char* DebugName = "";
+
+        uint32_t GetNumColorAttachments() const;
+    };
+
+    struct Dependencies final
+    {
+        constexpr static  uint8_t MaxSubmitDependencies = 4;
+        TextureHandle Textures[MaxSubmitDependencies]{};
+        BufferHandle Buffers[MaxSubmitDependencies]{};
+    };
+
+    struct Viewport final
+    {
+        float X = 0.0f;
+        float Y = 0.0f;
+        float Width = 1.0f;
+        float Height = 1.0f;
+        float MinDepth = 0.0f;
+        float MaxDepth = 1.0f;
     };
 
 #pragma region INTERFACES
@@ -138,11 +313,24 @@ namespace EOS
         virtual TextureHandle GetSwapChainTexture() = 0;
 
         /**
+        * @brief Gets the format to the currently in use SwapChain.
+        * @return The format of the currently in use SwapChain.
+        */
+        virtual Format GetSwapchainFormat() const = 0;
+
+        /**
         * @brief Creates shader module from a compiled shader.
         * @param shaderInfo information about the shader such as its code and stage.
         * @return A Holder Handle to a shader module.
         */
         virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) = 0;
+
+        /**
+         * @brief Creates a RenderPipeline and returns a handle to it.
+         * @param renderPipelineDescription The description about what type of pipeline we want to create and what it exists of.
+         * @return A Holder Handle to a Render Pipeline.
+         */
+        virtual EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const RenderPipelineDescription& renderPipelineDescription) = 0;
 
         /**
         * @brief Handles the destruction of a TextureHandle and what it holds.
@@ -156,6 +344,12 @@ namespace EOS
         * @param handle The handle to the shaderModule you want to destroy.
         */
         virtual void Destroy(ShaderModuleHandle handle) = 0;
+
+        /**
+        * @brief Handles the destruction of a RenderPipelineHandle and what it holds.
+        * @param handle The handle to the Renderpipeline you want to destroy.
+        */
+        virtual void Destroy(RenderPipelineHandle handle) = 0;
 
     protected:
         IContext() = default;
@@ -277,4 +471,55 @@ namespace EOS
 * @param imageBarriers The imageBarriers we want to insert
 */
 void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers);
+
+
+/**
+ * @brief Add a command to the commandbuffer that we will now start rendering, defining what should be rendered and what dependencies we have.
+ * @param commandBuffer The commandbuffer where we add the command to.
+ * @param renderPass Describes what how our framebuffer attachements should be loaded / stored ...
+ * @param description Describes our actual textures we want to use for rendering.
+ * @param dependancies Describes the depandancies of this "Pass".
+ */
+void cmdBeginRendering(EOS::ICommandBuffer& commandBuffer, const EOS::RenderPass& renderPass, EOS::Framebuffer& description, const EOS::Dependencies& dependancies = {});
+
+/**
+ * @brief Add a command to the commandbuffer that we will now end rendering
+ * @param commandBuffer The commandbuffer we want to record into
+ */
+void cmdEndRendering(EOS::ICommandBuffer& commandBuffer);
+
+/**
+ * @brief Records the command to bind the specified graphics pipeline.
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param renderPipelineHandle The handle to the pipeline we want to bind.
+ */
+void cmdBindRenderPipeline(EOS::ICommandBuffer& commandBuffer, EOS::RenderPipelineHandle renderPipelineHandle);
+
+/**
+ * @brief Records a simple draw command into the specified commandbuffer
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param vertexCount The amount of vertices we want to record.
+ * @param instanceCount The amount of instances to draw.
+ * @param firstVertex The index of the first vertex to draw.
+ * @param baseInstance The instance ID of the first instance to draw.
+ */
+void cmdDraw(const EOS::ICommandBuffer& commandBuffer, uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t baseInstance = 0);
+
+
+/**
+ * @brief Adds a debug marker that is visible in debug software.
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param label The name of the marker.
+ * @param colorRGBA The color of the marker.
+ */
+void cmdPushMarker(const EOS::ICommandBuffer& commandBuffer, const char* label, uint32_t colorRGBA);
+
+/**
+ * @brief Pops the last set debug marker.
+ * @param commandBuffer  The commandbuffer we want to record into.
+ */
+void cmdPopMarker(const EOS::ICommandBuffer& commandBuffer);
+
+
+
 #pragma endregion

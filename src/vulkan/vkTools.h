@@ -12,10 +12,10 @@
 }
 
 #pragma region ForwardDeclare
-
 struct DeviceQueues;
 namespace EOS
 {
+    struct SpecializationConstantDescription;
     struct HardwareDeviceDescription;
     enum class ColorSpace : uint8_t;
 }
@@ -85,7 +85,7 @@ namespace VkDebug
     }
 }
 
-//TODO: Move them back to VulkanContext -> private
+//TODO: Move most of them back to VulkanContext -> private
 namespace VkContext
 {
     [[nodiscard]] uint32_t FindQueueFamilyIndex(const VkPhysicalDevice& physicalDevice, VkQueueFlags flags);
@@ -102,6 +102,29 @@ namespace VkContext
     void GetDeviceExtensions(const VkPhysicalDevice& vulkanPhysicalDevice, std::vector<VkExtensionProperties>& allDeviceExtensions);
     void GetPhysicalDeviceProperties(VkPhysicalDeviceProperties2& physicalDeviceProperties, VkPhysicalDeviceDriverProperties& physicalDeviceDriverProperties, VkPhysicalDevice physicalDevice, uint32_t SDKMinorVersion);
     void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues);
+
+    [[nodiscard]] EOS::Format vkFormatToFormat(VkFormat format);
+    [[nodiscard]] VkFormat FormatTovkFormat(EOS::Format format);
+    [[nodiscard]] VkFormat VertexFormatToVkFormat(EOS::VertexFormat format);
+    [[nodiscard]] VkBlendFactor BlendFactorToVkBlendFactor(EOS::BlendFactor value);
+    [[nodiscard]] VkBlendOp BlendOpToVkBlendOp(EOS::BlendOp value);
+
+    [[nodiscard]] VkSpecializationInfo GetPipelineShaderStageSpecializationInfo(const EOS::SpecializationConstantDescription& specializationDescription,  VkSpecializationMapEntry* outEntries);
+    [[nodiscard]] VkPipelineShaderStageCreateInfo GetPipelineShaderStageCreateInfo(VkShaderStageFlagBits stage, VkShaderModule shaderModule, const char* entryPoint, const VkSpecializationInfo* specializationInfo);
+    [[nodiscard]] VkStencilOp StencilOpToVkStencilOp(const EOS::StencilOp op);
+    [[nodiscard]] VkCompareOp CompareOpToVkCompareOp(const EOS::CompareOp func);
+    [[nodiscard]] VkPrimitiveTopology TopologyToVkPrimitiveTopology(EOS::Topology t);
+    [[nodiscard]] VkPolygonMode PolygonModeToVkPolygonMode(EOS::PolygonMode mode);
+    [[nodiscard]] VkCullModeFlags CullModeToVkCullMode(EOS::CullMode mode);
+    [[nodiscard]] VkFrontFace WindingModeToVkFrontFace(EOS::WindingMode mode);
+
+    [[nodiscard]] VkSampleCountFlagBits GetVulkanSampleCountFlags(uint32_t numSamples, VkSampleCountFlags maxSamplesMask);
+    [[nodiscard]] uint32_t GetFramebufferMSAABitMask(VkPhysicalDevice physicalDevice);
+
+    [[nodiscard]] VkDescriptorSetLayoutBinding GetDSLBinding(uint32_t binding, VkDescriptorType descriptorType, uint32_t descriptorCount, VkShaderStageFlags stageFlags);
+
+    [[nodiscard]] VkAttachmentLoadOp LoadOpToVkAttachmentLoadOp(EOS::LoadOp loadOp);
+    [[nodiscard]] VkAttachmentStoreOp StoreOpToVkAttachmentStoreOp(EOS::StoreOp storeOp);
 }
 
 namespace VkSynchronization

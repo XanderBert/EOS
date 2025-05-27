@@ -1,6 +1,10 @@
 #pragma once
+#include <cassert>
+#include <filesystem>
 #include <string>
-#include "EOS.h"
+
+#include "enums.h"
+
 
 namespace EOS
 {
@@ -15,4 +19,7 @@ namespace EOS
     * @return
     */
     void WriteFile(const std::filesystem::path& filePath, const std::string& content);
+
+
+    uint32_t GetVertexFormatSize(const EOS::VertexFormat format);
 }

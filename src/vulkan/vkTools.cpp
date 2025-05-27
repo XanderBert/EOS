@@ -314,11 +314,11 @@ namespace VkContext
         for (const auto& device : hardwareDevices)
         {
             constexpr int DEVICE_TYPE_WEIGHT = 1000;
-            const auto vkDevice = reinterpret_cast<VkPhysicalDevice>(device.id);
+            const auto vkDevice = reinterpret_cast<VkPhysicalDevice>(device.ID);
             DeviceScore scoreEntry{&device};
 
             //Check device type
-            switch (device.type)
+            switch (device.Type)
             {
                 case EOS::HardwareDeviceType::Discrete:
                     scoreEntry.score += DEVICE_TYPE_WEIGHT * 4;
@@ -376,14 +376,14 @@ namespace VkContext
 
         if (bestDevice != scoredDevices.end() && bestDevice->suitable)
         {
-            physicalDevice = reinterpret_cast<VkPhysicalDevice>(bestDevice->desc->id);
+            physicalDevice = reinterpret_cast<VkPhysicalDevice>(bestDevice->desc->ID);
 
-            EOS::Logger->info("Selected device: {} (Score: {})", bestDevice->desc->name, bestDevice->score);
+            EOS::Logger->info("Selected device: {} (Score: {})", bestDevice->desc->Name, bestDevice->score);
         } else
         {
             // Fallback to first device with warning
-            physicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().id);
-            EOS::Logger->warn("No optimal device found! Using fallback: {}", hardwareDevices.back().name);
+            physicalDevice = reinterpret_cast<VkPhysicalDevice>(hardwareDevices.back().ID);
+            EOS::Logger->warn("No optimal device found! Using fallback: {}", hardwareDevices.back().Name);
         }
     }
 
@@ -731,6 +731,547 @@ namespace VkContext
         //Fill in our Device Queue's
         vkGetDeviceQueue(device, deviceQueues.Compute.QueueFamilyIndex, 0, &deviceQueues.Compute.Queue);
         vkGetDeviceQueue(device, deviceQueues.Graphics.QueueFamilyIndex, 0, &deviceQueues.Graphics.Queue);
+    }
+
+    EOS::Format vkFormatToFormat(VkFormat format)
+    {
+        switch (format)
+        {
+            case VK_FORMAT_UNDEFINED:
+                return EOS::Format::Invalid;
+            case VK_FORMAT_R8_UNORM:
+                return EOS::Format::R_UN8;
+            case VK_FORMAT_R16_UNORM:
+                return EOS::Format::R_UN16;
+            case VK_FORMAT_R16_SFLOAT:
+                return EOS::Format::R_F16;
+            case VK_FORMAT_R16_UINT:
+                return EOS::Format::R_UI16;
+            case VK_FORMAT_R8G8_UNORM:
+                return EOS::Format::RG_UN8;
+            case VK_FORMAT_B8G8R8A8_UNORM:
+                return EOS::Format::BGRA_UN8;
+            case VK_FORMAT_R8G8B8A8_UNORM:
+                return EOS::Format::RGBA_UN8;
+            case VK_FORMAT_R8G8B8A8_SRGB:
+                return EOS::Format::RGBA_SRGB8;
+            case VK_FORMAT_B8G8R8A8_SRGB:
+                return EOS::Format::BGRA_SRGB8;
+            case VK_FORMAT_R16G16_UNORM:
+                return EOS::Format::RG_UN16;
+            case VK_FORMAT_R16G16_SFLOAT:
+                return EOS::Format::RG_F16;
+            case VK_FORMAT_R32G32_SFLOAT:
+                return EOS::Format::RG_F32;
+            case VK_FORMAT_R16G16_UINT:
+                return EOS::Format::RG_UI16;
+            case VK_FORMAT_R32_SFLOAT:
+                return EOS::Format::R_F32;
+            case VK_FORMAT_R16G16B16A16_SFLOAT:
+                return EOS::Format::RGBA_F16;
+            case VK_FORMAT_R32G32B32A32_UINT:
+                return EOS::Format::RGBA_UI32;
+            case VK_FORMAT_R32G32B32A32_SFLOAT:
+                return EOS::Format::RGBA_F32;
+            case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK:
+                return EOS::Format::ETC2_RGB8;
+            case VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK:
+                return EOS::Format::ETC2_SRGB8;
+            case VK_FORMAT_D16_UNORM:
+                return EOS::Format::Z_UN16;
+            case VK_FORMAT_BC7_UNORM_BLOCK:
+                return EOS::Format::BC7_RGBA;
+            case VK_FORMAT_X8_D24_UNORM_PACK32:
+                return EOS::Format::Z_UN24;
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+                return EOS::Format::Z_UN24_S_UI8;
+            case VK_FORMAT_D32_SFLOAT:
+                return EOS::Format::Z_F32;
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                return EOS::Format::Z_F32_S_UI8;
+            case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
+                return EOS::Format::YUV_NV12;
+            case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
+                return EOS::Format::YUV_420p;
+            default:;
+        }
+
+        CHECK(false, "VkFormat value not handled: {}", static_cast<int>(format));
+        return EOS::Format::Invalid;
+
+    }
+
+    VkFormat FormatTovkFormat(EOS::Format format)
+    {
+        switch (format)
+        {
+            case EOS::Format::Invalid:
+                return VK_FORMAT_UNDEFINED;
+            case EOS::Format::R_UN8:
+                return VK_FORMAT_R8_UNORM;
+            case EOS::Format::R_UN16:
+                return VK_FORMAT_R16_UNORM;
+            case EOS::Format::R_F16:
+                return VK_FORMAT_R16_SFLOAT;
+            case EOS::Format::R_UI16:
+                return VK_FORMAT_R16_UINT;
+            case EOS::Format::RG_UN8:
+                return VK_FORMAT_R8G8_UNORM;
+            case EOS::Format::BGRA_UN8:
+                return VK_FORMAT_B8G8R8A8_UNORM;
+            case EOS::Format::RGBA_UN8:
+                return VK_FORMAT_R8G8B8A8_UNORM;
+            case EOS::Format::RGBA_SRGB8:
+                return VK_FORMAT_R8G8B8A8_SRGB;
+            case EOS::Format::BGRA_SRGB8:
+                return VK_FORMAT_B8G8R8A8_SRGB;
+            case EOS::Format::RG_UN16:
+                return VK_FORMAT_R16G16_UNORM;
+            case EOS::Format::RG_F16:
+                return VK_FORMAT_R16G16_SFLOAT;
+            case EOS::Format::RG_F32:
+                return VK_FORMAT_R32G32_SFLOAT;
+            case EOS::Format::RG_UI16:
+                return VK_FORMAT_R16G16_UINT;
+            case EOS::Format::R_F32:
+                return VK_FORMAT_R32_SFLOAT;
+            case EOS::Format::RGBA_F16:
+                return VK_FORMAT_R16G16B16A16_SFLOAT;
+            case EOS::Format::RGBA_UI32:
+                return VK_FORMAT_R32G32B32A32_UINT;
+            case EOS::Format::RGBA_F32:
+                return VK_FORMAT_R32G32B32A32_SFLOAT;
+            case EOS::Format::ETC2_RGB8:
+                return VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK;
+            case EOS::Format::ETC2_SRGB8:
+                return VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK;
+            case EOS::Format::Z_UN16:
+                return VK_FORMAT_D16_UNORM;
+            case EOS::Format::BC7_RGBA:
+                return VK_FORMAT_BC7_UNORM_BLOCK;
+            case EOS::Format::Z_UN24:
+                return VK_FORMAT_X8_D24_UNORM_PACK32;
+            case EOS::Format::Z_UN24_S_UI8:
+                return VK_FORMAT_D24_UNORM_S8_UINT;
+            case EOS::Format::Z_F32:
+                return  VK_FORMAT_D32_SFLOAT;
+            case EOS::Format::Z_F32_S_UI8:
+                return VK_FORMAT_D32_SFLOAT_S8_UINT;
+            case EOS::Format::YUV_NV12:
+                return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+            case EOS::Format::YUV_420p:
+                return VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
+            default:;
+        }
+
+        CHECK(false, "VkFormat value not handled: {}", static_cast<int>(format));
+        return VK_FORMAT_UNDEFINED;;
+    }
+
+    VkFormat VertexFormatToVkFormat(EOS::VertexFormat format)
+    {
+        using EOS::VertexFormat;
+        switch (format)
+        {
+            case VertexFormat::Invalid:
+              CHECK(false, "The Format is not valid");
+              return VK_FORMAT_UNDEFINED;
+            case VertexFormat::Float1:
+              return VK_FORMAT_R32_SFLOAT;
+            case VertexFormat::Float2:
+              return VK_FORMAT_R32G32_SFLOAT;
+            case VertexFormat::Float3:
+              return VK_FORMAT_R32G32B32_SFLOAT;
+            case VertexFormat::Float4:
+              return VK_FORMAT_R32G32B32A32_SFLOAT;
+            case VertexFormat::Byte1:
+              return VK_FORMAT_R8_SINT;
+            case VertexFormat::Byte2:
+              return VK_FORMAT_R8G8_SINT;
+            case VertexFormat::Byte3:
+              return VK_FORMAT_R8G8B8_SINT;
+            case VertexFormat::Byte4:
+              return VK_FORMAT_R8G8B8A8_SINT;
+            case VertexFormat::UByte1:
+              return VK_FORMAT_R8_UINT;
+            case VertexFormat::UByte2:
+              return VK_FORMAT_R8G8_UINT;
+            case VertexFormat::UByte3:
+              return VK_FORMAT_R8G8B8_UINT;
+            case VertexFormat::UByte4:
+              return VK_FORMAT_R8G8B8A8_UINT;
+            case VertexFormat::Short1:
+              return VK_FORMAT_R16_SINT;
+            case VertexFormat::Short2:
+              return VK_FORMAT_R16G16_SINT;
+            case VertexFormat::Short3:
+              return VK_FORMAT_R16G16B16_SINT;
+            case VertexFormat::Short4:
+              return VK_FORMAT_R16G16B16A16_SINT;
+            case VertexFormat::UShort1:
+              return VK_FORMAT_R16_UINT;
+            case VertexFormat::UShort2:
+              return VK_FORMAT_R16G16_UINT;
+            case VertexFormat::UShort3:
+              return VK_FORMAT_R16G16B16_UINT;
+            case VertexFormat::UShort4:
+              return VK_FORMAT_R16G16B16A16_UINT;
+            case VertexFormat::Byte2Norm:
+              return VK_FORMAT_R8G8_SNORM;
+            case VertexFormat::Byte4Norm:
+              return VK_FORMAT_R8G8B8A8_SNORM;
+            case VertexFormat::UByte2Norm:
+              return VK_FORMAT_R8G8_UNORM;
+            case VertexFormat::UByte4Norm:
+              return VK_FORMAT_R8G8B8A8_UNORM;
+            case VertexFormat::Short2Norm:
+              return VK_FORMAT_R16G16_SNORM;
+            case VertexFormat::Short4Norm:
+              return VK_FORMAT_R16G16B16A16_SNORM;
+            case VertexFormat::UShort2Norm:
+              return VK_FORMAT_R16G16_UNORM;
+            case VertexFormat::UShort4Norm:
+              return VK_FORMAT_R16G16B16A16_UNORM;
+            case VertexFormat::Int1:
+              return VK_FORMAT_R32_SINT;
+            case VertexFormat::Int2:
+              return VK_FORMAT_R32G32_SINT;
+            case VertexFormat::Int3:
+              return VK_FORMAT_R32G32B32_SINT;
+            case VertexFormat::Int4:
+              return VK_FORMAT_R32G32B32A32_SINT;
+            case VertexFormat::UInt1:
+              return VK_FORMAT_R32_UINT;
+            case VertexFormat::UInt2:
+              return VK_FORMAT_R32G32_UINT;
+            case VertexFormat::UInt3:
+              return VK_FORMAT_R32G32B32_UINT;
+            case VertexFormat::UInt4:
+              return VK_FORMAT_R32G32B32A32_UINT;
+            case VertexFormat::HalfFloat1:
+              return VK_FORMAT_R16_SFLOAT;
+            case VertexFormat::HalfFloat2:
+              return VK_FORMAT_R16G16_SFLOAT;
+            case VertexFormat::HalfFloat3:
+              return VK_FORMAT_R16G16B16_SFLOAT;
+            case VertexFormat::HalfFloat4:
+              return VK_FORMAT_R16G16B16A16_SFLOAT;
+        }
+        CHECK(false, "Could not determine the format");
+        return VK_FORMAT_UNDEFINED;
+    }
+
+    VkBlendFactor BlendFactorToVkBlendFactor(EOS::BlendFactor value)
+    {
+        switch (value)
+        {
+            case EOS::BlendFactor::Zero:
+                return VK_BLEND_FACTOR_ZERO;
+            case EOS::BlendFactor::One:
+                return VK_BLEND_FACTOR_ONE;
+            case EOS::BlendFactor::SrcColor:
+                return VK_BLEND_FACTOR_SRC_COLOR;
+            case EOS::BlendFactor::OneMinusSrcColor:
+                return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+            case EOS::BlendFactor::DstColor:
+                return VK_BLEND_FACTOR_DST_COLOR;
+            case EOS::BlendFactor::OneMinusDstColor:
+                return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+            case EOS::BlendFactor::SrcAlpha:
+                return VK_BLEND_FACTOR_SRC_ALPHA;
+            case EOS::BlendFactor::OneMinusSrcAlpha:
+                return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            case EOS::BlendFactor::DstAlpha:
+                return VK_BLEND_FACTOR_DST_ALPHA;
+            case EOS::BlendFactor::OneMinusDstAlpha:
+                return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+            case EOS::BlendFactor::BlendColor:
+                return VK_BLEND_FACTOR_CONSTANT_COLOR;
+            case EOS::BlendFactor::OneMinusBlendColor:
+                return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+            case EOS::BlendFactor::BlendAlpha:
+                return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+            case EOS::BlendFactor::OneMinusBlendAlpha:
+                return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+            case EOS::BlendFactor::SrcAlphaSaturated:
+                return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+            case EOS::BlendFactor::Src1Color:
+                return VK_BLEND_FACTOR_SRC1_COLOR;
+            case EOS::BlendFactor::OneMinusSrc1Color:
+                return VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR;
+            case EOS::BlendFactor::Src1Alpha:
+                return VK_BLEND_FACTOR_SRC1_ALPHA;
+            case EOS::BlendFactor::OneMinusSrc1Alpha:
+                return VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
+            default:
+                CHECK(false, "Could not find a proper VkBlendFactor");
+                return VK_BLEND_FACTOR_ONE; // default for unsupported values
+        }
+    }
+
+    VkBlendOp BlendOpToVkBlendOp(EOS::BlendOp value)
+    {
+        switch (value)
+        {
+            case EOS::BlendOp::Add:
+                return VK_BLEND_OP_ADD;
+            case EOS::BlendOp::Subtract:
+                return VK_BLEND_OP_SUBTRACT;
+            case EOS::BlendOp::ReverseSubtract:
+                return VK_BLEND_OP_REVERSE_SUBTRACT;
+            case EOS::BlendOp::Min:
+                return VK_BLEND_OP_MIN;
+            case EOS::BlendOp::Max:
+                return VK_BLEND_OP_MAX;
+        }
+
+        CHECK(false, "Could not find proper VkBlendOp");
+        return VK_BLEND_OP_ADD;
+    }
+
+    VkSpecializationInfo GetPipelineShaderStageSpecializationInfo(const EOS::SpecializationConstantDescription &specializationDescription, VkSpecializationMapEntry *outEntries)
+    {
+        const uint32_t numEntries = specializationDescription.GetNumberOfSpecializationConstants();
+        if (outEntries)
+        {
+            for (uint32_t i{}; i != numEntries; ++i)
+            {
+                outEntries[i] = VkSpecializationMapEntry
+                {
+                    .constantID = specializationDescription.Entries[i].ID,
+                    .offset = specializationDescription.Entries[i].Offset,
+                    .size = specializationDescription.Entries[i].Size,
+                };
+            }
+        }
+
+        return VkSpecializationInfo
+        {
+            .mapEntryCount = numEntries,
+            .pMapEntries = outEntries,
+            .dataSize = specializationDescription.DataSize,
+            .pData = specializationDescription.Data,
+        };
+    }
+
+    VkPipelineShaderStageCreateInfo GetPipelineShaderStageCreateInfo(VkShaderStageFlagBits stage,
+        VkShaderModule shaderModule, const char *entryPoint, const VkSpecializationInfo *specializationInfo)
+    {
+        return VkPipelineShaderStageCreateInfo
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .flags = 0,
+            .stage = stage,
+            .module = shaderModule,
+            .pName = entryPoint ? entryPoint : "main",
+            .pSpecializationInfo = specializationInfo,
+        };
+    }
+
+    VkStencilOp StencilOpToVkStencilOp(const EOS::StencilOp op)
+    {
+        switch (op)
+        {
+            case EOS::StencilOp::Keep:
+                return VK_STENCIL_OP_KEEP;
+            case EOS::StencilOp::Zero:
+                return VK_STENCIL_OP_ZERO;
+            case EOS::StencilOp::Replace:
+                return VK_STENCIL_OP_REPLACE;
+            case EOS::StencilOp::IncrementClamp:
+                return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+            case EOS::StencilOp::DecrementClamp:
+                return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+            case EOS::StencilOp::Invert:
+                return VK_STENCIL_OP_INVERT;
+            case EOS::StencilOp::IncrementWrap:
+                return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+            case EOS::StencilOp::DecrementWrap:
+                return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+        }
+        CHECK(false, "Could not fin right Stencil OP");
+        return VK_STENCIL_OP_KEEP;
+    }
+
+    VkCompareOp CompareOpToVkCompareOp(const EOS::CompareOp func)
+    {
+        switch (func)
+        {
+            case EOS::CompareOp::Never:
+                return VK_COMPARE_OP_NEVER;
+            case EOS::CompareOp::Less:
+                return VK_COMPARE_OP_LESS;
+            case EOS::CompareOp::Equal:
+                return VK_COMPARE_OP_EQUAL;
+            case EOS::CompareOp::LessEqual:
+                return VK_COMPARE_OP_LESS_OR_EQUAL;
+            case EOS::CompareOp::Greater:
+                return VK_COMPARE_OP_GREATER;
+            case EOS::CompareOp::NotEqual:
+                return VK_COMPARE_OP_NOT_EQUAL;
+            case EOS::CompareOp::GreaterEqual:
+                return VK_COMPARE_OP_GREATER_OR_EQUAL;
+            case EOS::CompareOp::AlwaysPass:
+                return VK_COMPARE_OP_ALWAYS;
+        }
+        CHECK(false, "CompareFunction value not handled: {}", static_cast<int>(func));
+        return VK_COMPARE_OP_ALWAYS;
+    }
+
+    VkPrimitiveTopology TopologyToVkPrimitiveTopology(EOS::Topology t)
+    {
+        switch (t)
+        {
+            case EOS::Topology::Point:
+                return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+            case EOS::Topology::Line:
+                return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+            case EOS::Topology::LineStrip:
+                return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+            case EOS::Topology::Triangle:
+                return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            case EOS::Topology::TriangleStrip:
+                return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+            case EOS::Topology::Patch:
+                return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+        }
+        CHECK(false, "Implement Topology = {}", static_cast<uint32_t>(t));
+        return VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
+    }
+
+    VkPolygonMode PolygonModeToVkPolygonMode(EOS::PolygonMode mode)
+    {
+        switch (mode)
+        {
+            case EOS::PolygonMode::Fill:
+                return VK_POLYGON_MODE_FILL;
+            case EOS::PolygonMode::Line:
+                return VK_POLYGON_MODE_LINE;
+        }
+        CHECK(false, "Implement a missing polygon fill mode");
+        return VK_POLYGON_MODE_FILL;
+    }
+
+    VkCullModeFlags CullModeToVkCullMode(EOS::CullMode mode)
+    {
+        switch (mode)
+        {
+            case EOS::CullMode::None:
+                return VK_CULL_MODE_NONE;
+            case EOS::CullMode::Front:
+                return VK_CULL_MODE_FRONT_BIT;
+            case EOS::CullMode::Back:
+                return VK_CULL_MODE_BACK_BIT;
+        }
+        CHECK(false, "Implement a missing cull mode");
+        return VK_CULL_MODE_NONE;
+    }
+
+    VkFrontFace WindingModeToVkFrontFace(EOS::WindingMode mode)
+    {
+        switch (mode) {
+            case EOS::WindingMode::CounterClockWise:
+                return VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            case EOS::WindingMode::ClockWise:
+                return VK_FRONT_FACE_CLOCKWISE;
+        }
+
+        CHECK(false, "Cannot determine Winding Mode");
+        return VK_FRONT_FACE_CLOCKWISE;
+    }
+
+    VkSampleCountFlagBits GetVulkanSampleCountFlags(uint32_t numSamples, VkSampleCountFlags maxSamplesMask)
+    {
+        if (numSamples <= 1 || VK_SAMPLE_COUNT_2_BIT > maxSamplesMask)
+        {
+            return VK_SAMPLE_COUNT_1_BIT;
+        }
+
+        if (numSamples <= 2 || VK_SAMPLE_COUNT_4_BIT > maxSamplesMask)
+        {
+            return VK_SAMPLE_COUNT_2_BIT;
+        }
+
+        if (numSamples <= 4 || VK_SAMPLE_COUNT_8_BIT > maxSamplesMask)
+        {
+            return VK_SAMPLE_COUNT_4_BIT;
+        }
+
+        if (numSamples <= 8 || VK_SAMPLE_COUNT_16_BIT > maxSamplesMask)
+        {
+            return VK_SAMPLE_COUNT_8_BIT;
+        }
+
+        if (numSamples <= 16 || VK_SAMPLE_COUNT_32_BIT > maxSamplesMask)
+        {
+            return VK_SAMPLE_COUNT_16_BIT;
+        }
+
+        if (numSamples <= 32 || VK_SAMPLE_COUNT_64_BIT > maxSamplesMask)
+        {
+            return VK_SAMPLE_COUNT_32_BIT;
+        }
+
+        return VK_SAMPLE_COUNT_64_BIT;
+    }
+
+    uint32_t GetFramebufferMSAABitMask(VkPhysicalDevice physicalDevice)
+    {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(physicalDevice, &props);
+        return props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts;
+    }
+
+    VkDescriptorSetLayoutBinding GetDSLBinding(uint32_t binding, VkDescriptorType descriptorType, uint32_t descriptorCount, VkShaderStageFlags stageFlags)
+    {
+        return VkDescriptorSetLayoutBinding
+        {
+            .binding = binding,
+            .descriptorType = descriptorType,
+            .descriptorCount = descriptorCount,
+            .stageFlags = stageFlags,
+            .pImmutableSamplers = nullptr,
+        };
+    }
+
+    VkAttachmentLoadOp LoadOpToVkAttachmentLoadOp(EOS::LoadOp loadOp)
+    {
+        switch (loadOp)
+        {
+            case EOS::LoadOp::Invalid:
+                CHECK(false, "LoadOp is in a Invalid state");
+                return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            case EOS::LoadOp::DontCare:
+                return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            case EOS::LoadOp::Load:
+                return VK_ATTACHMENT_LOAD_OP_LOAD;
+            case EOS::LoadOp::Clear:
+                return VK_ATTACHMENT_LOAD_OP_CLEAR;
+            case EOS::LoadOp::None:
+                return VK_ATTACHMENT_LOAD_OP_NONE_EXT;
+        }
+
+        CHECK(false, "Could not resolve LoadOp");
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    }
+
+    VkAttachmentStoreOp StoreOpToVkAttachmentStoreOp(EOS::StoreOp storeOp)
+    {
+        switch (storeOp)
+        {
+            case EOS::StoreOp::DontCare:
+                return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            case EOS::StoreOp::Store:
+                return VK_ATTACHMENT_STORE_OP_STORE;
+            case EOS::StoreOp::MsaaResolve:
+                // for MSAA resolve, we have to store data into a special "resolve" attachment
+                return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            case EOS::StoreOp::None:
+                return VK_ATTACHMENT_STORE_OP_NONE;
+        }
+
+        CHECK(false, "Could not resolve StoreOp");
+        return VK_ATTACHMENT_STORE_OP_DONT_CARE;
     }
 };
 

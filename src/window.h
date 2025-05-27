@@ -15,7 +15,7 @@ namespace EOS
         DELETE_COPY_MOVE(Window)
 
         //Fills in the window data in the Context Description
-        static GLFWwindow* InitWindow(ContextCreationDescription& contextDescription, uint32_t& outWidth, uint32_t& outHeight);
+        static GLFWwindow* InitWindow(ContextCreationDescription& contextDescription);
 
         inline static void DestroyWindow(GLFWwindow* window)
         {

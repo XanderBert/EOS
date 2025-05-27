@@ -1,7 +1,6 @@
 #pragma once
 #include <slang-include.h>
 #include <filesystem>
-#include <vector>
 
 #include "defines.h"
 #include "EOS.h"

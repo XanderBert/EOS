@@ -76,8 +76,276 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
 
     vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
 }
-#pragma endregion
 
+void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description, const EOS::Dependencies &dependancies)
+{
+    CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+
+    CHECK(!vulkanCommandBuffer->IsRendering, "Make sure you call cmdEndRendering before calling cmdBeginRendering again");
+    vulkanCommandBuffer->IsRendering = true;
+
+    const uint32_t numberOfFrameBufferColorAttachments = description.GetNumColorAttachments();
+    const uint32_t numberOfPassColorAttachments = renderPass.GetNumColorAttachments();
+
+    CHECK(numberOfFrameBufferColorAttachments == numberOfPassColorAttachments, "Make sure that the amount of described color attachments in the renderpass and framebuffer are the same.");
+    vulkanCommandBuffer->VulkanFrameBuffer = std::move(description);
+
+
+    VulkanTexturePool& texturePool = vulkanCommandBuffer->VkContext->TexturePool;
+
+    //Handle Rendering Attachements
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+    uint32_t mipLevel = 0;
+    uint32_t frameBufferWidth = 0;
+    uint32_t frameBufferHeight = 0;
+    VkRenderingAttachmentInfo colorAttachments[EOS_MAX_COLOR_ATTACHMENTS];
+    for (uint32_t i{}; i != numberOfPassColorAttachments; ++i)
+    {
+        const EOS::Framebuffer::AttachmentDesc& attachment = vulkanCommandBuffer->VulkanFrameBuffer.Color[i];
+        CHECK(!attachment.Texture.Empty(), "The passed color attachement is empty");
+
+        VulkanImage& colorTexture = *texturePool.Get(attachment.Texture);
+        const EOS::RenderPass::AttachmentDesc& descColor = renderPass.Color[i];
+        const VkExtent3D dimension = colorTexture.Extent;
+
+        //Check levels
+        if (mipLevel && descColor.Level)
+        {
+            CHECK(descColor.Level == mipLevel, "All color attachments should have the same mip-level");
+        }
+
+        //Check attachment width
+        if (frameBufferWidth)
+        {
+            CHECK(dimension.width == frameBufferWidth, "All attachments should have the same width");
+        }
+
+        //Check attachement height
+        if (frameBufferHeight)
+        {
+            CHECK(dimension.height == frameBufferHeight, "All attachments should have the same height");
+        }
+
+        mipLevel = descColor.Level;
+        frameBufferWidth = dimension.width;
+        frameBufferHeight = dimension.height;
+        samples = colorTexture.Samples;
+
+        colorAttachments[i] =
+        {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .pNext = nullptr,
+            .imageView = colorTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descColor.Level, descColor.Layer),
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .resolveMode = (samples > 1) ? VK_RESOLVE_MODE_AVERAGE_BIT : VK_RESOLVE_MODE_NONE,
+            .resolveImageView = VK_NULL_HANDLE,
+            .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .loadOp = VkContext::LoadOpToVkAttachmentLoadOp(descColor.LoadOpState),
+            .storeOp = VkContext::StoreOpToVkAttachmentStoreOp(descColor.StoreOpState),
+            .clearValue = {.color = {.float32 = {descColor.ClearColor[0], descColor.ClearColor[1], descColor.ClearColor[2], descColor.ClearColor[3]}}},
+        };
+
+        // handle MSAA
+        if (descColor.StoreOpState == EOS::StoreOp::MsaaResolve)
+        {
+            CHECK(samples > 1, "A MSAA Resolve should have more then 1 sample");
+            CHECK(!attachment.ResolveTexture.Empty(), "Framebuffer attachment should contain a resolve texture");
+            VulkanImage& colorResolveTexture = *texturePool.Get(attachment.ResolveTexture);
+            colorAttachments[i].resolveImageView = colorResolveTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descColor.Level, descColor.Layer);
+            colorAttachments[i].resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        }
+    }
+
+    //Handle the depth attachment
+    VkRenderingAttachmentInfo depthAttachment{};
+    EOS::TextureHandle depthTextureHandle = vulkanCommandBuffer->VulkanFrameBuffer.DepthStencil.Texture;
+    if (depthTextureHandle)
+    {
+        VulkanImage& depthTexture = *texturePool.Get(vulkanCommandBuffer->VulkanFrameBuffer.DepthStencil.Texture);
+        const EOS::RenderPass::AttachmentDesc& descDepth = renderPass.Depth;
+        CHECK(descDepth.Level == mipLevel, "Depth attachment should have the same mip-level as color attachments");
+
+        depthAttachment =
+        {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .pNext = nullptr,
+            .imageView = depthTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer),
+            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .resolveMode = VK_RESOLVE_MODE_NONE,
+            .resolveImageView = VK_NULL_HANDLE,
+            .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .loadOp = VkContext::LoadOpToVkAttachmentLoadOp(descDepth.LoadOpState),
+            .storeOp = VkContext::StoreOpToVkAttachmentStoreOp(descDepth.StoreOpState),
+            .clearValue = {.depthStencil = {.depth = descDepth.ClearDepth, .stencil = descDepth.ClearStencil}},
+        };
+
+        // handle depth MSAA
+        if (descDepth.StoreOpState == EOS::StoreOp::MsaaResolve)
+        {
+            CHECK(depthTexture.Samples == samples, "You need the same amount of samples for you depth texture.");
+            const EOS::Framebuffer::AttachmentDesc& attachment = vulkanCommandBuffer->VulkanFrameBuffer.DepthStencil;
+            CHECK(!attachment.ResolveTexture.Empty(), "Framebuffer depth attachment should contain a resolve texture");
+
+            VulkanImage& depthResolveTexture = *texturePool.Get(attachment.ResolveTexture);
+            depthAttachment.resolveImageView = depthResolveTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer);
+            depthAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            depthAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+        }
+
+        const VkExtent3D dim = depthTexture.Extent;
+        if (frameBufferWidth)
+        {
+            CHECK(dim.width == frameBufferWidth, "All attachments should have the same width");
+        }
+
+        if (frameBufferHeight)
+        {
+            CHECK(dim.height == frameBufferHeight, "All attachments should have the same height");
+        }
+
+        mipLevel = descDepth.Level;
+        frameBufferWidth = dim.width;
+        frameBufferHeight = dim.height;
+    }
+
+    const uint32_t width = std::max(frameBufferWidth >> mipLevel, 1u);
+    const uint32_t height = std::max(frameBufferHeight >> mipLevel, 1u);
+
+    const EOS::Viewport viewport = {0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, +1.0f};
+    VkRenderingAttachmentInfo stencilAttachment = depthAttachment;
+
+    const bool isStencilFormat = renderPass.Stencil.LoadOpState != EOS::LoadOp::Invalid;
+    const VkRenderingInfo renderingInfo
+    {
+      .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+      .pNext = nullptr,
+      .flags = 0,
+      .renderArea = {VkOffset2D{0u, 0u}, VkExtent2D{width, height}},
+      .layerCount = 1,
+      .viewMask = 0,
+      .colorAttachmentCount = numberOfPassColorAttachments,
+      .pColorAttachments = colorAttachments,
+      .pDepthAttachment = depthTextureHandle ? &depthAttachment : nullptr,
+      .pStencilAttachment = isStencilFormat ? &stencilAttachment : nullptr,
+    };
+
+    // Set the viewport
+    const VkViewport vp
+    {
+        .x = viewport.X,
+        .y = viewport.Height - viewport.Y,
+        .width = viewport.Width,
+        .height = -viewport.Height,
+        .minDepth = viewport.MinDepth,
+        .maxDepth = viewport.MaxDepth,
+    };
+    vkCmdSetViewport(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &vp);
+
+    // Set the scissors
+    const VkRect2D scissor
+    {
+        VkOffset2D{static_cast<int32_t>(viewport.X), static_cast<int32_t>(viewport.Y)},
+        VkExtent2D{static_cast<uint>(viewport.Width), static_cast<uint>(viewport.Height)},
+    };
+    vkCmdSetScissor(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &scissor);
+
+    // Set the Depth states
+    EOS::DepthState state{};
+    const VkCompareOp op = VkContext::CompareOpToVkCompareOp(state.CompareOpState);
+    vkCmdSetDepthWriteEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, state.IsDepthWriteEnabled ? VK_TRUE : VK_FALSE);
+    vkCmdSetDepthTestEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op != VK_COMPARE_OP_ALWAYS || state.IsDepthWriteEnabled);
+    vkCmdSetDepthCompareOp(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op);
+
+    //CheckAndUpdateDescriptorSets(); -> TODO: this is a solution but we can avoid to check this every frame, what about we add any descriptor sets...
+    vkCmdSetDepthBiasEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_FALSE);
+    vkCmdBeginRendering(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &renderingInfo);
+}
+
+void cmdEndRendering(EOS::ICommandBuffer &commandBuffer)
+{
+    CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+    CHECK(vulkanCommandBuffer->IsRendering, "Cannot end rendering if it hasn't started yet.");
+    vulkanCommandBuffer->IsRendering = false;
+    vulkanCommandBuffer->LastPipelineBound = nullptr;
+
+    vkCmdEndRendering(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
+
+    EOS::Framebuffer& frambuffer = vulkanCommandBuffer->VulkanFrameBuffer;
+    frambuffer = {};
+}
+
+void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipelineHandle renderPipelineHandle)
+{
+    CHECK(!renderPipelineHandle.Empty(), "The passed renderPipelineHandle needs to be a valid handle");
+    CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+
+    vulkanCommandBuffer->CurrentGraphicsPipeline = std::move(renderPipelineHandle);
+    vulkanCommandBuffer->CurrentComputePipeline = {};
+    vulkanCommandBuffer->CurrentRayTracingPipeline = {};
+
+    VulkanRenderPipelinePool& renderPipelinePool = vulkanCommandBuffer->VkContext->RenderPipelinePool;
+    const VulkanRenderPipelineState* rps = renderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
+    CHECK(rps, "The resolved RenderPipeline State is not valid");
+
+    const bool hasDepthAttachmentPipeline = rps->Description.DepthFormat != EOS::Format::Invalid;
+    const bool hasDepthAttachmentPass = !vulkanCommandBuffer->VulkanFrameBuffer.DepthStencil.Texture.Empty();
+    CHECK(hasDepthAttachmentPipeline == hasDepthAttachmentPass, "Make sure your render pass and render pipeline both have matching depth attachments");
+    CHECK(rps->Pipeline != VK_NULL_HANDLE, "The Vulkan Pipeline is a NULL Handle, It did not got created");
+
+    //TODO: make sure this this is if is not needed,
+    //We can sort the render loop based on pipelines...
+    if (vulkanCommandBuffer->LastPipelineBound != rps->Pipeline)
+    {
+        vulkanCommandBuffer->LastPipelineBound = rps->Pipeline;
+        vkCmdBindPipeline(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rps->Pipeline);
+        vulkanCommandBuffer->VkContext->BindDefaultDescriptorSet(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rps->PipelineLayout);
+    }
+}
+
+void cmdDraw(const EOS::ICommandBuffer &commandBuffer, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t baseInstance)
+{
+    if (vertexCount == 0)
+    {
+        return;
+    }
+
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    vkCmdDraw(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, vertexCount, instanceCount, firstVertex, baseInstance);
+}
+
+void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
+{
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    vkCmdEndDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
+}
+
+void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, uint32_t colorRGBA)
+{
+    CHECK(label, "You need to have a name set for the marker");
+
+    if (!label)
+    {
+        return;
+    }
+
+    const VkDebugUtilsLabelEXT utilsLabel
+    {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pNext = nullptr,
+        .pLabelName = label,
+        .color
+        {
+            static_cast<float>((colorRGBA >> 0) & 0xff) / 255.0f,
+            static_cast<float>((colorRGBA >> 8) & 0xff) / 255.0f,
+            static_cast<float>((colorRGBA >> 16) & 0xff) / 255.0f,
+            static_cast<float>((colorRGBA >> 24) & 0xff) / 255.0f
+        },
+    };
+
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    vkCmdBeginDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &utilsLabel);
+}
+#pragma endregion
 
 
 VulkanImage::VulkanImage(const ImageDescription &description)
@@ -88,9 +356,10 @@ VulkanImage::VulkanImage(const ImageDescription &description)
 , ImageFormat(description.ImageFormat)
 , Levels(description.Levels)
 , Layers(description.Layers)
+, DebugName(description.DebugName)
 {
-    VK_ASSERT(VkDebug::SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), description.DebugName));
-    CreateImageView(ImageView, description.Device, Image, ImageType, ImageFormat, Levels, Layers, description.DebugName);
+    VK_ASSERT(VkDebug::SetDebugObjectName(description.Device, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(Image), DebugName));
+    CreateImageView(ImageView, description.Device, Image, ImageType, ImageFormat, Levels, Layers, DebugName);
 }
 
 VkImageType VulkanImage::ToImageType(const EOS::ImageType imageType)
@@ -157,14 +426,30 @@ void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkIma
     VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_IMAGE_VIEW, reinterpret_cast<uint64_t>(imageView), debugName));
 }
 
+VkImageView VulkanImage::GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer)
+{
+    CHECK(level < EOS_MAX_MIP_LEVELS, "Specified level is bigger then the maximum supported mip levels");
+    CHECK(layer < ARRAY_COUNT(ImageViewForFramebuffer[0]), "You can have no more then the set layers");
 
+    if (level >= EOS_MAX_MIP_LEVELS || layer >= ARRAY_COUNT(ImageViewForFramebuffer[0]))
+    {
+        return VK_NULL_HANDLE;
+    }
+
+    if (ImageViewForFramebuffer[level][layer] != VK_NULL_HANDLE)
+    {
+        return ImageViewForFramebuffer[level][layer];
+    }
+    CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, fmt::format("{} - Framebuffer Image View [{}][{}]", DebugName , level, layer).c_str());
+
+    return ImageViewForFramebuffer[level][layer];
+}
 VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
 : VkContext(vulkanSwapChainDescription.vulkanContext)
 , GraphicsQueue(vulkanSwapChainDescription.vulkanContext->VulkanDeviceQueues.Graphics.Queue)
 {
     CHECK(VkContext, "VulkanContext is not valid.");
     CHECK(GraphicsQueue, "GraphicsQueue is not valid.");
-
 
     //Get details of what we support
     const VulkanSwapChainSupportDetails supportDetails{*VkContext};
@@ -280,12 +565,12 @@ VulkanSwapChain::~VulkanSwapChain()
         VkContext->Destroy(handle);
     }
 
-    vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
-
     for (const VkSemaphore& semaphore : AcquireSemaphores)
     {
         vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
     }
+
+    vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
 }
 
 void VulkanSwapChain::Present(VkSemaphore waitSemaphore)
@@ -654,7 +939,6 @@ CommandBufferData* CommandPool::AcquireCommandBuffer()
     {
         if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE)
         {
-            //TODO: This needs to be a copy, otherwise it will be moved out of the Buffers?
             currentCommandBuffer = &buffer;
             break;
         }
@@ -729,34 +1013,328 @@ CommandBuffer::operator bool() const
     return VkContext != nullptr;
 }
 
+VulkanPipelineBuilder::VulkanPipelineBuilder()
+    //TODO: set theses states again after .Build() and make static
+    : VertexInputStateInfo(VkPipelineVertexInputStateCreateInfo
+          {
+              .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+              .vertexBindingDescriptionCount = 0,
+              .pVertexBindingDescriptions = nullptr,
+              .vertexAttributeDescriptionCount = 0,
+              .pVertexAttributeDescriptions = nullptr,
+          })
+    , InputAssemblyState(
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .flags = 0,
+            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .primitiveRestartEnable = VK_FALSE,
+        })
+    , RasterizationState(
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .flags = 0,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = VK_CULL_MODE_NONE,
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .depthBiasEnable = VK_FALSE,
+            .depthBiasConstantFactor = 0.0f,
+            .depthBiasClamp = 0.0f,
+            .depthBiasSlopeFactor = 0.0f,
+            .lineWidth = 1.0f,
+        })
+    , MultisampleState(
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+            .sampleShadingEnable = VK_FALSE,
+            .minSampleShading = 0.0f,
+            .pSampleMask = nullptr,
+            .alphaToCoverageEnable = VK_FALSE,
+            .alphaToOneEnable = VK_FALSE,
+        })
+    , DepthStencilState(
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .pNext = VK_NULL_HANDLE,
+            .flags = 0,
+            .depthTestEnable = VK_FALSE,
+            .depthWriteEnable = VK_FALSE,
+            .depthCompareOp = VK_COMPARE_OP_LESS,
+            .depthBoundsTestEnable = VK_FALSE,
+            .stencilTestEnable = VK_FALSE,
+            .front =
+            {
+                .failOp = VK_STENCIL_OP_KEEP,
+                .passOp = VK_STENCIL_OP_KEEP,
+                .depthFailOp = VK_STENCIL_OP_KEEP,
+                .compareOp = VK_COMPARE_OP_NEVER,
+                .compareMask = 0,
+                .writeMask = 0,
+                .reference = 0,
+            },
+            .back =
+            {
+                .failOp = VK_STENCIL_OP_KEEP,
+                .passOp = VK_STENCIL_OP_KEEP,
+                .depthFailOp = VK_STENCIL_OP_KEEP,
+                .compareOp = VK_COMPARE_OP_NEVER,
+                .compareMask = 0,
+                .writeMask = 0,
+                .reference = 0,
+            },
+            .minDepthBounds = 0.0f,
+            .maxDepthBounds = 1.0f,
+        })
+    , TesselationState(
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+            .flags = 0,
+            .patchControlPoints = 0,
+        }){}
+
+VulkanPipelineBuilder& VulkanPipelineBuilder::DynamicState(const VkDynamicState state)
+{
+    CHECK(NumberOfDynamicStates < MaxDynamicStates, "You can have no more then MaxDynamicStates in a single VulkanPipeline");
+    DynamicStates[NumberOfDynamicStates++] = state;
+
+    return *this;
+}
+
+VulkanPipelineBuilder& VulkanPipelineBuilder::PrimitiveTypology(const VkPrimitiveTopology topology)
+{
+    InputAssemblyState.topology = topology;
+    return *this;
+}
+
+VulkanPipelineBuilder& VulkanPipelineBuilder::RasterizationSamples(const VkSampleCountFlagBits samples, const float minSampleShading)
+{
+    MultisampleState.rasterizationSamples = samples;
+    MultisampleState.sampleShadingEnable = minSampleShading > 0 ? VK_TRUE : VK_FALSE;
+    MultisampleState.minSampleShading = minSampleShading;
+
+    return *this;
+}
+
+VulkanPipelineBuilder& VulkanPipelineBuilder::ShaderStage(const VkPipelineShaderStageCreateInfo &stage)
+{
+    if (stage.module != VK_NULL_HANDLE)
+    {
+        CHECK(NumberOfShaderStages < ARRAY_COUNT(ShaderStages), "You can have no more of Max Shader Stages Count of shader stages");
+        ShaderStages[NumberOfShaderStages++] = stage;
+    }
+
+    return *this;
+}
+
+VulkanPipelineBuilder& VulkanPipelineBuilder::CullMode(const VkCullModeFlags mode)
+{
+    RasterizationState.cullMode = mode;
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::StencilStateOps(const VkStencilFaceFlags faceMask, const VkStencilOp failOp, const VkStencilOp passOp, const VkStencilOp depthFailOp, const VkCompareOp compareOp)
+{
+    DepthStencilState.stencilTestEnable = DepthStencilState.stencilTestEnable == VK_TRUE || failOp != VK_STENCIL_OP_KEEP || passOp != VK_STENCIL_OP_KEEP || depthFailOp != VK_STENCIL_OP_KEEP || compareOp != VK_COMPARE_OP_ALWAYS
+                                             ? VK_TRUE
+                                             : VK_FALSE;
+
+    if (faceMask & VK_STENCIL_FACE_FRONT_BIT)
+    {
+        VkStencilOpState& s = DepthStencilState.front;
+        s.failOp = failOp;
+        s.passOp = passOp;
+        s.depthFailOp = depthFailOp;
+        s.compareOp = compareOp;
+    }
+
+    if (faceMask & VK_STENCIL_FACE_BACK_BIT)
+    {
+        VkStencilOpState& s = DepthStencilState.back;
+        s.failOp = failOp;
+        s.passOp = passOp;
+        s.depthFailOp = depthFailOp;
+        s.compareOp = compareOp;
+    }
+
+    return *this;
+}
+
+VulkanPipelineBuilder& VulkanPipelineBuilder::StencilMasks(VkStencilFaceFlags faceMask, uint32_t compareMask, uint32_t writeMask, uint32_t reference)
+{
+    if (faceMask & VK_STENCIL_FACE_FRONT_BIT)
+    {
+        VkStencilOpState& s = DepthStencilState.front;
+        s.compareMask = compareMask;
+        s.writeMask = writeMask;
+        s.reference = reference;
+    }
+
+    if (faceMask & VK_STENCIL_FACE_BACK_BIT)
+    {
+        VkStencilOpState& s = DepthStencilState.back;
+        s.compareMask = compareMask;
+        s.writeMask = writeMask;
+        s.reference = reference;
+    }
+
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::FrontFace(const VkFrontFace mode)
+{
+    RasterizationState.frontFace = mode;
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::PolygonMode(const VkPolygonMode mode)
+{
+    RasterizationState.polygonMode = mode;
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::VertexInputState(const VkPipelineVertexInputStateCreateInfo& state)
+{
+    VertexInputStateInfo = state;
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::ColorAttachments(const VkPipelineColorBlendAttachmentState* states,const VkFormat* formats, uint32_t numColorAttachments)
+{
+    CHECK(states, "States are not valid");
+    CHECK(formats, "Formats are not valid");
+    CHECK(numColorAttachments <= ARRAY_COUNT(ColorBlendAttachmentStates), "You can have no more then {} ColorAttachments", ARRAY_COUNT(ColorBlendAttachmentStates));
+    CHECK(numColorAttachments <= ARRAY_COUNT(ColorAttachmentFormats), "You can have no more then {} ColorAttachments", ARRAY_COUNT(ColorBlendAttachmentStates));
+
+    for (uint32_t i{}; i != numColorAttachments; ++i)
+    {
+        ColorBlendAttachmentStates[i] = states[i];
+        ColorAttachmentFormats[i] = formats[i];
+    }
+    NumberOfColorAttachments = numColorAttachments;
+
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::DepthAttachmentFormat(VkFormat format)
+{
+    DepthAttachmentFormatInfo = format;
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::StencilAttachmentFormat(VkFormat format)
+{
+    StencilAttachmentFormatInfo = format;
+    return *this;
+}
+
+VulkanPipelineBuilder & VulkanPipelineBuilder::PatchControlPoints(uint32_t numPoints)
+{
+    TesselationState.patchControlPoints = numPoints;
+    return *this;
+}
+
+VkResult VulkanPipelineBuilder::Build(VkDevice device, VkPipelineCache pipelineCache, VkPipelineLayout pipelineLayout, VkPipeline*outPipeline, const char *debugName) noexcept
+{
+    const VkPipelineDynamicStateCreateInfo dynamicState
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = NumberOfDynamicStates,
+        .pDynamicStates = DynamicStates,
+    };
+
+    // viewport and scissor can be NULL if the viewport state is dynamic
+    constexpr VkPipelineViewportStateCreateInfo viewportState
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = nullptr,
+        .scissorCount = 1,
+        .pScissors = nullptr,
+    };
+
+    const VkPipelineColorBlendStateCreateInfo colorBlendState
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOpEnable = VK_FALSE,
+        .logicOp = VK_LOGIC_OP_COPY,
+        .attachmentCount = NumberOfColorAttachments,
+        .pAttachments = ColorBlendAttachmentStates,
+    };
+
+    const VkPipelineRenderingCreateInfo renderingInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
+        .pNext = nullptr,
+        .colorAttachmentCount = NumberOfColorAttachments,
+        .pColorAttachmentFormats = ColorAttachmentFormats,
+        .depthAttachmentFormat = DepthAttachmentFormatInfo,
+        .stencilAttachmentFormat = DepthAttachmentFormatInfo,
+    };
+
+    const VkGraphicsPipelineCreateInfo ci
+    {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &renderingInfo,
+        .flags = 0,
+        .stageCount = NumberOfShaderStages,
+        .pStages = ShaderStages,
+        .pVertexInputState = &VertexInputStateInfo,
+        .pInputAssemblyState = &InputAssemblyState,
+        .pTessellationState = &TesselationState,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &RasterizationState,
+        .pMultisampleState = &MultisampleState,
+        .pDepthStencilState = &DepthStencilState,
+        .pColorBlendState = &colorBlendState,
+        .pDynamicState = &dynamicState,
+        .layout = pipelineLayout,
+        .renderPass = VK_NULL_HANDLE,
+        .subpass = 0,
+        .basePipelineHandle = VK_NULL_HANDLE,
+        .basePipelineIndex = -1,
+    };
+
+    const VkResult result = vkCreateGraphicsPipelines(device, nullptr, 1, &ci, nullptr, outPipeline);
+    CHECK(result == VK_SUCCESS, "Could Not Create Graphics Pipeline");
+
+    if (result != VK_SUCCESS)
+    {
+        return result;
+    }
+
+    ++NumberOfCreatedPipelines;
+    return VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(*outPipeline), debugName);
+}
+
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
-: Configuration(contextDescription.config)
+: Configuration(contextDescription.Config)
 {
     CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
 
-    CreateVulkanInstance(contextDescription.applicationName);
+    CreateVulkanInstance(contextDescription.ApplicationName);
     SetupDebugMessenger();
-    CreateSurface(contextDescription.window, contextDescription.display);
+    CreateSurface(contextDescription.Window, contextDescription.Display);
 
     //Select the Physical Device
     std::vector<EOS::HardwareDeviceDescription> hardwareDevices;
-    GetHardwareDevice(contextDescription.preferredHardwareType, hardwareDevices);
+    GetHardwareDevice(contextDescription.PreferredHardwareType, hardwareDevices);
     VkContext::SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
 
     //Create our Vulkan Device
     VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
 
     //Create SwapChain
-    //TODO: will it need a description struct?
     VulkanSwapChainCreationDescription desc
     {
         .vulkanContext = this,
-        .width = 100,
-        .height = 80,
+        .width = static_cast<uint32_t>(contextDescription.Width),
+        .height = static_cast<uint32_t>(contextDescription.Height),
     };
 
     SwapChain = std::make_unique<VulkanSwapChain>(desc);
-
 
     //Create our Timeline Semaphore
     TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
@@ -764,12 +1342,13 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     //Create our CommandPool
     VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
 
-
     //TODO: pipeline cache
 
     //TODO: VMA init
 
     //TODO: Staging Device
+
+    GrowDescriptorPool(16, 16, 1);
 }
 
 VulkanContext::~VulkanContext()
@@ -777,8 +1356,7 @@ VulkanContext::~VulkanContext()
     //Wait unit all work has been done
     VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
 
-    SwapChain.reset(nullptr);
-
+    SwapChain.reset();
     vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
 
     if (TexturePool.NumObjects())
@@ -792,6 +1370,12 @@ VulkanContext::~VulkanContext()
         EOS::Logger->error("{} Leaked Shader Modules", ShaderModulePool.NumObjects());
     }
     ShaderModulePool.Clear();
+
+    if (RenderPipelinePool.NumObjects())
+    {
+        EOS::Logger->error("{} Leaked Render Pipelines", RenderPipelinePool.NumObjects());
+    }
+    RenderPipelinePool.Clear();
 
     WaitOnDeferredTasks();
 
@@ -871,6 +1455,17 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
     return swapChainTexture;
 }
 
+EOS::Format VulkanContext::GetSwapchainFormat() const
+{
+    if (!HasSwapChain())
+    {
+        EOS::Logger->error("Context: {} does not have a valid swapchain", reinterpret_cast<uint64_t>(this));
+        return EOS::Format::Invalid;
+    }
+
+    return VkContext::vkFormatToFormat(SwapChain->GetFormat().format);
+}
+
 EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS::ShaderInfo &shaderInfo)
 {
     VkShaderModule vkShaderModule = VK_NULL_HANDLE;
@@ -878,22 +1473,288 @@ EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS
     const VkShaderModuleCreateInfo createInfo =
     {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = shaderInfo.spirv.size() * sizeof(uint32_t),
-        .pCode = shaderInfo.spirv.data(),
+        .codeSize = shaderInfo.Spirv.size() * sizeof(uint32_t),
+        .pCode = shaderInfo.Spirv.data(),
     };
 
     VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &vkShaderModule);)
     CHECK(vkShaderModule != VK_NULL_HANDLE, "Failed to create shader module from ShaderInfo");
 
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(vkShaderModule), shaderInfo.debugName));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(vkShaderModule), shaderInfo.DebugName));
 
     VulkanShaderModuleState state
     {
         .ShaderModule = vkShaderModule,
-        .PushConstantsSize = shaderInfo.pushConstantSize
+        .PushConstantsSize = shaderInfo.PushConstantSize
     };
 
     return {this, ShaderModulePool.Create(std::move(state))};
+}
+
+EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const EOS::RenderPipelineDescription &renderPipelineDescription)
+{
+    //Check Attachments
+    const bool hasColorAttachments = renderPipelineDescription.GetNumColorAttachments() > 0;
+    const bool hasDepthAttachment = renderPipelineDescription.DepthFormat != EOS::Format::Invalid;
+    const bool hasAnyAttachments = hasColorAttachments || hasDepthAttachment;
+
+    CHECK(hasAnyAttachments, "At least one attachment is needed in a render pipeline");
+    if (!hasAnyAttachments) { return {};  }
+
+    //Check Tesselation Setup
+    if (renderPipelineDescription.TessellationControlShader.Valid() || renderPipelineDescription.TesselationShader.Valid() || renderPipelineDescription.PatchControlPoints)
+    {
+        const bool isTesselationOkay = renderPipelineDescription.TessellationControlShader.Valid() && renderPipelineDescription.TesselationShader.Valid();
+        CHECK(isTesselationOkay, "You need both Tesselation Control and Evaluation Shaders");
+
+        if (!isTesselationOkay){return {}; }
+
+        //Device Properties
+        VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
+        VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
+        uint32_t SDKApiVersion{};
+        vkEnumerateInstanceVersion(&SDKApiVersion);
+        const uint32_t SDKMinor = VK_API_VERSION_MINOR(SDKApiVersion);
+        VkContext::GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice, SDKMinor);
+
+        const bool areControlPointsOkay = renderPipelineDescription.PatchControlPoints > 0 && renderPipelineDescription.PatchControlPoints < vkPhysicalDeviceProperties2.properties.limits.maxTessellationPatchSize;
+        CHECK(areControlPointsOkay, "You can have no more tesselation control points then: {} or less then: 1", vkPhysicalDeviceProperties2.properties.limits.maxTessellationPatchSize);
+        if (!areControlPointsOkay){ return {}; }
+    }
+
+    const bool hasVertexShader = renderPipelineDescription.VertexShader.Valid();
+
+    //Check Mesh Shader Setup
+    if (renderPipelineDescription.MeshShader.Valid())
+    {
+        CHECK(!hasVertexShader, "Cannot have vertex shader with mesh shaders");
+        if (hasVertexShader) {return {}; }
+
+        const bool hasAttributesOrInputBindings = renderPipelineDescription.VertexInput.GetNumAttributes() == 0 && renderPipelineDescription.VertexInput.GetNumInputBindings() == 0;
+        CHECK(!hasAttributesOrInputBindings, "Cannot have vertexInput with mesh shaders");
+        if (hasAttributesOrInputBindings) {return {}; }
+
+        const bool hasTesselationShader = renderPipelineDescription.TesselationShader.Valid() || renderPipelineDescription.TessellationControlShader.Valid();
+        CHECK(!hasTesselationShader, "Cannot have tesselation shader with mesh shaders");
+        if (hasTesselationShader) {return {}; }
+
+        const bool hasGeometryShader = renderPipelineDescription.GeometryShader.Valid();
+        CHECK(!hasGeometryShader, "Cannot have geometry shader with mesh shaders");
+        if (hasGeometryShader){return {}; }
+    }
+    else
+    {
+        CHECK(hasVertexShader, "You need a vertex shader for a renderpipeline that doesn't use a mesh shader");
+        if (!hasVertexShader) {return {}; }
+    }
+
+    const bool hasFragmentShader = renderPipelineDescription.FragmentShader.Valid();
+    CHECK(hasFragmentShader, "Missing fragment shader");
+    if (!hasFragmentShader){return {}; }
+
+
+    VulkanRenderPipelineState renderPipelineState = {.Description = renderPipelineDescription};
+
+    // Iterate and cache vertex input bindings and attributes
+    const EOS::VertexInputData& vertexInput = renderPipelineState.Description.VertexInput;
+
+    bool bufferAlreadyBound[EOS::VertexInputData::MAX_BUFFERS]{};
+
+    renderPipelineState.NumberOfAttributes = vertexInput.GetNumAttributes();
+
+    for (uint32_t i{}; i != renderPipelineState.NumberOfAttributes; ++i)
+    {
+        const EOS::VertexInputData::VertexAttribute& attr = vertexInput.Attributes[i];
+
+        renderPipelineState.Attributes[i] =
+        {
+            .location = attr.Location,
+            .binding = attr.Binding,
+            .format = VkContext::VertexFormatToVkFormat(attr.Format),
+            .offset = static_cast<uint32_t>(attr.Offset)
+        };
+
+        if (!bufferAlreadyBound[attr.Binding])
+        {
+            bufferAlreadyBound[attr.Binding] = true;
+            renderPipelineState.Bindings[renderPipelineState.NumberOfBindings++] =
+            {
+                .binding = attr.Binding,
+                .stride = vertexInput.InputBindings[attr.Binding].Stride,
+                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+            };
+        }
+    }
+
+    if (renderPipelineDescription.SpecInfo.Data && renderPipelineDescription.SpecInfo.DataSize)
+    {
+        // copy into a local storage
+        renderPipelineState.SpecConstantDataStorage = malloc(renderPipelineDescription.SpecInfo.DataSize);
+        memcpy(renderPipelineState.SpecConstantDataStorage, renderPipelineDescription.SpecInfo.Data, renderPipelineDescription.SpecInfo.DataSize);
+        renderPipelineState.Description.SpecInfo.Data = renderPipelineState.SpecConstantDataStorage;
+    }
+
+    //Create the vulkan pipeline and pipeline layout
+    // build a new Vulkan pipeline
+    const EOS::RenderPipelineDescription& description = renderPipelineState.Description;
+    const uint32_t numColorAttachments = description.GetNumColorAttachments();
+
+
+    // Not all attachments are valid. We need to create color blend attachments only for active attachments
+    VkPipelineColorBlendAttachmentState colorBlendAttachmentStates[EOS_MAX_COLOR_ATTACHMENTS]{};
+    VkFormat colorAttachmentFormats[EOS_MAX_COLOR_ATTACHMENTS]{};
+
+    for (uint32_t i{}; i != numColorAttachments; ++i)
+    {
+        const EOS::ColorAttachment& attachment = description.ColorAttachments[i];
+        CHECK(attachment.ColorFormat != EOS::Format::Invalid, "The Color Attachment Format is invalid.");
+
+        colorAttachmentFormats[i] = VkContext::FormatTovkFormat(attachment.ColorFormat);
+        if (!attachment.BlendEnabled)
+        {
+            colorBlendAttachmentStates[i] = VkPipelineColorBlendAttachmentState
+            {
+                .blendEnable = VK_FALSE,
+                .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+                .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+                .colorBlendOp = VK_BLEND_OP_ADD,
+                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+                .alphaBlendOp = VK_BLEND_OP_ADD,
+                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+            };
+        }
+        else
+        {
+            colorBlendAttachmentStates[i] = VkPipelineColorBlendAttachmentState
+            {
+                .blendEnable = VK_TRUE,
+                .srcColorBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.SrcRGBBlendFactor),
+                .dstColorBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.DstRGBBlendFactor),
+                .colorBlendOp = VkContext::BlendOpToVkBlendOp(attachment.RGBBlendOp),
+                .srcAlphaBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.SrcAlphaBlendFactor),
+                .dstAlphaBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.DstAlphaBlendFactor),
+                .alphaBlendOp = VkContext::BlendOpToVkBlendOp(attachment.AlphaBlendOp),
+                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+            };
+        }
+    }
+
+    const VulkanShaderModuleState* vertModule = ShaderModulePool.Get(description.VertexShader);
+    const VulkanShaderModuleState* tescModule = ShaderModulePool.Get(description.TessellationControlShader);
+    const VulkanShaderModuleState* teseModule = ShaderModulePool.Get(description.TesselationShader);
+    const VulkanShaderModuleState* geomModule = ShaderModulePool.Get(description.GeometryShader);
+    const VulkanShaderModuleState* fragModule = ShaderModulePool.Get(description.FragmentShader);
+    const VulkanShaderModuleState* taskModule = ShaderModulePool.Get(description.TaskShader);
+    const VulkanShaderModuleState* meshModule = ShaderModulePool.Get(description.MeshShader);
+
+    const VkPipelineVertexInputStateCreateInfo ciVertexInputState
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount    = renderPipelineState.NumberOfBindings,
+        .pVertexBindingDescriptions       = renderPipelineState.NumberOfBindings ? renderPipelineState.Bindings : nullptr,
+        .vertexAttributeDescriptionCount  = renderPipelineState.NumberOfAttributes,
+        .pVertexAttributeDescriptions     = renderPipelineState.NumberOfAttributes ? renderPipelineState.Attributes : nullptr,
+    };
+
+    VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants]{};
+    const VkSpecializationInfo specializationInfo = VkContext::GetPipelineShaderStageSpecializationInfo(description.SpecInfo, entries);
+
+    // create pipeline layout
+    {
+        #define UPDATE_PUSH_CONSTANT_SIZE(sm, bit)                                  \
+        if (sm)                                                                     \
+        {                                                                           \
+            pushConstantsSize = std::max(pushConstantsSize, sm->PushConstantsSize); \
+            renderPipelineState.ShaderStageFlags |= bit;                            \
+        }
+
+
+        renderPipelineState.ShaderStageFlags = 0;
+        uint32_t pushConstantsSize = 0;
+
+        UPDATE_PUSH_CONSTANT_SIZE(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
+        UPDATE_PUSH_CONSTANT_SIZE(tescModule, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+        UPDATE_PUSH_CONSTANT_SIZE(teseModule, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+        UPDATE_PUSH_CONSTANT_SIZE(geomModule, VK_SHADER_STAGE_GEOMETRY_BIT);
+        UPDATE_PUSH_CONSTANT_SIZE(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
+        UPDATE_PUSH_CONSTANT_SIZE(taskModule, VK_SHADER_STAGE_TASK_BIT_EXT);
+        UPDATE_PUSH_CONSTANT_SIZE(meshModule, VK_SHADER_STAGE_MESH_BIT_EXT);
+
+        #undef UPDATE_PUSH_CONSTANT_SIZE
+
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(VulkanPhysicalDevice, &props);
+        CHECK(pushConstantsSize <= props.limits.maxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, props.limits.maxPushConstantsSize);
+
+        const VkDescriptorSetLayout dsls[] = {DescriptorSetLayout};
+        const VkPushConstantRange range
+        {
+            .stageFlags = renderPipelineState.ShaderStageFlags,
+            .offset = 0,
+            .size = pushConstantsSize,
+        };
+
+        const VkPipelineLayoutCreateInfo createInfo
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .setLayoutCount = 1,
+            .pSetLayouts = dsls,
+            .pushConstantRangeCount = pushConstantsSize ? 1u : 0u,
+            .pPushConstantRanges = pushConstantsSize ? &range : nullptr,
+        };
+        VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &createInfo, nullptr, &renderPipelineState.PipelineLayout));
+        VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(renderPipelineState.PipelineLayout), fmt::format("Pipeline Layout: {}", renderPipelineDescription.DebugName).c_str()));
+    }
+
+    //TODO: Store?
+    VkPipelineCache cache;
+
+    VK_ASSERT(VulkanPipelineBuilder()
+    .DynamicState(VK_DYNAMIC_STATE_VIEWPORT)
+    .DynamicState(VK_DYNAMIC_STATE_SCISSOR)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS)
+    .DynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)
+    .PrimitiveTypology(VkContext::TopologyToVkPrimitiveTopology(renderPipelineDescription.PipelineTopology))
+    .RasterizationSamples(VkContext::GetVulkanSampleCountFlags(renderPipelineDescription.SamplesCount, VkContext::GetFramebufferMSAABitMask(VulkanPhysicalDevice)), renderPipelineDescription.MinSampleShading)
+    .PolygonMode(VkContext::PolygonModeToVkPolygonMode(renderPipelineDescription.PolygonModeDescription))
+    .StencilStateOps(VK_STENCIL_FACE_FRONT_BIT,
+                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.FrontFaceStencil.StencilFailureOp),
+                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.FrontFaceStencil.DepthStencilPassOp),
+                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.FrontFaceStencil.DepthFailureOp),
+                       VkContext::CompareOpToVkCompareOp(renderPipelineDescription.FrontFaceStencil.StencilCompareOp))
+      .StencilStateOps(VK_STENCIL_FACE_BACK_BIT,
+                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.BackFaceStencil.StencilFailureOp),
+                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.BackFaceStencil.DepthStencilPassOp),
+                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.BackFaceStencil.DepthFailureOp),
+                       VkContext::CompareOpToVkCompareOp(renderPipelineDescription.BackFaceStencil.StencilCompareOp))
+      .StencilMasks(VK_STENCIL_FACE_FRONT_BIT, 0xFF, renderPipelineDescription.FrontFaceStencil.WriteMask, renderPipelineDescription.FrontFaceStencil.ReadMask)
+      .StencilMasks(VK_STENCIL_FACE_BACK_BIT, 0xFF, renderPipelineDescription.BackFaceStencil.WriteMask, renderPipelineDescription.BackFaceStencil.ReadMask)
+      .ShaderStage(taskModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TASK_BIT_EXT, taskModule->ShaderModule, renderPipelineDescription.EntryPointTask, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .ShaderStage(meshModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_MESH_BIT_EXT, meshModule->ShaderModule, renderPipelineDescription.EntryPointMesh, &specializationInfo)
+                                : VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertModule->ShaderModule, renderPipelineDescription.EntryPointVert, &specializationInfo))
+      .ShaderStage(VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragModule->ShaderModule, renderPipelineDescription.EntryPointFrag, &specializationInfo))
+      .ShaderStage(tescModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, tescModule->ShaderModule, renderPipelineDescription.EntryPointTesc, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .ShaderStage(teseModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, teseModule->ShaderModule, renderPipelineDescription.EntryPointTese, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .ShaderStage(geomModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_GEOMETRY_BIT, geomModule->ShaderModule, renderPipelineDescription.EntryPointGeom, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .CullMode(VkContext::CullModeToVkCullMode(renderPipelineDescription.PipelineCullMode))
+      .FrontFace(VkContext::WindingModeToVkFrontFace(renderPipelineDescription.FrontFaceWinding))
+      .VertexInputState(ciVertexInputState)
+      .ColorAttachments(colorBlendAttachmentStates, colorAttachmentFormats, numColorAttachments)
+      .DepthAttachmentFormat(VkContext::FormatTovkFormat(renderPipelineDescription.DepthFormat))
+      .StencilAttachmentFormat(VkContext::FormatTovkFormat(renderPipelineDescription.StencilFormat))
+      .PatchControlPoints(renderPipelineDescription.PatchControlPoints)
+      .Build(VulkanDevice, cache, renderPipelineState.PipelineLayout, &renderPipelineState.Pipeline, renderPipelineDescription.DebugName));
+
+    return {this, RenderPipelinePool.Create(std::move(renderPipelineState))};
 }
 
 void VulkanContext::Destroy(EOS::TextureHandle handle)
@@ -912,7 +1773,7 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
         Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = image->ImageViewStorage]() { vkDestroyImageView(device, imageView, nullptr); }));
     }
 
-    for (size_t i{}; i != VulkanImage::MaxMipLevels; ++i)
+    for (size_t i{}; i != EOS_MAX_MIP_LEVELS; ++i)
     {
         for (size_t j = 0; j != ARRAY_COUNT(image->ImageViewForFramebuffer[0]); ++j)
         {
@@ -973,6 +1834,25 @@ void VulkanContext::Destroy(EOS::ShaderModuleHandle handle)
     ShaderModulePool.Destroy(handle);
 }
 
+void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
+{
+    VulkanRenderPipelineState* renderPipelineState = RenderPipelinePool.Get(handle);
+
+    if (!renderPipelineState)
+    {
+        EOS::Logger->warn("Tried to destroy a non-valid RenderPipelineState");
+        return;
+    }
+
+    //TODO: Questionable solution ....
+    free(renderPipelineState->SpecConstantDataStorage);
+
+    Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = renderPipelineState->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
+    Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
+
+    RenderPipelinePool.Destroy(handle);
+}
+
 void VulkanContext::ProcessDeferredTasks() const
 {
     while (!DeferredTasks.empty() && VulkanCommandPool->IsReady(DeferredTasks.front().Handle, true))
@@ -996,6 +1876,118 @@ void VulkanContext::Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle h
     DeferredTasks.emplace_back(std::move(task), handle);
 }
 
+void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs)
+{
+    //TODO: Check for our limits in vkPhysicalDeviceVulkan12Properties
+    //Device Properties
+    //VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
+    //VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
+    //uint32_t SDKApiVersion{};
+    //vkEnumerateInstanceVersion(&SDKApiVersion);
+    //const uint32_t SDKMinor = VK_API_VERSION_MINOR(SDKApiVersion);
+    //VkContext::GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice, SDKMinor);
+
+    //CHECK(maxTextures <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSampledImages, "Max Textures exceeded, Current:{}, Max:{}", maxTextures, vkPhysicalDeviceVulkan12Properties_.maxDescriptorSetUpdateAfterBindSampledImages);
+    //CHECK(maxSamplers <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSamplers, "Max Samplers exceeded, Current:{}, Max:{}", maxSamplers);
+
+    CurrentMaxTextures      = maxTextures;
+    CurrentMaxSamplers      = maxSamplers;
+    CurrentMaxAccelStructs  = maxAccelStructs;
+
+    if (DescriptorSetLayout != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, dsl = DescriptorSetLayout]() { vkDestroyDescriptorSetLayout(device, dsl, nullptr); }));
+    }
+
+    if (DescriptorPool != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, dp = DescriptorPool]() { vkDestroyDescriptorPool(device, dp, nullptr); }));
+    }
+
+    // create default descriptor set layout which is going to be shared by graphics pipelines
+    VkShaderStageFlags stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+
+    if (HasRaytracingPipeline)
+    {
+        stageFlags |= VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    }
+
+    const VkDescriptorSetLayoutBinding bindings[EOS::Bindings::Count]
+    {
+        VkContext::GetDSLBinding(EOS::Bindings::Textures, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER, maxSamplers, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::StorageImages, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, maxTextures, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::AccelerationStructures, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxAccelStructs, stageFlags),
+    };
+
+    constexpr uint32_t flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+
+    VkDescriptorBindingFlags bindingFlags[EOS::Bindings::Count];
+
+    for (int i{}; i < EOS::Bindings::Count; ++i)
+    {
+        bindingFlags[i] = flags;
+    }
+
+    const VkDescriptorSetLayoutBindingFlagsCreateInfo setLayoutBindingFlagsCI
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT,
+        .bindingCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+        .pBindingFlags = bindingFlags,
+    };
+
+    const VkDescriptorSetLayoutCreateInfo dslci
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = &setLayoutBindingFlagsCI,
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT,
+        .bindingCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+        .pBindings = bindings,
+    };
+
+    VK_ASSERT(vkCreateDescriptorSetLayout(VulkanDevice, &dslci, nullptr, &DescriptorSetLayout));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, reinterpret_cast<uint64_t>(DescriptorSetLayout), "Descriptor Set Layout: VulkanContext::DescriptorSetLayout"));
+
+    {
+        // create default descriptor pool and allocate 1 descriptor set
+        const VkDescriptorPoolSize poolSizes[EOS::Bindings::Count]
+        {
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, maxSamplers},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, maxTextures},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxAccelStructs},
+        };
+
+        const VkDescriptorPoolCreateInfo ci
+        {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+            .maxSets = 1,
+            .poolSizeCount = static_cast<uint32_t>(HasRaytracingPipeline ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+            .pPoolSizes = poolSizes,
+        };
+        VK_ASSERT(vkCreateDescriptorPool(VulkanDevice, &ci, nullptr, &DescriptorPool));
+
+        const VkDescriptorSetAllocateInfo ai
+        {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = DescriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &DescriptorSetLayout,
+        };
+        VK_ASSERT(vkAllocateDescriptorSets(VulkanDevice, &ai, &DescriptorSet));
+    }
+}
+
+void VulkanContext::BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const
+{
+    vkCmdBindDescriptorSets(commandBuffer, bindPoint, layout, 0, 1, &DescriptorSet, 0, nullptr);
+}
+
+VkDevice VulkanContext::GetDevice() const
+{
+    return VulkanDevice;
+}
 
 bool VulkanContext::HasSwapChain() const noexcept
 {
@@ -1029,7 +2021,7 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
             break;
         }
     }
-    Configuration.enableValidationLayers = foundLayer;
+    Configuration.EnableValidationLayers = foundLayer;
 
     //Setup the validation layers and extensions
     uint32_t instanceExtensionCount;
@@ -1045,7 +2037,7 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
     instanceExtensionNames.reserve(4);
     availableInstanceExtensionNames.reserve(5);
 
-    if (Configuration.enableValidationLayers)
+    if (Configuration.EnableValidationLayers)
     {
         validationFeatures.emplace_back(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT);
         validationFeatures.emplace_back(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT);
@@ -1217,7 +2209,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
     CHECK(!hardwareDevices.empty(), "Couldn't find a physical hardware device!");
 }
 
-void VulkanContext::WaitOnDeferredTasks()
+void VulkanContext::WaitOnDeferredTasks() const
 {
     for (auto& task : DeferredTasks)
     {

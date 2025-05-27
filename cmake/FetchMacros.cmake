@@ -1,4 +1,4 @@
-﻿macro(FETCH_GLFW depsDir)
+macro(FETCH_GLFW depsDir)
     set(DEPS_DIR ${depsDir})
 
     # Fetch GLFW and Setup

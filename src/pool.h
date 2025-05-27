@@ -65,10 +65,11 @@ namespace EOS
         //Tries to reserve a the amount.
         void Reserve(uint32_t capacity);
 
-    private:
+
 
         std::vector<PoolEntry> Objects;
-
+        
+    private:
         //It’s an invalid index (since Objects_size() can’t reach 2^32 - 1), making it a safe "end" marker.
         static constexpr uint32_t ListEnd = 0xFFFFFFFF;
         uint32_t FreeListHead = ListEnd;
