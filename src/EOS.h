@@ -272,6 +272,15 @@ namespace EOS
         float MaxDepth = 1.0f;
     };
 
+    struct BufferDescription final
+    {
+        BufferUsageFlags Usage = BufferUsageFlags::None;
+        StorageType Storage = StorageType::HostVisible;
+        size_t Size = 0;
+        const void* Data = nullptr;
+        const char* DebugName = "";
+    };
+
 #pragma region INTERFACES
     //TODO: instead of interfaces use concept and a forward declare. And then every API implements 1 class of that name with the concept.
     //CMake should handle that only 1 type of API is being used at the time.
@@ -327,11 +336,19 @@ namespace EOS
         virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) = 0;
 
         /**
-         * @brief Creates a RenderPipeline and returns a handle to it.
-         * @param renderPipelineDescription The description about what type of pipeline we want to create and what it exists of.
-         * @return A Holder Handle to a Render Pipeline.
-         */
+        * @brief Creates a RenderPipeline and returns a handle to it.
+        * @param renderPipelineDescription The description about what type of pipeline we want to create and what it exists of.
+        * @return A Holder Handle to a Render Pipeline.
+        */
         virtual EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const RenderPipelineDescription& renderPipelineDescription) = 0;
+
+
+        /**
+        * @brief Creates a Buffer and returns a handle to it.
+        * @param description desecribes the what sort of buffer it is and its properties.
+        * @return A Holder Handle to the buffer.
+        */
+        virtual EOS::Holder<BufferHandle> CreateBuffer(const BufferDescription& description) = 0;
 
         /**
         * @brief Handles the destruction of a TextureHandle and what it holds.
@@ -351,6 +368,12 @@ namespace EOS
         * @param handle The handle to the Renderpipeline you want to destroy.
         */
         virtual void Destroy(RenderPipelineHandle handle) = 0;
+
+        /**
+         * @brief Handles the destruction of a BufferHandle and what it holds.
+         * @param handle The handle to the Buffer you want to destroy.
+         */
+        virtual void Destroy(BufferHandle handle) = 0;
 
     protected:
         IContext() = default;

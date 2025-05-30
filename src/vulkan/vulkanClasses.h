@@ -13,6 +13,7 @@
 struct VulkanRenderPipelineState;
 struct VulkanShaderModuleState;
 struct VulkanImage;
+struct VulkanBuffer;
 class VulkanContext;
 
 static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
@@ -20,6 +21,24 @@ static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 using VulkanRenderPipelinePool = EOS::Pool<EOS::RenderPipeline, VulkanRenderPipelineState>;
 using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleState>;
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
+using VulkanBufferPool = EOS::Pool<EOS::Buffer, VulkanBuffer>;
+
+//TODO: Split up in hot and cold data
+struct VulkanBuffer final
+{
+    [[nodiscard]] inline uint8_t* GetMappedPtr() const { return static_cast<uint8_t*>(MappedPtr); }
+    [[nodiscard]] inline bool IsMapped() const { return MappedPtr != nullptr;  }
+
+    VkBuffer VulkanVkBuffer             = VK_NULL_HANDLE;
+    VkDeviceMemory VulkanMemory         = VK_NULL_HANDLE;
+    VmaAllocation VMAAllocation         = VK_NULL_HANDLE;
+    VkDeviceAddress VulkanDeviceAddress = 0;
+    VkDeviceSize BufferSize             = 0;
+    VkBufferUsageFlags VkUsageFlags     = 0;
+    VkMemoryPropertyFlags VkMemoryFlags = 0;
+    void* MappedPtr                     = nullptr;
+    bool IsCoherentMemory               = false;
+};
 
 //TODO: split up in hot and cold data for the pool
 struct VulkanRenderPipelineState final
@@ -346,10 +365,12 @@ public:
     [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo &shaderInfo) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription &renderPipelineDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription &bufferDescription) override;
 
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderModuleHandle handle) override;
     void Destroy(EOS::RenderPipelineHandle handle) override;
+    void Destroy(EOS::BufferHandle handle) override;
 
     //Deferred Tasks
     void ProcessDeferredTasks() const;
@@ -364,14 +385,18 @@ public:
     VulkanRenderPipelinePool RenderPipelinePool{};
     VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
+    VulkanBufferPool BufferPool{};
 private:
     [[nodiscard]] bool HasSwapChain() const noexcept;
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
+    void CreateAllocator();
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     void WaitOnDeferredTasks() const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
+    [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
+
 
 private:
     VkInstance VulkanInstance                       = VK_NULL_HANDLE;
@@ -387,12 +412,16 @@ private:
     VkDescriptorPool DescriptorPool                 = VK_NULL_HANDLE;
     VkDescriptorSet DescriptorSet                   = VK_NULL_HANDLE;
 
+    VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
+
     uint32_t CurrentMaxTextures;
     uint32_t CurrentMaxSamplers;
     uint32_t CurrentMaxAccelStructs;
 
     bool HasAccelerationStructure                   = false; //TOOD: Just check size of the pipeline pool for raytracing
     bool HasRaytracingPipeline                      = false; //TOOD: Just check size of the pipeline pool for raytracing
+    bool UseStagingDevice                           = false;
+
 
     CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.
     DeviceQueues VulkanDeviceQueues{};

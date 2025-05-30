@@ -1273,6 +1273,72 @@ namespace VkContext
         CHECK(false, "Could not resolve StoreOp");
         return VK_ATTACHMENT_STORE_OP_DONT_CARE;
     }
+
+    VkBufferUsageFlags BufferUsageFlagsToVkBufferUsageFlags(EOS::BufferUsageFlags bufferUsageFlags)
+    {
+        VkBufferUsageFlags usageFlags{};
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::Index)
+        {
+            usageFlags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::Vertex)
+        {
+            usageFlags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::Uniform)
+        {
+            usageFlags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::Storage)
+        {
+            usageFlags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::Indirect)
+        {
+            usageFlags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::ShaderBindingTable)
+        {
+            usageFlags |= VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::AccelStructBuildInputReadOnly)
+        {
+            usageFlags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+        }
+
+        if (bufferUsageFlags & EOS::BufferUsageFlags::AccelStructStorage)
+        {
+            usageFlags |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
+        }
+
+        return usageFlags;
+    }
+
+    VkMemoryPropertyFlags StorageTypeToVkMemoryPropertyFlags(EOS::StorageType storage)
+    {
+        VkMemoryPropertyFlags memFlags{0};
+
+        switch (storage)
+        {
+            case EOS::StorageType::Device:
+                memFlags |= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+                break;
+            case EOS::StorageType::HostVisible:
+                memFlags |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+                break;
+            case EOS::StorageType::Memoryless:
+                memFlags |= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+                break;
+        }
+        return memFlags;
+    }
 };
 
 namespace VkSynchronization

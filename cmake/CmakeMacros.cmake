@@ -53,4 +53,16 @@ macro(CREATE_APP name)
         add_definitions(-D_CONSOLE)
         set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif()
+
+    # Copy shaders
+    foreach(SHADER ${SHADER_FILES})
+        get_filename_component(SHADER_NAME ${SHADER} NAME)
+        add_custom_command(
+                TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SHADER}"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${SHADER_NAME}"
+                COMMENT "Copying shader file: ${SHADER_NAME}"
+        )
+    endforeach()
 endmacro()

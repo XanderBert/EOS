@@ -1,13 +1,8 @@
-// Fragment Shader
-
-struct FragmentInput
+[shader("fragment")]
+void main(
+    float3 inColor : COLOR0,
+    out float4 outFragColor : SV_Target
+)
 {
-    float4 position : SV_Position; // Not typically used directly in basic fragment shaders
-    float3 color    : COLOR;       // Input color from vertex shader
-};
-
-float4 main(FragmentInput input) : SV_Target
-{
-    // Output the interpolated color from the vertex shader
-    return float4(input.color, 1.0); // r, g, b, alpha
+    outFragColor = float4(inColor, 1.0);
 }

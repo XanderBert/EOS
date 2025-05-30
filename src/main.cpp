@@ -15,6 +15,7 @@ int main()
     std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
     std::unique_ptr<EOS::ShaderCompiler> shaderCompiler = EOS::CreateShaderCompiler("./");
 
+    //TODO First check if the shader is not already compiled
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context, shaderCompiler, "triangleVert");
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context, shaderCompiler, "triangleFrag");
 
@@ -27,6 +28,27 @@ int main()
     };
 
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(triangleDescription);
+
+
+    //EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
+    //{
+    //    .usage     = EOS::BufferUsageFlags::Vertex,
+    //    .storage   = EOS::StorageType::Device,
+    //    .size      = sizeof(float[3]) * positions.size(),
+    //    .data      = positions.data(),
+    //    .debugName = "Buffer: vertex"
+    //});
+//
+//
+    //EOS::Holder<EOS::BufferHandle> indexBuffer = context->CreateBuffer(
+//{
+    //    .usage     = EOS::BufferUsageFlags::Vertex,
+    //    .storage   = EOS::StorageType::Device,
+    //    .size      = sizeof(uint32_t) * indices.size(),
+    //    .data      = indices.data(),`
+    //    .debugName = "Buffer: vertex"
+    //});
+
 
     while (!glfwWindowShouldClose(window))
     {

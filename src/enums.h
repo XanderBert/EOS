@@ -306,4 +306,24 @@ namespace EOS
         MsaaResolve,
         None,
     };
+
+    enum class StorageType : uint8_t
+    {
+        Device,
+        HostVisible,
+        Memoryless
+    };
+
+    enum BufferUsageFlags : uint8_t
+    {
+        None = 0x00,
+        Index = 0x01,
+        Vertex = 0x02,
+        Uniform = 0x04,
+        Storage = 0x08,
+        Indirect = 0x10,
+        ShaderBindingTable = 0x20,
+        AccelStructBuildInputReadOnly = 0x40,
+        AccelStructStorage = 0x80
+    };
 }

@@ -565,12 +565,12 @@ VulkanSwapChain::~VulkanSwapChain()
         VkContext->Destroy(handle);
     }
 
+    vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
+
     for (const VkSemaphore& semaphore : AcquireSemaphores)
     {
         vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
     }
-
-    vkDestroySwapchainKHR(VkContext->VulkanDevice, SwapChain, nullptr);
 }
 
 void VulkanSwapChain::Present(VkSemaphore waitSemaphore)
@@ -1342,21 +1342,22 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     //Create our CommandPool
     VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
 
-    //TODO: pipeline cache
+    //TODO: Create pipeline cache
+    UseStagingDevice = IsHostVisibleMemorySingleHeap();
+    CreateAllocator();
 
-    //TODO: VMA init
-
-    //TODO: Staging Device
+    //TODO: Create Staging Device
 
     GrowDescriptorPool(16, 16, 1);
 }
 
 VulkanContext::~VulkanContext()
 {
+
     //Wait unit all work has been done
     VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
-
     SwapChain.reset();
+
     vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
 
     if (TexturePool.NumObjects())
@@ -1377,12 +1378,19 @@ VulkanContext::~VulkanContext()
     }
     RenderPipelinePool.Clear();
 
+    if (BufferPool.NumObjects())
+    {
+        EOS::Logger->error("{} Leaked Buffers", BufferPool.NumObjects());
+    }
+    BufferPool.Clear();
+
     WaitOnDeferredTasks();
 
     VulkanCommandPool.reset(nullptr);
 
     vkDestroySurfaceKHR(VulkanInstance, VulkanSurface, nullptr);
-
+    vkDestroyDescriptorSetLayout(VulkanDevice, DescriptorSetLayout, nullptr);
+    vkDestroyDescriptorPool(VulkanDevice, DescriptorPool, nullptr);
     //vmaDestroyAllocator(Vma);
 
     vkDestroyDevice(VulkanDevice, nullptr);
@@ -1754,6 +1762,28 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
     return {this, RenderPipelinePool.Create(std::move(renderPipelineState))};
 }
 
+EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription &bufferDescription)
+{
+    CHECK(bufferDescription.Usage != EOS::BufferUsageFlags::None, "Invalid Buffer Usage");
+
+    EOS::StorageType storageType = bufferDescription.Storage;
+
+    //If we don't use a staging buffer device memory becomes host visible
+    if (!UseStagingDevice && (storageType == EOS::StorageType::Device))
+    {
+        storageType = EOS::StorageType::HostVisible;
+    }
+
+    VkBufferUsageFlags usageFlags = VkContext::BufferUsageFlagsToVkBufferUsageFlags(bufferDescription.Usage);
+
+    // Use staging device to transfer data into the buffer when the storage is private to the device
+    usageFlags = (storageType == EOS::StorageType::Device) ? VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0;
+
+    const VkMemoryPropertyFlags memFlags = VkContext::StorageTypeToVkMemoryPropertyFlags(storageType);
+
+    return {this, CreateBuffer(bufferDescription.Size, usageFlags, memFlags, bufferDescription.DebugName)};
+}
+
 void VulkanContext::Destroy(EOS::TextureHandle handle)
 {
     VulkanImage* image = TexturePool.Get(handle);
@@ -1848,6 +1878,27 @@ void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
     Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
 
     RenderPipelinePool.Destroy(handle);
+}
+
+void VulkanContext::Destroy(EOS::BufferHandle handle)
+{
+    VulkanBuffer* buf = BufferPool.Get(handle);
+    if (!buf)
+    {
+        return;
+    }
+
+    if (buf->MappedPtr)
+    {
+        vmaUnmapMemory(vmaAllocator, buf->VMAAllocation);
+    }
+
+    Defer(std::packaged_task<void()>([vma = vmaAllocator, buffer = buf->VulkanVkBuffer, allocation = buf->VMAAllocation]()
+    {
+          vmaDestroyBuffer(vma, buffer, allocation);
+    }));
+
+    BufferPool.Destroy(handle);
 }
 
 void VulkanContext::ProcessDeferredTasks() const
@@ -2184,6 +2235,55 @@ void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
 #endif
 }
 
+void VulkanContext::CreateAllocator()
+{
+    const VmaVulkanFunctions functions
+    {
+        .vkGetInstanceProcAddr = vkGetInstanceProcAddr,
+        .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
+        .vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties,
+        .vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties,
+        .vkAllocateMemory = vkAllocateMemory,
+        .vkFreeMemory = vkFreeMemory,
+        .vkMapMemory = vkMapMemory,
+        .vkUnmapMemory = vkUnmapMemory,
+        .vkFlushMappedMemoryRanges = vkFlushMappedMemoryRanges,
+        .vkInvalidateMappedMemoryRanges = vkInvalidateMappedMemoryRanges,
+        .vkBindBufferMemory = vkBindBufferMemory,
+        .vkBindImageMemory = vkBindImageMemory,
+        .vkGetBufferMemoryRequirements = vkGetBufferMemoryRequirements,
+        .vkGetImageMemoryRequirements = vkGetImageMemoryRequirements,
+        .vkCreateBuffer = vkCreateBuffer,
+        .vkDestroyBuffer = vkDestroyBuffer,
+        .vkCreateImage = vkCreateImage,
+        .vkDestroyImage = vkDestroyImage,
+        .vkCmdCopyBuffer = vkCmdCopyBuffer,
+        .vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2,
+        .vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2,
+        .vkBindBufferMemory2KHR = vkBindBufferMemory2,
+        .vkBindImageMemory2KHR = vkBindImageMemory2,
+        .vkGetPhysicalDeviceMemoryProperties2KHR = vkGetPhysicalDeviceMemoryProperties2,
+        .vkGetDeviceBufferMemoryRequirements = vkGetDeviceBufferMemoryRequirements,
+        .vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements,
+    };
+
+    const VmaAllocatorCreateInfo createInfo
+    {
+        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+        .physicalDevice = VulkanPhysicalDevice,
+        .device = VulkanDevice,
+        .preferredLargeHeapBlockSize = 0,
+        .pAllocationCallbacks = nullptr,
+        .pDeviceMemoryCallbacks = nullptr,
+        .pHeapSizeLimit = nullptr,
+        .pVulkanFunctions = &functions,
+        .instance = VulkanInstance,
+        .vulkanApiVersion = VK_API_VERSION_1_4, //TODO: Make 1.3 compatible
+    };
+
+    VK_ASSERT(vmaCreateAllocator(&createInfo, &vmaAllocator));
+}
+
 void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const
 {
     uint32_t deviceCount = 0;
@@ -2232,4 +2332,86 @@ bool VulkanContext::IsHostVisibleMemorySingleHeap() const
     });
 
     return hasMemoryType;
+}
+
+EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char *debugName)
+{
+    CHECK(bufferSize > 0, "The buffer you want to create needs to be bigger then 0");
+
+    //TODO: Check maxUniformBufferRange -> VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    //TODO: Check maxStorageBufferRange -> VK_BUFFER_USAGE_FLAG_BITS_MAX_ENUM
+
+    VulkanBuffer buffer
+    {
+      .BufferSize = bufferSize,
+      .VkUsageFlags = usageFlags,
+      .VkMemoryFlags = memFlags,
+    };
+
+    const VkBufferCreateInfo createInfo
+    {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .pNext = nullptr,
+      .flags = 0,
+      .size = bufferSize,
+      .usage = usageFlags,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      .queueFamilyIndexCount = 0,
+      .pQueueFamilyIndices = nullptr,
+    };
+
+    VmaAllocationCreateInfo vmaAllocInfo{};
+
+    if (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    {
+        vmaAllocInfo =
+        {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+            .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+            .preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+        };
+
+        // Check if coherent buffer is available.
+        VK_ASSERT(vkCreateBuffer(VulkanDevice, &createInfo, nullptr, &buffer.VulkanVkBuffer));
+
+        //Reset the Buffer
+        vkDestroyBuffer(VulkanDevice, buffer.VulkanVkBuffer, nullptr);
+        buffer.VulkanVkBuffer = VK_NULL_HANDLE;
+        VkMemoryRequirements requirements{};
+        vkGetBufferMemoryRequirements(VulkanDevice, buffer.VulkanVkBuffer, &requirements);
+
+        if (requirements.memoryTypeBits & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+        {
+            vmaAllocInfo.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            buffer.IsCoherentMemory = true;
+        }
+    }
+
+    vmaCreateBuffer(vmaAllocator, &createInfo, &vmaAllocInfo, &buffer.VulkanVkBuffer, &buffer.VMAAllocation, nullptr);
+
+    // handle memory-mapped buffers
+    if (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    {
+        vmaMapMemory(vmaAllocator, buffer.VMAAllocation, &buffer.MappedPtr);
+    }
+
+
+    CHECK(buffer.VulkanVkBuffer != VK_NULL_HANDLE, "Could not create buffer");
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(buffer.VulkanVkBuffer), debugName));
+
+    // handle shader access
+    if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+    {
+        const VkBufferDeviceAddressInfo addressInfo
+        {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = buffer.VulkanVkBuffer,
+        };
+
+        buffer.VulkanDeviceAddress = vkGetBufferDeviceAddress(VulkanDevice, &addressInfo);
+        CHECK(buffer.VulkanDeviceAddress, "Could not get Buffer Device Address");
+  }
+
+  return BufferPool.Create(std::move(buffer));
 }

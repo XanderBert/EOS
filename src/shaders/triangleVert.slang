@@ -1,23 +1,24 @@
-// Vertex Shader
+// Slang version
 
-struct VertexInput
+[shader("vertex")]
+void main(
+    uint vertexID : SV_VertexID,
+    out float4 outPosition : SV_Position,
+    out float3 outColor : COLOR0
+)
 {
-    float2 position : POSITION; // Input vertex position
-    float3 color    : COLOR;    // Input vertex color
-};
+    static const float2 pos[3] = {
+        float2(-0.6, -0.4),
+        float2( 0.6, -0.4),
+        float2( 0.0,  0.6)
+    };
 
-struct VertexOutput
-{
-    float4 position : SV_Position; // Output clip-space position
-    float3 color    : COLOR;       // Output color to fragment shader
-};
+    static const float3 col[3] = {
+        float3(1.0, 0.0, 0.0),
+        float3(0.0, 1.0, 0.0),
+        float3(0.0, 0.0, 1.0)
+    };
 
-VertexOutput main(VertexInput input)
-{
-    VertexOutput output;
-    // Pass the 2D position directly, assuming it's already in clip space for simplicity.
-    // z = 0.5 for visibility, w = 1.0 for a proper perspective divide.
-    output.position = float4(input.position, 0.5, 1.0);
-    output.color = input.color;
-    return output;
+    outPosition = float4(pos[vertexID], 0.0, 1.0);
+    outColor = col[vertexID];
 }
