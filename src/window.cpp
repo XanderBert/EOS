@@ -3,7 +3,7 @@
 
 namespace EOS
 {
-    GLFWwindow*  Window::InitWindow(ContextCreationDescription& contextDescription)
+    Window::Window(ContextCreationDescription& contextDescription)
     {
         /// Setup the error callback
         glfwSetErrorCallback([](int error, const char* message)
@@ -16,7 +16,7 @@ namespace EOS
         {
             contextDescription.Window = nullptr;
             contextDescription.Display = nullptr;
-            return nullptr;
+            return;
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -31,44 +31,44 @@ namespace EOS
 
         // Calculate window dimensions and position
         int x = 0, y = 0;
-        int w = mode->width;
-        int h = mode->height;
+        Width = mode->width;
+        Height = mode->height;
 
         if (fullscreen)
         {
             // Adjust for the taskbar in fullscreen mode
-            glfwGetMonitorWorkarea(monitor, &x, &y, &w, &h);
+            glfwGetMonitorWorkarea(monitor, &x, &y, &Width, &Height);
         }
         else
         {
             // Use the provided dimensions for windowed mode
-            w = contextDescription.Width;
-            h = contextDescription.Height;
+            Width = contextDescription.Width;
+            Height = contextDescription.Height;
         }
 
         // Create the window
-        GLFWwindow* window = glfwCreateWindow(w, h, contextDescription.ApplicationName , fullscreen ? monitor : nullptr, nullptr);
-        if (!window)
+        GlfwWindow = glfwCreateWindow(Width, Height, contextDescription.ApplicationName , fullscreen ? monitor : nullptr, nullptr);
+        if (!GlfwWindow)
         {
             glfwTerminate();
             contextDescription.Window = nullptr;
             contextDescription.Display = nullptr;
-            return nullptr;
+            return;
         }
 
         // Position the window in fullscreen mode
         if (fullscreen)
         {
-            glfwSetWindowPos(window, x, y);
+            glfwSetWindowPos(GlfwWindow, x, y);
         }
 
         // Get the actual window size and store it
-        glfwGetWindowSize(window, &w, &h);
-        contextDescription.Width  = w;
-        contextDescription.Height = h;
+        glfwGetWindowSize(GlfwWindow, &Width, &Height);
+        contextDescription.Width  = Width;
+        contextDescription.Height = Height;
 
         // Setup the key callback
-        glfwSetKeyCallback(window, [](GLFWwindow* window, int key, int, int action, int)
+        glfwSetKeyCallback(GlfwWindow, [](GLFWwindow* window, int key, int, int action, int)
         {
             if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
             {
@@ -77,18 +77,38 @@ namespace EOS
         });
 
 #if defined(EOS_PLATFORM_WAYLAND)
-        contextDescription.Window     = static_cast<void*>(glfwGetWaylandWindow(window));
+        contextDescription.Window     = static_cast<void*>(glfwGetWaylandWindow(GlfwWindow));
         contextDescription.Display    = static_cast<void*>(glfwGetWaylandDisplay());
 #elif defined(EOS_PLATFORM_X11)
-        contextDescription.Window     = reinterpret_cast<void*>(glfwGetX11Window(window));
+        contextDescription.Window     = reinterpret_cast<void*>(glfwGetX11Window(GlfwWindow));
         contextDescription.Display    = static_cast<void*>(glfwGetX11Display());
 #elif defined(EOS_PLATFORM_WIN32)
-        contextDescription.Window     = static_cast<void*>(glfwGetWin32Window(window));
+        contextDescription.Window     = static_cast<void*>(glfwGetWin32Window(GlfwWindow));
         contextDescription.Display    = nullptr;  // Not used on Windows
 #endif
+    }
 
+    Window::~Window()
+    {
+        glfwDestroyWindow(GlfwWindow);
+        glfwTerminate();
+    }
 
-        return window;
+    void Window::Poll()
+    {
+        glfwPollEvents();
+    }
+
+    bool Window::ShouldClose() const
+    {
+        return glfwWindowShouldClose(GlfwWindow);
+    }
+
+    bool Window::IsFocused()
+    {
+        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
+
+        return Width || Height;
     }
 }
 

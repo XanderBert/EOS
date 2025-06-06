@@ -45,9 +45,11 @@ namespace EOS
         IModule *module = Session->loadModule(shaderCompilationDescription.Name, Diagnostics.writeRef());
         if(Diagnostics)
         {
-            EOS::Logger->warn("Slang Shader Compiler: {}", Diagnostics->getBufferPointer());
+            EOS::Logger->critical("Slang Shader Compiler Diagnostics:\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
+            CHECK(false, "Shader Compile Error");
+            Diagnostics.setNull();
         }
-        Diagnostics.setNull();
+
 
         Slang::ComPtr<IEntryPoint> entryPoint;
         module->findEntryPointByName(shaderCompilationDescription.EntryPoint, entryPoint.writeRef());
@@ -115,29 +117,36 @@ namespace EOS
             }
         }
 
-        //Store all the needed information that we need from the shader
+
         slang::ProgramLayout* reflection = linkedProgram->getLayout();
         slang::EntryPointReflection* entryPointLayout = reflection->getEntryPointByIndex(0);
-        outShaderInfo.ShaderStage = ToShaderStage(entryPointLayout);
 
-        size_t lastOffset = 0;
-        for (int i{}; i < entryPointLayout->getParameterCount(); ++i)
+        int totalPushConstantSize = 0;
+        for (int i{}; i < reflection->getParameterCount(); ++i)
         {
-            VariableLayoutReflection* variableLayout = entryPointLayout->getParameterByIndex(i);
-            const size_t offset = variableLayout->getOffset();
+            VariableLayoutReflection* variableLayout = reflection->getParameterByIndex(i);
+            auto category = variableLayout->getCategory();
 
-            //This is asumed to be a push constnat
-            if (variableLayout->getCategory() == slang::Uniform)
+            // Whenever our pushconstant holds a struct of data
+            if ( category == slang::PushConstantBuffer)
             {
-                TypeReflection* type = variableLayout->getVariable()->getType();
-                outShaderInfo.PushConstantSize += offset - lastOffset;
-                assert(false && "Needs to have a better implementation");
+                EOS::Logger->debug("Found Shader Variable: {}, of Type: {}, as PushConstant", variableLayout->getName(), variableLayout->getType()->getName());
+                totalPushConstantSize += variableLayout->getTypeLayout()->getElementVarLayout()->getTypeLayout()->getSize();
             }
 
-            lastOffset = offset;
+            // Whenever a "raw" datatype is used as pushconstant
+            // TODO: i dont see a way at the moment how i can figure out whenever the uniform is used for push const or not.
+            if (category == slang::Uniform)
+            {
+                EOS::Logger->debug("Found Shader Variable: {}, of Type: {}, as PushConstant", variableLayout->getName(), variableLayout->getType()->getName());
+                assert(false);
+                //totalPushConstantSize += variableLayout->getTypeLayout()->getSize();
+            }
         }
 
+        outShaderInfo.PushConstantSize = totalPushConstantSize;
         outShaderInfo.DebugName = shaderCompilationDescription.Name;
+        outShaderInfo.ShaderStage = ToShaderStage(entryPointLayout);
     }
 
     EOS::ShaderStage ShaderCompiler::ToShaderStage(slang::EntryPointReflection *entryPointReflection)

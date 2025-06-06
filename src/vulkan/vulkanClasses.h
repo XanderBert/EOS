@@ -29,6 +29,9 @@ struct VulkanBuffer final
     [[nodiscard]] inline uint8_t* GetMappedPtr() const { return static_cast<uint8_t*>(MappedPtr); }
     [[nodiscard]] inline bool IsMapped() const { return MappedPtr != nullptr;  }
 
+    void BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data);
+    void FlushMappedMemory(const VulkanContext* vulkanContext, VkDeviceSize offset, VkDeviceSize size) const;
+
     VkBuffer VulkanVkBuffer             = VK_NULL_HANDLE;
     VkDeviceMemory VulkanMemory         = VK_NULL_HANDLE;
     VmaAllocation VMAAllocation         = VK_NULL_HANDLE;
@@ -350,6 +353,41 @@ private:
     static inline uint32_t NumberOfCreatedPipelines = 0;
 };
 
+class VulkanStagingDevice final
+{
+    struct MemoryRegionDescription
+    {
+        uint32_t Offset = 0;
+        VkDeviceSize Size = 0;
+        EOS::SubmitHandle Handle{};
+    };
+
+public:
+    explicit VulkanStagingDevice(VulkanContext* context);
+    ~VulkanStagingDevice() = default;
+    DELETE_COPY_MOVE(VulkanStagingDevice);
+
+    void BufferSubData(const EOS::Handle<EOS::Buffer>& buffer, size_t dstOffset, size_t size, const void* data);
+
+private:
+    void EnsureSize(uint32_t sizeNeeded);
+    void WaitAndReset();
+    [[nodiscard]] MemoryRegionDescription GetNextFreeOffset(uint32_t size);
+
+private:
+    VulkanContext* VkContext;
+    EOS::Holder<EOS::BufferHandle> StagingBuffer;
+
+    inline static uint8_t Alignment = 16;
+    inline static constexpr uint32_t MaxBufferSize =  128 * 2048 * 2048;  // 128 mb //TODO: Get this from properties
+    inline static constexpr uint32_t MinBufferSize =  4 * 2048 * 2048;    // 4 mb
+
+    VkDeviceSize Size = 0;
+    uint32_t Counter = -1;
+
+    std::deque<MemoryRegionDescription> Regions;
+};
+
 class VulkanContext final : public EOS::IContext
 {
 public:
@@ -358,7 +396,6 @@ public:
     DELETE_COPY_MOVE(VulkanContext)
 
     //Implements EOS::IContext
-
     [[nodiscard]] EOS::ICommandBuffer& AcquireCommandBuffer() override;
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
@@ -372,13 +409,17 @@ public:
     void Destroy(EOS::RenderPipelineHandle handle) override;
     void Destroy(EOS::BufferHandle handle) override;
 
+    void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
+
     //Deferred Tasks
     void ProcessDeferredTasks() const;
+    void WaitOnDeferredTasks() const;
     void Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle = {}) const;
 
     void GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
     void BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const;
     [[nodiscard]] VkDevice GetDevice() const;
+    [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
@@ -386,6 +427,8 @@ public:
     VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
     VulkanBufferPool BufferPool{};
+    VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
+
 private:
     [[nodiscard]] bool HasSwapChain() const noexcept;
     void CreateVulkanInstance(const char* applicationName);
@@ -393,9 +436,7 @@ private:
     void CreateSurface(void* window, void* display);
     void CreateAllocator();
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
-    void WaitOnDeferredTasks() const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
-    [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
 
 private:
@@ -406,13 +447,12 @@ private:
     VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
     VkSemaphore TimelineSemaphore                   = VK_NULL_HANDLE;
     std::unique_ptr<VulkanSwapChain> SwapChain      = nullptr;
+    std::unique_ptr<VulkanStagingDevice> VulkanStagingBuffer = nullptr;
     mutable std::deque<DeferredTask> DeferredTasks;
         
     VkDescriptorSetLayout DescriptorSetLayout       = VK_NULL_HANDLE;
     VkDescriptorPool DescriptorPool                 = VK_NULL_HANDLE;
     VkDescriptorSet DescriptorSet                   = VK_NULL_HANDLE;
-
-    VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
 
     uint32_t CurrentMaxTextures;
     uint32_t CurrentMaxSamplers;

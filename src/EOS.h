@@ -375,6 +375,15 @@ namespace EOS
          */
         virtual void Destroy(BufferHandle handle) = 0;
 
+        /**
+         * @brief
+         * @param handle The handle of the buffer we want to upload to.
+         * @param data The data we want to upload.
+         * @param size The size of the data we want to upload.
+         * @param offset The offset it needs to have inside of the buffer.
+         */
+        virtual void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) = 0;
+
     protected:
         IContext() = default;
     };
@@ -387,6 +396,7 @@ namespace EOS
     public:
         Holder() = default;
         Holder(EOS::IContext* context, HandleType handle) : HolderContext(context), Handle(handle) {}
+
         ~Holder()
         {
             CHECK(HolderContext, "the context of the holder is no longer valid in the destruction of the holder");
@@ -403,6 +413,7 @@ namespace EOS
             other.HolderContext = nullptr;
             other.Handle = HandleType{};
         }
+
         Holder& operator=(Holder&& other) noexcept
         {
             std::swap(HolderContext, other.HolderContext);
@@ -520,7 +531,26 @@ void cmdEndRendering(EOS::ICommandBuffer& commandBuffer);
 void cmdBindRenderPipeline(EOS::ICommandBuffer& commandBuffer, EOS::RenderPipelineHandle renderPipelineHandle);
 
 /**
- * @brief Records a simple draw command into the specified commandbuffer
+ * @brief Binds the commandBuffer
+ * @param commandBuffer The commandBuffer to send the command to to bind the VertexBuffer.
+ * @param index The Index of the vertexBuffer.
+ * @param buffer The Handle to the buffer.
+ * @param bufferOffset The offset the buffer has.
+ */
+void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t index, EOS::BufferHandle buffer, uint64_t bufferOffset = 0);
+
+
+/**
+ * @brief Binds the indexBuffer
+ * @param commandBuffer The commandBuffer to send the command to to bind the indexbuffer.
+ * @param indexBuffer The indexBuffer.
+ * @param indexFormat The int format of the index buffer (speifies how many bytes 1 index is).
+ * @param indexBufferOffset The offset of the indexBuffer
+ */
+void cmdBindIndexBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle indexBuffer, EOS::IndexFormat indexFormat, uint64_t indexBufferOffset = 0);
+
+/**
+ * @brief Records a simple draw command into the specified commandbuffer.
  * @param commandBuffer The commandbuffer we want to record into.
  * @param vertexCount The amount of vertices we want to record.
  * @param instanceCount The amount of instances to draw.
@@ -529,6 +559,38 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer& commandBuffer, EOS::RenderPipeli
  */
 void cmdDraw(const EOS::ICommandBuffer& commandBuffer, uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t baseInstance = 0);
 
+/**
+ * @brief Records a indexed draw command into the specified commandbuffer.
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param indexCount The amount of indices we want to draw.
+ * @param instanceCount The amount of instances we want to draw.
+ * @param firstIndex At what index the draw command should start to draw.
+ * @param vertexOffset At what offset we should start usng the vertices.
+ * @param baseInstance At what Instance we want to start drawing.
+ */
+void cmdDrawIndexed(const EOS::ICommandBuffer& commandBuffer, uint32_t indexCount, uint32_t instanceCount = 1, uint32_t firstIndex = 0, int32_t vertexOffset = 0, uint32_t baseInstance = 0);
+
+/**
+ * @brief Binds push constants.
+ * @param commandBuffer The commandbuffer we want to record to to bind our push constants.
+ * @param data The actual data we want to bind.
+ * @param size The size of the data we want to bind.
+ * @param offset At what offset we would like to start to bind the data from.
+ */
+void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const void* data, size_t size, size_t offset = 0);
+
+/**
+ * @brief Templated helper function to bind push constants.
+ * @tparam Struct The structure we would like to bind as push constants.
+ * @param commandBuffer The commandbuffer we want to record to to bind our push constants.
+ * @param data The data structure we want to bind as pushconstants
+ * @param offset At what offset we would like to start to bind the data from.
+ */
+template<typename Struct>
+void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const Struct& data, size_t offset = 0)
+{
+    cmdPushConstants(commandBuffer, &data, sizeof(Struct), offset);
+}
 
 /**
  * @brief Adds a debug marker that is visible in debug software.

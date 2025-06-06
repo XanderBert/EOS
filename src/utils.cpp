@@ -90,6 +90,11 @@ namespace EOS
 #undef SIZE2_4_NORM
 
     }
+
+    uint32_t GetSizeAligned(uint32_t value, uint32_t alignment)
+    {
+        return (value + alignment - 1) & ~(alignment - 1);
+    }
 }
 
 

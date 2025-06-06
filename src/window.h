@@ -31,16 +31,17 @@ namespace EOS
 
     struct Window final
     {
+        Window(ContextCreationDescription& contextDescription);
+        ~Window();
         DELETE_COPY_MOVE(Window)
 
-        //Fills in the window data in the Context Description
-        static GLFWwindow* InitWindow(ContextCreationDescription& contextDescription);
+        static void Poll();
+        [[nodiscard] ]bool ShouldClose() const;
+        [[nodiscard] ]bool IsFocused();
 
-        inline static void DestroyWindow(GLFWwindow* window)
-        {
-            glfwDestroyWindow(window);
-            glfwTerminate();
-        }
+        GLFWwindow* GlfwWindow;
+        int Width;
+        int Height;
     };
 
 

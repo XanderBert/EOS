@@ -252,6 +252,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     // Set the Depth states
     EOS::DepthState state{};
     const VkCompareOp op = VkContext::CompareOpToVkCompareOp(state.CompareOpState);
+
     vkCmdSetDepthWriteEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, state.IsDepthWriteEnabled ? VK_TRUE : VK_FALSE);
     vkCmdSetDepthTestEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op != VK_COMPARE_OP_ALWAYS || state.IsDepthWriteEnabled);
     vkCmdSetDepthCompareOp(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op);
@@ -302,15 +303,74 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipeli
     }
 }
 
+void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t index, EOS::BufferHandle buffer, const uint64_t bufferOffset)
+{
+    CHECK(!buffer.Empty(), "The handle to the buffer is empty");
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
+
+    const VulkanBuffer* vkbuffer = vkContext->BufferPool.Get(buffer);
+    CHECK(vkbuffer->VkUsageFlags & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, "The buffer usage flags do not indicate this is a Vertex buffer.");
+
+    vkCmdBindVertexBuffers(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, index, 1, &vkbuffer->VulkanVkBuffer, &bufferOffset);
+}
+
+void cmdBindIndexBuffer(const EOS::ICommandBuffer &commandBuffer, EOS::BufferHandle indexBuffer, EOS::IndexFormat indexFormat, uint64_t indexBufferOffset)
+{
+    CHECK(!indexBuffer.Empty(), "The handle to the buffer is empty");
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
+
+    const VulkanBuffer* vkbuffer = vkContext->BufferPool.Get(indexBuffer);
+    CHECK(vkbuffer->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT, "The buffer usage flags do not indicate this is a Index buffer.");
+    
+    vkCmdBindIndexBuffer(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, vkbuffer->VulkanVkBuffer, indexBufferOffset, VkContext::IndexFormatToVkIndexType(indexFormat));
+}
+
 void cmdDraw(const EOS::ICommandBuffer &commandBuffer, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t baseInstance)
 {
-    if (vertexCount == 0)
+    CHECK(vertexCount > 0, "Cannot draw with vertex count less then 1");
+    if (vertexCount <= 0)
     {
         return;
     }
 
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     vkCmdDraw(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, vertexCount, instanceCount, firstVertex, baseInstance);
+}
+
+void cmdDrawIndexed(const EOS::ICommandBuffer &commandBuffer, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t baseInstance)
+{
+    CHECK(indexCount > 0, "Cannot draw with index count less then 1");
+    if (indexCount <= 0)
+    {
+        return;
+    }
+
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+
+    vkCmdDrawIndexed(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, baseInstance);
+}
+
+void cmdPushConstants(const EOS::ICommandBuffer &commandBuffer, const void *data, size_t size, size_t offset)
+{
+    CHECK(size % 4 == 0, "A push constant must be a multiple of 4");
+
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
+
+    CHECK(!vulkanCommandBuffer->CurrentGraphicsPipeline.Empty() || !vulkanCommandBuffer->CurrentComputePipeline.Empty() || !vulkanCommandBuffer->CurrentRayTracingPipeline.Empty(), "No pipeline bound, cannot set pushconstants");
+
+
+    const VulkanRenderPipelineState* stateGraphics = vkContext->RenderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
+    //TODO: Add options for compute and ray tracing once these pipelines have been added
+    //const VulkanComputePipelineState* stateCompute = vkContext->ComputePipelinesPool.Get(vulkanCommandBuffer->CurrentComputePipeline);
+    //const VulkanRayTracingPipelineState* stateRayTracing = vkContext->RayTracingPipelinesPool.Get(vulkanCommandBuffer->CurrentRayTracingPipeline);
+
+   CHECK(stateGraphics, "Graphics State is not valid");
+
+
+    vkCmdPushConstants(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, stateGraphics->PipelineLayout, stateGraphics->ShaderStageFlags, static_cast<uint32_t>(offset), static_cast<uint32_t>(size), data);
 }
 
 void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
@@ -347,6 +407,42 @@ void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, 
 }
 #pragma endregion
 
+
+void VulkanBuffer::BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data)
+{
+    CHECK(MappedPtr, "buffer is not host-visible");
+    if (!MappedPtr)
+    {
+        return;
+    }
+
+    CHECK(offset + size <= BufferSize, "Buffer is not big enough to add the data to it");
+
+    if (data)
+    {
+        memcpy(static_cast<uint8_t*>(MappedPtr) + offset, data, size);
+    }
+    else
+    {
+        memset(static_cast<uint8_t*>(MappedPtr) + offset, 0, size);
+    }
+
+    if (!IsCoherentMemory)
+    {
+        FlushMappedMemory(vulkanContext, offset, size);
+    }
+}
+
+void VulkanBuffer::FlushMappedMemory(const VulkanContext *vulkanContext, VkDeviceSize offset, VkDeviceSize size) const
+{
+    CHECK(IsMapped(), "Buffer needs to be mapped to flush its memory");
+    if (!IsMapped())
+    {
+        return;
+    }
+
+    vmaFlushAllocation(vulkanContext->vmaAllocator, VMAAllocation, offset, size);
+}
 
 VulkanImage::VulkanImage(const ImageDescription &description)
 : Image(description.Image)
@@ -1309,6 +1405,159 @@ VkResult VulkanPipelineBuilder::Build(VkDevice device, VkPipelineCache pipelineC
     return VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(*outPipeline), debugName);
 }
 
+VulkanStagingDevice::VulkanStagingDevice(VulkanContext* context)
+: VkContext(context)
+, StagingBuffer(context, EOS::BufferHandle())
+{
+}
+
+void VulkanStagingDevice::EnsureSize(uint32_t sizeNeeded)
+{
+    const uint32_t alignedSize = std::max(EOS::GetSizeAligned(sizeNeeded, Alignment), MinBufferSize);
+    sizeNeeded = alignedSize < MaxBufferSize ? alignedSize : MaxBufferSize;
+
+    if (!StagingBuffer.Empty())
+    {
+        const bool isEnoughSize = sizeNeeded <= Size;
+        const bool isMaxSize = Size == MaxBufferSize;
+
+        if (isEnoughSize || isMaxSize)
+        {
+            return;
+        }
+    }
+
+    WaitAndReset();
+
+    // deallocate the previous staging buffer
+    StagingBuffer = nullptr;
+
+    // if the combined size of the new staging buffer and the existing one is larger than the limit imposed by some architectures on buffers
+    // that are device and host visible, we need to wait for the current buffer to be destroyed before we can allocate a new one
+    if ((sizeNeeded + Size) > MaxBufferSize)
+    {
+        VkContext->WaitOnDeferredTasks();
+    }
+
+    Size = sizeNeeded;
+
+    const std::string debugName = fmt::format("Buffer: staging buffer {}", ++Counter);
+
+    EOS::BufferHandle bufferHandle = VkContext->CreateBuffer(Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, debugName.c_str());
+    StagingBuffer = {VkContext, bufferHandle };
+
+    CHECK(!StagingBuffer.Empty(), "Could not create StagingBuffer");
+}
+
+void VulkanStagingDevice::WaitAndReset()
+{
+    for (const MemoryRegionDescription& region : Regions)
+    {
+        VkContext->VulkanCommandPool->Wait(region.Handle);
+    };
+
+    Regions.clear();
+    Regions.push_front({0, Size, EOS::SubmitHandle()});
+}
+
+void VulkanStagingDevice::BufferSubData(const EOS::Handle<EOS::Buffer> &buffer, size_t dstOffset, size_t size, const void *data)
+{
+    VulkanBuffer* vulkanBuffer = VkContext->BufferPool.Get(buffer);
+    CHECK(vulkanBuffer, "The buffer from the handle is not valid");
+    CHECK(dstOffset + size <= vulkanBuffer->BufferSize, "The data you want to upload is too big for the buffer");
+
+    if (vulkanBuffer->IsMapped())
+    {
+        vulkanBuffer->BufferSubData(VkContext, dstOffset, size, data);
+        return;
+    }
+
+    VulkanBuffer* stagingBuffer = VkContext->BufferPool.Get(StagingBuffer);
+    CHECK(stagingBuffer, "Staging buffer is not valid");
+
+    while (size)
+    {
+        // get next staging buffer free offset
+        MemoryRegionDescription desc = GetNextFreeOffset(static_cast<uint32_t>(size));
+        const uint32_t chunkSize = std::min(static_cast<uint32_t>(size), static_cast<uint32_t>(desc.Size));
+
+        // copy data into staging buffer
+        stagingBuffer->BufferSubData(VkContext, desc.Offset, chunkSize, data);
+
+        // do the transfer
+        const VkBufferCopy copy =
+        {
+            .srcOffset = desc.Offset,
+            .dstOffset = dstOffset,
+            .size = chunkSize,
+        };
+
+        EOS::ICommandBuffer& wrapper = VkContext->AcquireCommandBuffer();
+        auto vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&wrapper);
+        vkCmdCopyBuffer(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, stagingBuffer->VulkanVkBuffer, vulkanBuffer->VulkanVkBuffer, 1, &copy);
+
+        //TODO: Check states
+        EOS::GlobalBarrier globBarrier{buffer,  EOS::CopySource,EOS::Common };
+        cmdPipelineBarrier(wrapper, {globBarrier}, {});
+
+        desc.Handle = VkContext->VulkanCommandPool->Submit(*vulkanCommandBuffer->CommandBufferImpl);
+        Regions.push_back(desc);
+
+        size -= chunkSize;
+        data = chunkSize + static_cast<const uint8_t*>(data);
+        dstOffset += chunkSize;
+    }
+}
+
+VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOffset(uint32_t size)
+{
+    const uint32_t requestedAlignedSize = EOS::GetSizeAligned(size, Alignment);
+
+    EnsureSize(requestedAlignedSize);
+    CHECK(!Regions.empty(), "Memory Regions are empty");
+
+    for (auto it = Regions.begin(); it != Regions.end(); ++it)
+    {
+        // Check if region is available
+        if (VkContext->VulkanCommandPool->IsReady(it->Handle))
+        {
+            //Check if region is big enoug
+            if (it->Size >= requestedAlignedSize)
+            {
+                const uint32_t unusedSize = it->Size - requestedAlignedSize;
+                const uint32_t unusedOffset = it->Offset + requestedAlignedSize;
+
+                //Replace the region with the smaller one.
+                Regions.erase(it);
+                if (unusedSize > 0)
+                {
+                    Regions.push_front({unusedOffset, unusedSize, EOS::SubmitHandle()});
+                }
+
+                return {it->Offset, requestedAlignedSize, EOS::SubmitHandle()}; // New Region that we will use
+            }
+        }
+    }
+
+    //Wait for the staging buffer to become free.
+    WaitAndReset();
+    Regions.clear();
+
+    const uint32_t unusedSize = Size > requestedAlignedSize ? Size - requestedAlignedSize : 0;
+    if (unusedSize)
+    {
+        const uint32_t unusedOffset = Size - unusedSize;
+        Regions.push_front({unusedOffset, unusedSize, EOS::SubmitHandle()});
+    }
+
+    return
+    {
+        .Offset = 0,
+        .Size = Size - unusedSize,
+        .Handle = EOS::SubmitHandle(),
+    };
+}
+
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.Config)
 {
@@ -1343,20 +1592,24 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
 
     //TODO: Create pipeline cache
+
     UseStagingDevice = IsHostVisibleMemorySingleHeap();
+
     CreateAllocator();
 
-    //TODO: Create Staging Device
+    VulkanStagingBuffer = std::make_unique<VulkanStagingDevice>(this);
 
     GrowDescriptorPool(16, 16, 1);
 }
 
 VulkanContext::~VulkanContext()
 {
-
     //Wait unit all work has been done
     VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
-    SwapChain.reset();
+
+
+    SwapChain.reset(nullptr);
+    VulkanStagingBuffer.reset(nullptr);
 
     vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
 
@@ -1391,7 +1644,7 @@ VulkanContext::~VulkanContext()
     vkDestroySurfaceKHR(VulkanInstance, VulkanSurface, nullptr);
     vkDestroyDescriptorSetLayout(VulkanDevice, DescriptorSetLayout, nullptr);
     vkDestroyDescriptorPool(VulkanDevice, DescriptorPool, nullptr);
-    //vmaDestroyAllocator(Vma);
+    vmaDestroyAllocator(vmaAllocator);
 
     vkDestroyDevice(VulkanDevice, nullptr);
     vkDestroyDebugUtilsMessengerEXT(VulkanInstance, VulkanDebugMessenger, nullptr);
@@ -1774,14 +2027,20 @@ EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDesc
         storageType = EOS::StorageType::HostVisible;
     }
 
-    VkBufferUsageFlags usageFlags = VkContext::BufferUsageFlagsToVkBufferUsageFlags(bufferDescription.Usage);
-
     // Use staging device to transfer data into the buffer when the storage is private to the device
-    usageFlags = (storageType == EOS::StorageType::Device) ? VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0;
+    VkBufferUsageFlags usageFlags = (storageType == EOS::StorageType::Device) ? VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0;
+    usageFlags |= VkContext::BufferUsageFlagsToVkBufferUsageFlags(bufferDescription.Usage);
 
     const VkMemoryPropertyFlags memFlags = VkContext::StorageTypeToVkMemoryPropertyFlags(storageType);
 
-    return {this, CreateBuffer(bufferDescription.Size, usageFlags, memFlags, bufferDescription.DebugName)};
+    EOS::BufferHandle handle = CreateBuffer(bufferDescription.Size, usageFlags, memFlags, bufferDescription.DebugName);
+
+    if (bufferDescription.Data)
+    {
+        Upload(handle, bufferDescription.Data, bufferDescription.Size, 0);
+    }
+
+    return {this, handle};
 }
 
 void VulkanContext::Destroy(EOS::TextureHandle handle)
@@ -1899,6 +2158,14 @@ void VulkanContext::Destroy(EOS::BufferHandle handle)
     }));
 
     BufferPool.Destroy(handle);
+}
+
+void VulkanContext::Upload(EOS::BufferHandle handle, const void *data, size_t size, size_t offset)
+{
+    CHECK(data, "The data you want to upload should be valid");
+    CHECK(size, "Data size should be non-zero");
+
+    VulkanStagingBuffer->BufferSubData(handle, offset, size, data);
 }
 
 void VulkanContext::ProcessDeferredTasks() const
@@ -2375,11 +2642,14 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
         // Check if coherent buffer is available.
         VK_ASSERT(vkCreateBuffer(VulkanDevice, &createInfo, nullptr, &buffer.VulkanVkBuffer));
 
+
+        VkMemoryRequirements requirements{};
+        vkGetBufferMemoryRequirements(VulkanDevice, buffer.VulkanVkBuffer, &requirements);
+
         //Reset the Buffer
         vkDestroyBuffer(VulkanDevice, buffer.VulkanVkBuffer, nullptr);
         buffer.VulkanVkBuffer = VK_NULL_HANDLE;
-        VkMemoryRequirements requirements{};
-        vkGetBufferMemoryRequirements(VulkanDevice, buffer.VulkanVkBuffer, &requirements);
+
 
         if (requirements.memoryTypeBits & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
         {

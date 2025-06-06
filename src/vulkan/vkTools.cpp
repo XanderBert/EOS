@@ -1339,6 +1339,22 @@ namespace VkContext
         }
         return memFlags;
     }
+    
+    VkIndexType IndexFormatToVkIndexType(EOS::IndexFormat format)
+    {
+        switch (format)
+        {
+            case EOS::IndexFormat::UI8:
+                return VK_INDEX_TYPE_UINT8_EXT;
+            case EOS::IndexFormat::UI16:
+                return VK_INDEX_TYPE_UINT16;
+            case EOS::IndexFormat::UI32:
+                return VK_INDEX_TYPE_UINT32;
+        };
+
+        CHECK(false, "Could not determine index type from index format");
+        return VK_INDEX_TYPE_NONE_KHR;
+    }
 };
 
 namespace VkSynchronization

@@ -12,7 +12,7 @@ Eos aims to be:
 
 # Dependencies
 > [!NOTE] 
-> These dependencies are fetched automatically by CMake during the configuration step using FetchContent
+> These dependencies are used by EOS and are fetched automatically by CMake during the configuration step using FetchContent
 >
 
  
@@ -21,6 +21,8 @@ Eos aims to be:
 - [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [SPDLOG](https://github.com/gabime/spdlog)
 - [SLANG](https://github.com/shader-slang/slang)
+- [ASSIMP]()
+- [GLM]()
 
 
 # Building

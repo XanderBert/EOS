@@ -326,4 +326,11 @@ namespace EOS
         AccelStructBuildInputReadOnly = 0x40,
         AccelStructStorage = 0x80
     };
+
+    enum class IndexFormat : uint8_t
+    {
+        UI8,
+        UI16,
+        UI32,
+    };
 }

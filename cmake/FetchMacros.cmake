@@ -113,3 +113,34 @@ macro(FETCH_SLANG)
         endif()
     endif()
 endmacro()
+
+macro(FETCH_ASSIMP depsDir)
+    set(ASSIMP_ROOT_DIR ${depsDir}/src/assimp)
+    set(ASSIMP_BUILD_TESTS OFF)
+    set(ASSIMP_INSTALL_PDB OFF)
+    set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
+    set(ASSIMP_BUILD_IFC_IMPORTER OFF)
+
+
+    FetchContent_Declare(
+            assimp
+            GIT_REPOSITORY https://github.com/assimp/assimp
+            GIT_TAG v6.0.0
+    )
+
+    FetchContent_MakeAvailable(assimp)
+    target_link_libraries(EOS PRIVATE assimp::assimp)
+endmacro()
+
+macro(FETCH_GLM depsDir)
+
+    set(GLM_ROOT_DIR ${depsDir}/src/assimp)
+    FetchContent_Declare(
+            glm
+            GIT_REPOSITORY https://github.com/g-truc/glm
+            GIT_TAG 1.0.1
+    )
+
+    FetchContent_MakeAvailable(glm)
+    target_link_libraries(EOS PRIVATE glm::glm)
+endmacro()

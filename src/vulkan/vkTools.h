@@ -145,6 +145,8 @@ namespace VkContext
     [[nodiscard]] VkAttachmentStoreOp StoreOpToVkAttachmentStoreOp(EOS::StoreOp storeOp);
     [[nodiscard]] VkBufferUsageFlags BufferUsageFlagsToVkBufferUsageFlags(EOS::BufferUsageFlags bufferUsageFlags);
     [[nodiscard]] VkMemoryPropertyFlags StorageTypeToVkMemoryPropertyFlags(EOS::StorageType storage);
+
+    [[nodiscard]] VkIndexType IndexFormatToVkIndexType(EOS::IndexFormat indexFormat);
 }
 
 namespace VkSynchronization
