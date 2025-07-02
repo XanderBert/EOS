@@ -64,13 +64,19 @@ int main()
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context, shaderCompiler, "triangleVert");
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context, shaderCompiler, "triangleFrag");
 
-
     constexpr EOS::VertexInputData vdesc
     {
         .Attributes    = { { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = 0 } },
         .InputBindings = { { .Stride = sizeof(glm::vec3) } },
     };
 
+    EOS::Holder<EOS::TextureHandle> depthTexture = context->CreateTexture({
+    .Type       = EOS::ImageType::Image_2D,
+    .TextureFormat     = EOS::Format::Z_F32,
+    .TextureDimensions = {static_cast<uint32_t>(window->Width), static_cast<uint32_t>(window->Height)},
+    .Usage      = EOS::TextureUsageFlags::Attachment,
+    .DebugName  = "Depth Buffer",
+    });
 
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineDescription
@@ -79,18 +85,15 @@ int main()
         .VertexShader = shaderHandleVert,
         .FragmentShader = shaderHandleFrag,
         .ColorAttachments = {{ .ColorFormat = context->GetSwapchainFormat()}},
-
+        .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
+        .PipelineCullMode = EOS::CullMode::Back,
+        .DebugName = "Basic Render Pipeline"
     };
-
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
 
     std::vector<glm::vec3> positions;
     std::vector<uint32_t> indices;
-
-    //TODO: Copy over data to bin
     LoadModel("../data/rubber_duck/scene.gltf", positions, indices);
-
-
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
     {
@@ -100,7 +103,6 @@ int main()
       .Data      = positions.data(),
       .DebugName = "Buffer: vertex"
       });
-
 
     EOS::Holder<EOS::BufferHandle> indexBuffer = context->CreateBuffer(
     {
@@ -118,31 +120,54 @@ int main()
         {
             continue; // Or sleep
         }
-
         const float aspectRatio = static_cast<float>(window->Width) / static_cast<float>(window->Height);
 
-        //TODO: There is no depth texture available in the vertex stage to handle Depth Comparrison
+        //glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(  static_cast<float>(glfwGetTime() * 20.0f)  ), glm::vec3(1, 0, 0));
+        //constexpr glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -1.5f));
+        //const glm::mat4 projection = glm::perspective(glm::radians(65.0f), aspectRatio, 0.1f, 1000.0f);
 
-        glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(  static_cast<float>(glfwGetTime() * 10.0f)  ), glm::vec3(1, 0, 0));
-        constexpr glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -1.5f));
-        const glm::mat4 projection = glm::perspective(glm::radians(65.0f), aspectRatio, 0.1f, 1000.0f);
-        const glm::mat4 mvp = projection * view * model;
+        using glm::mat4;
+        using glm::vec3;
+
+        const mat4 m = glm::rotate(mat4(1.0f), glm::radians(-90.0f), vec3(1, 0, 0));
+        const mat4 v = glm::rotate(glm::translate(mat4(1.0f), vec3(0.0f, -0.5f, -1.5f)), (float)glfwGetTime(), vec3(0.0f, 1.0f, 0.0f));
+        const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);
+        const glm::mat4 mvp = p * v * m;
 
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
         cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::Present}});
 
-        EOS::Framebuffer framebuffer = {.Color = {{.Texture = context->GetSwapChainTexture()}}};
-        EOS::RenderPass renderPass{ .Color = { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } }};
-        cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
-            cmdPushMarker(cmdBuffer, "Render Duck", 0xff0000ff);
-                cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-                cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
-                cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
-                cmdPushConstants(cmdBuffer, mvp);
-                cmdDrawIndexed(cmdBuffer, indices.size());
-            cmdPopMarker(cmdBuffer);
-        cmdEndRendering(cmdBuffer);
+        EOS::Framebuffer framebuffer
+        {
+            .Color = {{.Texture = context->GetSwapChainTexture()}},
+            .DepthStencil = { .Texture = depthTexture },
+            .DebugName = "Basic Color Depth Framebuffer"
+        };
 
+        EOS::RenderPass renderPass
+        {
+            .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
+            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
+        };
+
+        EOS::DepthState depthState
+        {
+            .CompareOpState = EOS::CompareOp::Less,
+            .IsDepthWriteEnabled = true,
+        };
+
+        cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
+        {
+            cmdPushMarker(cmdBuffer, "Render Duck", 0xff0000ff);
+            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
+            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
+            cmdPushConstants(cmdBuffer, mvp);
+            cmdSetDepthState(cmdBuffer, depthState);
+            cmdDrawIndexed(cmdBuffer, indices.size());
+            cmdPopMarker(cmdBuffer);
+        }
+        cmdEndRendering(cmdBuffer);
         context->Submit(cmdBuffer, context->GetSwapChainTexture());
     }
 

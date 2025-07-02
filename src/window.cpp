@@ -20,6 +20,13 @@ namespace EOS
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+#if defined(EOS_PLATFORM_WAYLAND)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
+#elif defined(EOS_PLATFORM_X11)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#elif defined(EOS_PLATFORM_WIN32)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
+#endif
 
         // Determine if we're in fullscreen mode
         const bool fullscreen = !contextDescription.Width || !contextDescription.Height;

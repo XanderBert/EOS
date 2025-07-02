@@ -106,6 +106,98 @@ namespace VkDebug
 //TODO: Move most of them back to VulkanContext -> private
 namespace VkContext
 {
+    struct TextureFormatProperties
+    {
+        const EOS::Format Format = EOS::Format::Invalid;
+        const uint8_t BytesPerBlock : 5 = 1;
+        const uint8_t BlockWidth : 3 = 1;
+        const uint8_t BlockHeight : 3 = 1;
+        const uint8_t MinBlocksX : 2 = 1;
+        const uint8_t MinBlocksY : 2 = 1;
+        const bool Depth : 1 = false;
+        const bool Stencil : 1 = false;
+        const bool Compressed : 1 = false;
+        const uint8_t NumberOfPlanes : 2 = 1;
+    };
+
+    static constexpr TextureFormatProperties VulkanTextureFormatProperties[]
+    {
+        TextureFormatProperties { .Format = EOS::Format::Invalid, .BytesPerBlock = 1 },
+        TextureFormatProperties { .Format = EOS::Format::R_UN8, .BytesPerBlock = 1 },
+        TextureFormatProperties { .Format = EOS::Format::R_UI16, .BytesPerBlock = 2 },
+        TextureFormatProperties { .Format = EOS::Format::R_UI32, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::R_UN16, .BytesPerBlock = 2 },
+        TextureFormatProperties { .Format = EOS::Format::R_F16, .BytesPerBlock = 2 },
+        TextureFormatProperties { .Format = EOS::Format::R_F32, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::RG_UN8, .BytesPerBlock = 2 },
+        TextureFormatProperties { .Format = EOS::Format::RG_UI16, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::RG_UI32, .BytesPerBlock = 8 },
+        TextureFormatProperties { .Format = EOS::Format::RG_UN16, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::RG_F16, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::RG_F32, .BytesPerBlock = 8 },
+        TextureFormatProperties { .Format = EOS::Format::RGBA_UN8, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::RGBA_UI32, .BytesPerBlock = 16 },
+        TextureFormatProperties { .Format = EOS::Format::RGBA_F16, .BytesPerBlock = 8 },
+        TextureFormatProperties { .Format = EOS::Format::RGBA_F32, .BytesPerBlock = 16 },
+        TextureFormatProperties { .Format = EOS::Format::RGBA_SRGB8, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::BGRA_UN8, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::BGRA_SRGB8, .BytesPerBlock = 4 },
+        TextureFormatProperties { .Format = EOS::Format::ETC2_RGB8, .BytesPerBlock = 8,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
+        TextureFormatProperties { .Format = EOS::Format::ETC2_SRGB8, .BytesPerBlock = 8,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
+        TextureFormatProperties { .Format = EOS::Format::BC7_RGBA, .BytesPerBlock = 16,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
+        TextureFormatProperties { .Format = EOS::Format::Z_UN16, .BytesPerBlock = 2,.Depth = true },
+        TextureFormatProperties { .Format = EOS::Format::Z_UN24, .BytesPerBlock = 3,.Depth = true },
+        TextureFormatProperties { .Format = EOS::Format::Z_F32, .BytesPerBlock = 4,.Depth = true },
+        TextureFormatProperties { .Format = EOS::Format::Z_UN24_S_UI8, .BytesPerBlock = 4,.Depth = true, .Stencil = true },
+        TextureFormatProperties { .Format = EOS::Format::Z_F32_S_UI8, .BytesPerBlock = 5,.Depth = true, .Stencil = true },
+        TextureFormatProperties { .Format = EOS::Format::YUV_NV12, .BytesPerBlock = 24,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true, .NumberOfPlanes = 2 }, // Subsampled 420
+        TextureFormatProperties { .Format = EOS::Format::YUV_420p, .BytesPerBlock = 24,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true, .NumberOfPlanes = 3 }, // Subsampled 420
+    };
+
+    [[nodiscard]] constexpr uint32_t CalculateNumberOfMipLevels(uint32_t width, uint32_t height)
+    {
+        uint32_t levels = 1;
+        while ((width | height) >> levels) levels++;
+
+        return levels;
+    }
+    
+    [[nodiscard]] constexpr uint32_t GetNumberOfImagePlanes(VkFormat format) {
+        switch (format) {
+            case VK_FORMAT_UNDEFINED:
+                return 0;
+            case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
+            case VK_FORMAT_G8_B8_R8_3PLANE_422_UNORM:
+            case VK_FORMAT_G8_B8_R8_3PLANE_444_UNORM:
+            case VK_FORMAT_G12X4_B12X4_R12X4_3PLANE_420_UNORM_3PACK16:
+            case VK_FORMAT_G12X4_B12X4_R12X4_3PLANE_422_UNORM_3PACK16:
+            case VK_FORMAT_G12X4_B12X4_R12X4_3PLANE_444_UNORM_3PACK16:
+            case VK_FORMAT_G16_B16_R16_3PLANE_420_UNORM:
+            case VK_FORMAT_G16_B16_R16_3PLANE_422_UNORM:
+            case VK_FORMAT_G16_B16_R16_3PLANE_444_UNORM:
+                return 3;
+            case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
+            case VK_FORMAT_G8_B8R8_2PLANE_422_UNORM:
+            case VK_FORMAT_G12X4_B12X4R12X4_2PLANE_420_UNORM_3PACK16:
+            case VK_FORMAT_G12X4_B12X4R12X4_2PLANE_422_UNORM_3PACK16:
+            case VK_FORMAT_G16_B16R16_2PLANE_420_UNORM:
+            case VK_FORMAT_G16_B16R16_2PLANE_422_UNORM:
+            case VK_FORMAT_G8_B8R8_2PLANE_444_UNORM:
+            case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_444_UNORM_3PACK16:
+            case VK_FORMAT_G12X4_B12X4R12X4_2PLANE_444_UNORM_3PACK16:
+            case VK_FORMAT_G16_B16R16_2PLANE_444_UNORM:
+                return 2;
+            default:
+                return 1;
+        }
+    }
+
+
+    [[nodiscard]] static inline bool IsDepthOrStencilFormat(EOS::Format format)
+    {
+        return VulkanTextureFormatProperties[format].Depth || VulkanTextureFormatProperties[format].Stencil;
+    }
+
     [[nodiscard]] uint32_t FindQueueFamilyIndex(const VkPhysicalDevice& physicalDevice, VkQueueFlags flags);
 
     void CheckMissingDeviceFeatures(
@@ -124,6 +216,11 @@ namespace VkContext
     [[nodiscard]] EOS::Format vkFormatToFormat(VkFormat format);
     [[nodiscard]] VkFormat FormatTovkFormat(EOS::Format format);
     [[nodiscard]] VkFormat VertexFormatToVkFormat(EOS::VertexFormat format);
+    [[nodiscard]] std::vector<VkFormat> GetCompatibleDepthStencilFormats(EOS::Format format);
+    [[nodiscard]] VkFormat GetClosestDepthStencilFormat(EOS::Format desiredFormat, const VkPhysicalDevice& physicalDevice);
+    [[nodiscard]] uint32_t GetTextureBytesPerLayer(uint32_t width, uint32_t height, EOS::Format format, uint32_t level);
+
+
     [[nodiscard]] VkBlendFactor BlendFactorToVkBlendFactor(EOS::BlendFactor value);
     [[nodiscard]] VkBlendOp BlendOpToVkBlendOp(EOS::BlendOp value);
 

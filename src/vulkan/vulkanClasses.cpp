@@ -249,13 +249,9 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     };
     vkCmdSetScissor(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &scissor);
 
-    // Set the Depth states
+    // Reset the Depth states
     EOS::DepthState state{};
-    const VkCompareOp op = VkContext::CompareOpToVkCompareOp(state.CompareOpState);
-
-    vkCmdSetDepthWriteEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, state.IsDepthWriteEnabled ? VK_TRUE : VK_FALSE);
-    vkCmdSetDepthTestEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op != VK_COMPARE_OP_ALWAYS || state.IsDepthWriteEnabled);
-    vkCmdSetDepthCompareOp(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op);
+    cmdSetDepthState(commandBuffer, state);
 
     //CheckAndUpdateDescriptorSets(); -> TODO: this is a solution but we can avoid to check this every frame, what about we add any descriptor sets...
     vkCmdSetDepthBiasEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_FALSE);
@@ -377,6 +373,16 @@ void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
 {
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     vkCmdEndDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
+}
+
+void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
+{
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+
+    const VkCompareOp op = VkContext::CompareOpToVkCompareOp(depthState.CompareOpState);
+    vkCmdSetDepthWriteEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, depthState.IsDepthWriteEnabled ? VK_TRUE : VK_FALSE);
+    vkCmdSetDepthTestEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op != VK_COMPARE_OP_ALWAYS || depthState.IsDepthWriteEnabled);
+    vkCmdSetDepthCompareOp(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op);
 }
 
 void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, uint32_t colorRGBA)
@@ -506,16 +512,45 @@ VkImageViewType VulkanImage::ToImageViewType(EOS::ImageType imageType)
 }
 
 void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, const EOS::ImageType imageType,
-    const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName)
+    const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName, const EOS::ComponentMapping& componentMapping)
 {
+    VkImageAspectFlags aspect{};
+
+    const bool isDepth = IsDepthFormat(imageFormat);
+    const bool isStencil = IsStencilFormat(imageFormat);
+
+    if (isDepth || isStencil)
+    {
+        if (isDepth)
+        {
+            aspect |= VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+        else if (isStencil)
+        {
+            aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+    }
+    else
+    {
+        aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+
+    const VkComponentMapping mapping
+    {
+        .r = static_cast<VkComponentSwizzle>(componentMapping.R),
+        .g = static_cast<VkComponentSwizzle>(componentMapping.G),
+        .b = static_cast<VkComponentSwizzle>(componentMapping.B),
+        .a = static_cast<VkComponentSwizzle>(componentMapping.A),
+    };
+
     const VkImageViewCreateInfo createInfo =
    {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = image,
         .viewType = ToImageViewType(imageType),
         .format = imageFormat,
-        .components =  {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels , 0, layers},
+        .components =  mapping,
+        .subresourceRange = {aspect, 0, levels , 0, layers},
     };
 
     VK_ASSERT(vkCreateImageView(device, &createInfo, nullptr, &imageView));
@@ -536,10 +571,137 @@ VkImageView VulkanImage::GetImageViewForFramebuffer(VkDevice vulkanDevice, uint3
     {
         return ImageViewForFramebuffer[level][layer];
     }
-    CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, fmt::format("{} - Framebuffer Image View [{}][{}]", DebugName , level, layer).c_str());
+
+
+    if (!DebugName){ DebugName = "ImageView"; }
+    const std::string imageViewDebugName = fmt::format("{} - Framebuffer Image View [{}][{}]", DebugName , level, layer);
+    CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, imageViewDebugName.c_str());
 
     return ImageViewForFramebuffer[level][layer];
 }
+
+void VulkanImage::GenerateMipmaps(VkCommandBuffer commandBuffer) const
+{
+    constexpr uint32_t formatFeatureMask = (VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT);
+    const bool hardwareDownscalingSupported = (FormatProperties.optimalTilingFeatures & formatFeatureMask) == formatFeatureMask;
+    if (!hardwareDownscalingSupported)
+    {
+        EOS::Logger->warn("Does not support hardware downscaling while generinting mips for this image:{}", DebugName);
+    }
+
+
+    // Choose linear filter for color formats if supported by the device, else use nearest filter
+    // Choose nearest filter by default for depth/stencil formats
+    const VkFilter blitFilter = [](bool isDepthOrStencilFormat, bool imageFilterLinear)
+    {
+        if (isDepthOrStencilFormat) { return VK_FILTER_NEAREST; }
+        if (imageFilterLinear) { return VK_FILTER_LINEAR; }
+        return VK_FILTER_NEAREST;
+    }(VkContext::IsDepthOrStencilFormat(VkContext::vkFormatToFormat(ImageFormat)), FormatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+
+    constexpr VkDebugUtilsLabelEXT utilsLabel =
+    {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = "Generate mipmaps",
+        .color = {1.0f, 0.75f, 1.0f, 1.0f},
+    };
+    vkCmdBeginDebugUtilsLabelEXT(commandBuffer, &utilsLabel);
+
+    // Transition the first level and all layers into VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+    const VkImageAspectFlags imageAspectFlags = GetImageAspectFlags();
+    InsertMemoryBarrier(commandBuffer, EOS::Common, EOS::CopySource, {imageAspectFlags, 0, 1, 0, Layers});
+
+    for (uint32_t layer{}; layer < Layers; ++layer)
+    {
+        int32_t mipWidth = static_cast<int32_t>(Extent.width);
+        int32_t mipHeight = static_cast<int32_t>(Extent.height);
+
+        for (uint32_t i{1}; i < Levels; ++i)
+        {
+            // Transition level i to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; it will be copied into from the (i-1)-th layer
+            InsertMemoryBarrier(commandBuffer, EOS::CopySource, EOS::CopyDest, {imageAspectFlags, i, 1, layer, 1});
+
+            const int32_t nextLevelWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+            const int32_t nextLevelHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+
+            const VkOffset3D srcOffsets[2]
+            {
+                VkOffset3D{0, 0, 0},
+                VkOffset3D{mipWidth, mipHeight, 1},
+            };
+
+            const VkOffset3D dstOffsets[2]
+            {
+                VkOffset3D{0, 0, 0},
+                VkOffset3D{nextLevelWidth, nextLevelHeight, 1},
+            };
+
+            // Blit the image from the prev mip-level (i-1) (VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) to the current mip-level (i) (VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+            const VkImageBlit blit
+            {
+                .srcSubresource = VkImageSubresourceLayers{imageAspectFlags, i - 1, layer, 1},
+                .srcOffsets = {srcOffsets[0], srcOffsets[1]},
+                .dstSubresource = VkImageSubresourceLayers{imageAspectFlags, i, layer, 1},
+                .dstOffsets = {dstOffsets[0], dstOffsets[1]},
+            };
+
+            vkCmdBlitImage(commandBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, blitFilter);
+
+            // Transition i-th level to VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL as it will be read from in the next iteration
+            InsertMemoryBarrier(commandBuffer, EOS::CopyDest, EOS::CopySource, {imageAspectFlags, i, 1, layer, 1});
+
+            // Compute the size of the next mip level
+            mipWidth = nextLevelWidth;
+            mipHeight = nextLevelHeight;
+        }
+    }
+
+    // Transition all levels and layers (faces) to their final layout
+    InsertMemoryBarrier(commandBuffer, EOS::CopySource, EOS::Undefined, {imageAspectFlags, 0, Levels, 0, Layers});
+    vkCmdEndDebugUtilsLabelEXT(commandBuffer);
+}
+
+VkImageAspectFlags VulkanImage::GetImageAspectFlags() const
+{
+    //TODO Move this functionaliyt towards  VkSynchronization::ConvertToVkImageAspectFlags or remove that one and use this one. which may be even better.
+    const bool isDepthFormat =  IsDepthFormat(ImageFormat);
+    const bool isStencilFormat =  IsStencilFormat(ImageFormat);
+
+    VkImageAspectFlags flags = 0;
+    flags |= isDepthFormat ? VK_IMAGE_ASPECT_DEPTH_BIT : 0;
+    flags |= isStencilFormat ? VK_IMAGE_ASPECT_STENCIL_BIT : 0;
+    flags |= !(isDepthFormat || isStencilFormat) ? VK_IMAGE_ASPECT_COLOR_BIT : 0;
+
+    return flags;
+}
+
+void VulkanImage::InsertMemoryBarrier(VkCommandBuffer commandBuffer, EOS::ResourceState currentState, EOS::ResourceState nextState, const VkImageSubresourceRange& subResourceRange) const
+{
+    VkImageMemoryBarrier2 vkBarrier
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR,
+        .pNext = nullptr,
+        .srcStageMask       = VkSynchronization::ConvertToVkPipelineStage2(currentState),
+        .srcAccessMask      = VkSynchronization::ConvertToVkAccessFlags2(currentState),
+        .dstStageMask       = VkSynchronization::ConvertToVkPipelineStage2(nextState),
+        .dstAccessMask      = VkSynchronization::ConvertToVkAccessFlags2(nextState),
+        .oldLayout          = VkSynchronization::ConvertToVkImageLayout(currentState),
+        .newLayout          = VkSynchronization::ConvertToVkImageLayout(nextState),
+        .image              = Image,
+        .subresourceRange   = subResourceRange
+    };
+
+    const VkDependencyInfoKHR dependencyInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR,
+        .pNext = nullptr,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &vkBarrier
+    };
+
+    vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
+}
+
 VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulkanSwapChainDescription)
 : VkContext(vulkanSwapChainDescription.vulkanContext)
 , GraphicsQueue(vulkanSwapChainDescription.vulkanContext->VulkanDeviceQueues.Graphics.Queue)
@@ -1367,7 +1529,7 @@ VkResult VulkanPipelineBuilder::Build(VkDevice device, VkPipelineCache pipelineC
         .colorAttachmentCount = NumberOfColorAttachments,
         .pColorAttachmentFormats = ColorAttachmentFormats,
         .depthAttachmentFormat = DepthAttachmentFormatInfo,
-        .stencilAttachmentFormat = DepthAttachmentFormatInfo,
+        .stencilAttachmentFormat = StencilAttachmentFormatInfo,
     };
 
     const VkGraphicsPipelineCreateInfo ci
@@ -1492,21 +1654,159 @@ void VulkanStagingDevice::BufferSubData(const EOS::Handle<EOS::Buffer> &buffer, 
             .size = chunkSize,
         };
 
-        EOS::ICommandBuffer& wrapper = VkContext->AcquireCommandBuffer();
-        auto vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&wrapper);
-        vkCmdCopyBuffer(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, stagingBuffer->VulkanVkBuffer, vulkanBuffer->VulkanVkBuffer, 1, &copy);
+        CommandBufferData* commandbuffer = VkContext->VulkanCommandPool->AcquireCommandBuffer();
+
+        vkCmdCopyBuffer(commandbuffer->VulkanCommandBuffer, stagingBuffer->VulkanVkBuffer, vulkanBuffer->VulkanVkBuffer, 1, &copy);
 
         //TODO: Check states
         EOS::GlobalBarrier globBarrier{buffer,  EOS::CopySource,EOS::Common };
-        cmdPipelineBarrier(wrapper, {globBarrier}, {});
+        VkMemoryBarrier2 vkBarrier
+        {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR,
+            .pNext = nullptr,
+            .srcStageMask   = VkSynchronization::ConvertToVkPipelineStage2(globBarrier.CurrentState),
+            .srcAccessMask  = VkSynchronization::ConvertToVkAccessFlags2(globBarrier.CurrentState),
+            .dstStageMask   = VkSynchronization::ConvertToVkPipelineStage2(globBarrier.NextState),
+            .dstAccessMask  = VkSynchronization::ConvertToVkAccessFlags2(globBarrier.NextState)
+        };
 
-        desc.Handle = VkContext->VulkanCommandPool->Submit(*vulkanCommandBuffer->CommandBufferImpl);
+        const VkDependencyInfoKHR dependencyInfo
+        {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR,
+            .pNext = nullptr,
+            .dependencyFlags = 0,
+            .memoryBarrierCount = 1u,
+            .pMemoryBarriers = &vkBarrier,
+            .bufferMemoryBarrierCount = 0,
+            .pBufferMemoryBarriers = nullptr,
+            .imageMemoryBarrierCount = 0,
+            .pImageMemoryBarriers = nullptr
+        };
+
+        vkCmdPipelineBarrier2(commandbuffer->VulkanCommandBuffer, &dependencyInfo);
+
+        desc.Handle = VkContext->VulkanCommandPool->Submit(*commandbuffer);
         Regions.push_back(desc);
 
         size -= chunkSize;
         data = chunkSize + static_cast<const uint8_t*>(data);
         dstOffset += chunkSize;
     }
+}
+
+void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void *data)
+{
+    CHECK(numMipLevels <= EOS_MAX_MIP_LEVELS, "mip levels exceed max mip levels");
+
+    // divide the width and height by 2 until we get to the size of level 'baseMipLevel'
+    uint32_t width = image.Extent.width >> baseMipLevel;
+    uint32_t height = image.Extent.height >> baseMipLevel;
+
+    const EOS::Format texFormat(VkContext::vkFormatToFormat(format));
+    CHECK(!imageRegion.offset.x && !imageRegion.offset.y && imageRegion.extent.width == width && imageRegion.extent.height == height, "Uploading mip-levels with an image region that is smaller than the base mip level is not supported");
+
+    // find the storage size for all mip-levels being uploaded
+    uint32_t layerStorageSize = 0;
+    for (uint32_t i = 0; i < numMipLevels; ++i)
+    {
+        const uint32_t mipSize = VkContext::GetTextureBytesPerLayer(image.Extent.width, image.Extent.height, texFormat, i);
+        layerStorageSize += mipSize;
+        width = width <= 1 ? 1 : width >> 1;
+        height = height <= 1 ? 1 : height >> 1;
+    }
+
+    const uint32_t storageSize = layerStorageSize * numLayers;
+    EnsureSize(storageSize);
+    CHECK(storageSize <= Size, "storageSize exceeds available size for the staging device");
+
+    MemoryRegionDescription desc = GetNextFreeOffset(storageSize);
+
+    // No support for copying image in multiple smaller chunk sizes. If we get smaller buffer size than storageSize, we will wait for GPU idle
+    // and get bigger chunk.
+    if (desc.Size < storageSize)
+    {
+        WaitAndReset();
+        desc = GetNextFreeOffset(storageSize);
+    }
+    CHECK(desc.Size >= storageSize, "the needed size is bigger then the storageSize");
+
+    CommandBufferData* wrapper = VkContext->VulkanCommandPool->AcquireCommandBuffer();
+    CHECK(wrapper, "The Aquired CommandBuffer is not valid.");
+
+    VulkanBuffer* stagingBuffer = VkContext->BufferPool.Get(StagingBuffer);
+    CHECK(stagingBuffer, "The staging buffer handle does not hold a valid staging buffer");
+    stagingBuffer->BufferSubData(VkContext, desc.Offset, storageSize, data);
+
+    uint32_t offset = 0;
+    const uint32_t numPlanes = VkContext::GetNumberOfImagePlanes(image.ImageFormat);
+    if (numPlanes > 1)
+    {
+        assert(false); //Multiple planes arre not supported yet.
+        CHECK(layer == 0 && baseMipLevel == 0, "Your image layers and levels should be the same with multiple image planes.");
+        CHECK(numLayers == 1 && numMipLevels == 1, "Your image layers and levels should be the same with multiple image planes.");
+        CHECK(imageRegion.offset.x == 0 && imageRegion.offset.y == 0, "You can't have a image offset with multiple image planes.");
+        CHECK(image.ImageType == EOS::ImageType::Image_2D, "Your image must be a 2D image with multiple image planes");
+        CHECK(image.Extent.width == imageRegion.extent.width && image.Extent.height == imageRegion.extent.height, "The image extent is not correct");
+    }
+
+    VkImageAspectFlags imageAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (numPlanes == 2) { imageAspect = VK_IMAGE_ASPECT_PLANE_0_BIT | VK_IMAGE_ASPECT_PLANE_1_BIT; }
+    if (numPlanes == 3) { imageAspect = VK_IMAGE_ASPECT_PLANE_0_BIT | VK_IMAGE_ASPECT_PLANE_1_BIT | VK_IMAGE_ASPECT_PLANE_2_BIT; }
+
+    // https://registry.khronos.org/KTX/specs/1.0/ktxspec.v1.html
+    for (uint32_t mipLevel{}; mipLevel < numMipLevels; ++mipLevel)
+    {
+        for (constexpr uint32_t currentLayer{}; layer != numLayers; layer++)
+        {
+            const uint32_t currentMipLevel = baseMipLevel + mipLevel;
+            CHECK(currentMipLevel < image.Levels, "");
+            CHECK(mipLevel < image.Levels, "");
+
+            // 1. Transition initial image layout into TRANSFER_DST_OPTIMAL
+            image.InsertMemoryBarrier(wrapper->VulkanCommandBuffer, EOS::Undefined, EOS::CopyDest, {imageAspect, currentMipLevel, 1, currentLayer, 1});
+
+            // 2. Copy the pixel data from the staging buffer into the image
+            uint32_t planeOffset = 0;
+            for (uint32_t plane{}; plane != numPlanes; ++plane)
+            {
+                //TODO: These extent should take YUV images into account once they are supported.
+                const VkExtent2D extent
+                {
+                    .width = std::max(1u, imageRegion.extent.width >> mipLevel),
+                    .height = std::max(1u, imageRegion.extent.height >> mipLevel),
+                };
+
+                const VkRect2D region
+                {
+                    .offset = {.x = imageRegion.offset.x >> mipLevel, .y = imageRegion.offset.y >> mipLevel},
+                    .extent = extent,
+                };
+
+                const VkBufferImageCopy copy
+                {
+                    // the offset for this level is at the start of all mip-levels plus the size of all previous mip-levels being uploaded
+                    .bufferOffset = desc.Offset + offset + planeOffset,
+                    .bufferRowLength = 0,
+                    .bufferImageHeight = 0,
+                    .imageSubresource =
+                    VkImageSubresourceLayers{numPlanes > 1 ? VK_IMAGE_ASPECT_PLANE_0_BIT << plane : imageAspect, currentMipLevel, layer, 1},
+                    .imageOffset = {.x = region.offset.x, .y = region.offset.y, .z = 0},
+                    .imageExtent = {.width = region.extent.width, .height = region.extent.height, .depth = 1u},
+                };
+
+                vkCmdCopyBufferToImage(wrapper->VulkanCommandBuffer, stagingBuffer->VulkanVkBuffer, image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+                planeOffset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, plane); //TODO Should also take into acount of YUV images which are not supported yet.
+            }
+
+            // 3. Transition TRANSFER_DST_OPTIMAL into SHADER_READ_ONLY_OPTIMAL
+            image.InsertMemoryBarrier(wrapper->VulkanCommandBuffer, EOS::CopyDest, EOS::ShaderResource, VkImageSubresourceRange{imageAspect, currentMipLevel, 1, layer, 1});
+            offset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, currentMipLevel);
+        }
+    }
+
+    //TODO: Doesn't make sense that aquire returns a pointer and submit requires a reference
+    desc.Handle = VkContext->VulkanCommandPool->Submit(*wrapper);
+    Regions.emplace_back(desc);
 }
 
 VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOffset(uint32_t size)
@@ -1606,7 +1906,6 @@ VulkanContext::~VulkanContext()
 {
     //Wait unit all work has been done
     VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
-
 
     SwapChain.reset(nullptr);
     VulkanStagingBuffer.reset(nullptr);
@@ -1752,7 +2051,7 @@ EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS
     return {this, ShaderModulePool.Create(std::move(state))};
 }
 
-EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const EOS::RenderPipelineDescription &renderPipelineDescription)
+EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription)
 {
     //Check Attachments
     const bool hasColorAttachments = renderPipelineDescription.GetNumColorAttachments() > 0;
@@ -2015,7 +2314,7 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
     return {this, RenderPipelinePool.Create(std::move(renderPipelineState))};
 }
 
-EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription &bufferDescription)
+EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription& bufferDescription)
 {
     CHECK(bufferDescription.Usage != EOS::BufferUsageFlags::None, "Invalid Buffer Usage");
 
@@ -2043,6 +2342,174 @@ EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDesc
     return {this, handle};
 }
 
+EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureDescription& textureDescription)
+{
+    //Store copy to modify
+    EOS::TextureDescription desc{textureDescription};
+
+    const bool isDepthOrStencil = VkContext::IsDepthOrStencilFormat(desc.TextureFormat);
+    VkFormat vkFormat = VkContext::FormatTovkFormat(desc.TextureFormat);;\
+
+    if (isDepthOrStencil) { vkFormat = VkContext::GetClosestDepthStencilFormat(desc.TextureFormat, VulkanPhysicalDevice); }
+
+
+    CHECK(vkFormat != VK_FORMAT_UNDEFINED, "Invalid VkFormat.");
+    CHECK(desc.Type == EOS::ImageType::Image_2D || desc.Type == EOS::ImageType::Image_3D || desc.Type == EOS::ImageType::CubeMap || desc.Type == EOS::ImageType::Image_2D_Array || desc.Type == EOS::ImageType::CubeMap_Array , "Only 2D, 3D and Cubemaps are supported");
+    CHECK(desc.NumberOfMipLevels >= 1, "The number of mip levels must be bigger then 0");
+    if (desc.NumberOfSamples > 1)
+    {
+        CHECK(desc.NumberOfMipLevels == 1, "The mip levels for multisamples images should be 1");
+        CHECK(desc.Type != EOS::ImageType::Image_3D, "3D images are not supported for multisampling");
+    }
+    CHECK(desc.NumberOfMipLevels <= VkContext::CalculateNumberOfMipLevels(desc.TextureDimensions.Width, desc.TextureDimensions.Height), "The number of specified mip-levels is greater than the maximum possible");
+    CHECK(desc.Usage != 0, "Usage flags are not set");
+
+    // Use staging device to transfer data into the image when the storage is private to the device
+    VkImageUsageFlags usageFlags = (desc.Storage == EOS::StorageType::Device) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
+    if (desc.Usage & EOS::TextureUsageFlags::Sampled)
+    {
+        usageFlags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    }
+
+    if (desc.Usage & EOS::TextureUsageFlags::Storage)
+    {
+        CHECK(desc.NumberOfSamples <= 1, "Storage images cannot be multisampled");
+        usageFlags |= VK_IMAGE_USAGE_STORAGE_BIT;
+    }
+
+    if (desc.Usage & EOS::TextureUsageFlags::Attachment)
+    {
+        usageFlags |= VkContext::IsDepthOrStencilFormat(desc.TextureFormat) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (desc.Storage == EOS::StorageType::Memoryless) usageFlags |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+    }
+
+    if (desc.Storage != EOS::StorageType::Memoryless)
+    {
+        usageFlags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+    CHECK(usageFlags != 0, "Invalid Usage Flags");
+
+    const VkMemoryPropertyFlags memFlags = VkContext::StorageTypeToVkMemoryPropertyFlags(desc.Storage);
+    VkImageCreateFlags vkCreateFlags = 0;
+    VkSampleCountFlagBits vkSamples = VK_SAMPLE_COUNT_1_BIT;
+
+
+    //Handle Wrongly setting the image type by the number of layers
+    //Handle Samples, layers and some creation flags
+    switch (desc.Type)
+    {
+        case EOS::ImageType::Image_2D:
+        case EOS::ImageType::Image_2D_Array:
+        desc.Type = desc.NumberOfLayers > 1 ? EOS::ImageType::Image_2D_Array : EOS::ImageType::Image_2D;
+        vkSamples = VkContext::GetVulkanSampleCountFlags(desc.NumberOfSamples, VkContext::GetFramebufferMSAABitMask(VulkanPhysicalDevice));
+        break;
+        case EOS::ImageType::CubeMap:
+        case EOS::ImageType::CubeMap_Array:
+        desc.Type = desc.NumberOfLayers > 1 ? EOS::ImageType::CubeMap_Array : EOS::ImageType::CubeMap;
+        vkCreateFlags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        desc.NumberOfLayers *= 6;
+        break;
+        default:
+
+        //Handle the case when a selected image type is not supported
+        if (desc.Type != EOS::ImageType::Image_3D)
+        {
+            CHECK(false, "This is a unsupported image type");
+            return {};
+        }
+    }
+
+    VkImageViewType vkImageViewType = VulkanImage::ToImageViewType(desc.Type);
+    VkImageType vkImageType = VulkanImage::ToImageType(desc.Type);
+    const VkExtent3D vkExtent{desc.TextureDimensions.Width, desc.TextureDimensions.Height, desc.TextureDimensions.Depth};
+    // TODO: Validate the VkExtent3D with the limits
+
+    CHECK(desc.NumberOfMipLevels > 0, "The image must contain at least one mip-level");
+    CHECK(desc.NumberOfLayers > 0, "The image must contain at least one layer");
+    CHECK(vkSamples > 0, "The image must contain at least one sample");
+    CHECK(vkExtent.width > 0, "The texture width is 0");
+    CHECK(vkExtent.height > 0, "The texture height is 0");
+    CHECK(vkExtent.depth > 0, "The texture depth is 0");
+
+    VulkanImage image{};
+    image.UsageFlags = usageFlags;
+    image.Extent = vkExtent;
+    image.ImageType = desc.Type;
+    image.ImageFormat = vkFormat;
+    image.Samples = vkSamples;
+    image.Levels = desc.NumberOfMipLevels;
+    image.Layers = desc.NumberOfLayers;
+
+
+    const uint32_t numPlanes = VkContext::GetNumberOfImagePlanes(vkFormat);
+    CHECK(numPlanes == 1, "Cannot handle multiplanar images at the moment");
+
+
+    const VkImageCreateInfo ci
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = vkCreateFlags,
+        .imageType = vkImageType,
+        .format = vkFormat,
+        .extent = vkExtent,
+        .mipLevels = desc.NumberOfMipLevels,
+        .arrayLayers = desc.NumberOfLayers,
+        .samples = vkSamples,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = usageFlags,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = nullptr,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    VmaAllocationCreateInfo vmaAllocInfo = {.usage = memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? VMA_MEMORY_USAGE_CPU_TO_GPU : VMA_MEMORY_USAGE_AUTO};
+    VK_ASSERT(vmaCreateImage(vmaAllocator, &ci, &vmaAllocInfo, &image.Image, &image.Allocation, nullptr));
+
+    // handle memory-mapped buffers
+    if (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    {
+        vmaMapMemory(vmaAllocator, image.Allocation, &image.MappedPtr);
+    }
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(image.Image), desc.DebugName));
+
+    // Get physical device's properties for the image's format
+    vkGetPhysicalDeviceFormatProperties(VulkanPhysicalDevice, image.ImageFormat, &image.FormatProperties);
+
+    VulkanImage::CreateImageView(image.ImageView, VulkanDevice, image.Image, desc.Type, vkFormat, VK_REMAINING_MIP_LEVELS, desc.NumberOfLayers, fmt::format("{} - Image View",desc.DebugName).c_str(), desc.Swizzle);
+    if (image.UsageFlags & VK_IMAGE_USAGE_STORAGE_BIT && !desc.Swizzle.Identity())
+    {
+        VulkanImage::CreateImageView(image.ImageViewStorage, VulkanDevice, image.Image, desc.Type, vkFormat, VK_REMAINING_MIP_LEVELS, desc.NumberOfLayers, fmt::format("{} - Image View Storage",desc.DebugName).c_str(), desc.Swizzle);
+    }
+
+    EOS::TextureHandle handle = TexturePool.Create(std::move(image));
+
+    if (desc.Data)
+    {
+        CHECK(desc.Type == EOS::ImageType::Image_2D || desc.Type == EOS::ImageType::CubeMap || desc.Type == EOS::ImageType::Image_2D_Array || desc.Type == EOS::ImageType::CubeMap_Array, "Can only upload data to the GPU is texture is 2D or Cubemap");
+        CHECK(desc.DataNumberOfMipLevels <= desc.NumberOfMipLevels, "The specified numbers of mips that should be uploaded is bigger then the total allowed mips");
+
+        const uint32_t numLayers = desc.Type == EOS::ImageType::CubeMap || desc.Type == EOS::ImageType::CubeMap_Array ? 6 : 1;
+
+        const EOS::TextureRangeDescription textureRange
+        {
+            .Dimension = desc.TextureDimensions,
+            .NumberOfLayers =  numLayers,
+            .NumberOfMipLevels = desc.DataNumberOfMipLevels
+        };
+
+        Upload(handle, textureRange, desc.Data);
+
+        if (desc.GenerateMipmaps)
+        {
+            GenerateMipmaps(handle);
+        }
+    }
+
+    return {this, handle};
+}
+
 void VulkanContext::Destroy(EOS::TextureHandle handle)
 {
     VulkanImage* image = TexturePool.Get(handle);
@@ -2051,7 +2518,7 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
     {
         return;
     }
-
+    //Destroy ImageView
     Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = image->ImageView]() { vkDestroyImageView(device, imageView, nullptr); }));
 
     if (image->ImageViewStorage)
@@ -2077,31 +2544,15 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
         return;
     }
 
-    //TODO: Add once VMA is setup and image has allocations on the GPU
-    //if (image->MappedPtr)
-    //{
-    //    vmaUnmapMemory(static_cast<VmaAllocator>(GetVmaAllocator()), image->Allocation);
-    //}
+    if (image->MappedPtr)
+    {
+        vmaUnmapMemory(vmaAllocator, image->Allocation);
+    }
 
-    //Defer(std::packaged_task<void()>([vma = GetVmaAllocator(), image = image->Image, allocation = image->VmaAllocation]() {vmaDestroyImage(static_cast<VmaAllocator>(vma), image, allocation);}));
-    //Defer(std::packaged_task<void()>([device = VulkanDevice, image = image->Image, memory0 = image->VkMemory[0], memory1 = image->VkMemory[1], memory2 = image->VkMemory[2]]()
-    //{
-    //    vkDestroyImage(device, image, nullptr);
-    //    if (memory0 != VK_NULL_HANDLE)
-    //    {
-    //        vkFreeMemory(device, memory0, nullptr);
-    //    }
-
-    //    if (memory1 != VK_NULL_HANDLE)
-    //    {
-    //        vkFreeMemory(device, memory1, nullptr);
-    //    }
-
-    //    if (memory2 != VK_NULL_HANDLE)
-    //    {
-    //        vkFreeMemory(device, memory2, nullptr);
-    //    }
-    //}));
+    if (image->Allocation)
+    {
+        Defer(std::packaged_task<void()>([vma = vmaAllocator, image = image->Image, allocation = image->Allocation](){ vmaDestroyImage(vma, image, allocation); }));
+    }
 
     TexturePool.Destroy(handle);
 }
@@ -2166,6 +2617,45 @@ void VulkanContext::Upload(EOS::BufferHandle handle, const void *data, size_t si
     CHECK(size, "Data size should be non-zero");
 
     VulkanStagingBuffer->BufferSubData(handle, offset, size, data);
+}
+
+void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data)
+{
+    CHECK(data, "The texture data you want to upload is not valid");
+
+    VulkanImage* texture = TexturePool.Get(handle);
+    CHECK(texture, "The texture of this handle is not valid");
+
+    //Validate the image range
+    const uint32_t numberOfLayers = std::max(range.NumberOfLayers, 1u);
+    const uint32_t texWidth = std::max(texture->Extent.width >> range.MipLevel, 1u);
+    const uint32_t texHeight = std::max(texture->Extent.height >> range.MipLevel, 1u);
+    const uint32_t texDepth = std::max(texture->Extent.depth >> range.MipLevel, 1u);
+
+    CHECK(range.Dimension.Width > 0 && range.Dimension.Height > 0 || range.Dimension.Depth > 0 || range.NumberOfLayers > 0 || range.NumberOfMipLevels > 0, "The specified range is out of range");
+    CHECK(range.MipLevel > numberOfLayers, "range.mipLevel is bigger then the texture mip levels");
+    CHECK(range.Dimension.Width < texWidth && range.Dimension.Height < texHeight && range.Dimension.Depth < texDepth, "Dimension out of range");
+    CHECK(range.Offset.X < texWidth - range.Dimension.Width && range.Offset.Y < texHeight - range.Dimension.Height && range.Offset.Z < texDepth - range.Dimension.Depth, "range dimensions exceed texture dimensions");
+
+    if (VulkanImage::ToImageType(texture->ImageType) == VK_IMAGE_TYPE_3D)
+    {
+        const VkOffset3D offset {range.Offset.X, range.Offset.Y, range.Offset.Z};
+        const VkExtent3D extent {range.Dimension.Width, range.Dimension.Height, range.Dimension.Depth};
+        assert(false);
+
+        //TODO: Add 3D Image Support
+        //VulkanStagingBuffer->ImageData3D(*texture, offset,extent, texture->ImageFormat, data);
+    }
+    else
+    {
+        const VkRect2D imageRegion
+        {
+            .offset = {.x = range.Offset.X, .y = range.Offset.Y},
+            .extent = {.width = range.Dimension.Width, .height = range.Dimension.Height},
+        };
+
+        VulkanStagingBuffer->ImageData2D(*texture, imageRegion, range.MipLevel, range.NumberOfMipLevels, range.Layer, range.NumberOfLayers, texture->ImageFormat, data);
+    }
 }
 
 void VulkanContext::ProcessDeferredTasks() const
@@ -2549,6 +3039,20 @@ void VulkanContext::CreateAllocator()
     };
 
     VK_ASSERT(vmaCreateAllocator(&createInfo, &vmaAllocator));
+}
+
+void VulkanContext::GenerateMipmaps(EOS::TextureHandle handle)
+{
+    if (handle.Empty()) { return; }
+
+    const VulkanImage* texture = TexturePool.Get(handle);
+    if (texture->Levels <= 1) { return; }
+
+    CommandBufferData* commandbuffer = VulkanCommandPool->AcquireCommandBuffer();
+    texture->GenerateMipmaps(commandbuffer->VulkanCommandBuffer);
+
+    // ReSharper disable once CppNoDiscardExpression
+    auto result = VulkanCommandPool->Submit(*commandbuffer);
 }
 
 void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const

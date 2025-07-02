@@ -174,7 +174,7 @@ namespace EOS
         ClockWise
     };
 
-    enum class Format : uint8_t
+    enum Format : uint8_t
     {
         Invalid = 0,
 
@@ -320,7 +320,7 @@ namespace EOS
         Index = 0x01,
         Vertex = 0x02,
         Uniform = 0x04,
-        Storage = 0x08,
+        StorageFlag = 0x08,
         Indirect = 0x10,
         ShaderBindingTable = 0x20,
         AccelStructBuildInputReadOnly = 0x40,
@@ -332,5 +332,23 @@ namespace EOS
         UI8,
         UI16,
         UI32,
+    };
+
+    enum TextureUsageFlags : uint8_t
+    {
+        Sampled = 0x00,
+        Storage = 0x01,
+        Attachment = 0x2,
+    };
+
+    enum Swizzle : uint8_t
+    {
+        Identity = 0,
+        Zero,
+        One,
+        R,
+        G,
+        B,
+        A,
     };
 }

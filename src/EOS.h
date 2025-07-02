@@ -281,6 +281,80 @@ namespace EOS
         const char* DebugName = "";
     };
 
+    struct ComponentMapping final
+    {
+        Swizzle R = Swizzle::Identity;
+        Swizzle G = Swizzle::Identity;
+        Swizzle B = Swizzle::Identity;
+        Swizzle A = Swizzle::Identity;
+
+        bool Identity() const
+        {
+            return R == Swizzle::Identity && G == Swizzle::Identity && B == Swizzle::Identity && A == Swizzle::Identity;
+        }
+    };
+
+    struct Dimensions final
+    {
+        uint32_t Width = 1;
+        uint32_t Height = 1;
+        uint32_t Depth = 1;
+
+        inline Dimensions divide1D(uint32_t v) const
+        {
+            return {.Width = Width / v, .Height = Height, .Depth = Depth};
+        }
+
+        inline Dimensions divide2D(uint32_t v) const
+        {
+            return {.Width = Width / v, .Height = Height / v, .Depth = Depth};
+        }
+
+        inline Dimensions divide3D(uint32_t v) const
+        {
+            return {.Width = Width / v, .Height = Height / v, .Depth = Depth / v};
+        }
+
+        inline bool operator==(const Dimensions& other) const
+        {
+            return Width == other.Width && Height == other.Height && Depth == other.Depth;
+        }
+    };
+
+    struct TextureDescription final
+    {
+        EOS::ImageType Type = EOS::ImageType::Image_2D;
+        Format TextureFormat = Format::Invalid;
+        Dimensions TextureDimensions = {1, 1, 1};
+        uint32_t NumberOfLayers = 1;
+        uint32_t NumberOfMipLevels = 1;
+        uint32_t NumberOfSamples = 1;
+        uint8_t Usage = TextureUsageFlags::Sampled;
+        StorageType Storage = StorageType::Device;
+        ComponentMapping Swizzle{};
+        const void* Data = nullptr;
+        uint32_t DataNumberOfMipLevels = 1;     // how many mip-levels we want to upload
+        bool GenerateMipmaps = false;           // generate mip-levels immediately, valid only with non-null data
+        const char* DebugName = "";
+    };
+
+    struct Offset3D final
+    {
+        int32_t X = 0;
+        int32_t Y = 0;
+        int32_t Z = 0;
+    };
+
+    struct TextureRangeDescription final
+    {
+        Offset3D Offset = {};
+        Dimensions Dimension = {1, 1, 1};
+        uint32_t Layer = 0;
+        uint32_t NumberOfLayers = 1;
+        uint32_t MipLevel = 0;
+        uint32_t NumberOfMipLevels = 1;
+    };
+
 #pragma region INTERFACES
     //TODO: instead of interfaces use concept and a forward declare. And then every API implements 1 class of that name with the concept.
     //CMake should handle that only 1 type of API is being used at the time.
@@ -350,6 +424,8 @@ namespace EOS
         */
         virtual EOS::Holder<BufferHandle> CreateBuffer(const BufferDescription& description) = 0;
 
+        virtual EOS::Holder<TextureHandle> CreateTexture(const TextureDescription& description) = 0;
+
         /**
         * @brief Handles the destruction of a TextureHandle and what it holds.
         * @param handle The handle to the texture you want to destroy.
@@ -370,19 +446,27 @@ namespace EOS
         virtual void Destroy(RenderPipelineHandle handle) = 0;
 
         /**
-         * @brief Handles the destruction of a BufferHandle and what it holds.
-         * @param handle The handle to the Buffer you want to destroy.
-         */
+        * @brief Handles the destruction of a BufferHandle and what it holds.
+        * @param handle The handle to the Buffer you want to destroy.
+        */
         virtual void Destroy(BufferHandle handle) = 0;
 
         /**
-         * @brief
-         * @param handle The handle of the buffer we want to upload to.
-         * @param data The data we want to upload.
-         * @param size The size of the data we want to upload.
-         * @param offset The offset it needs to have inside of the buffer.
-         */
+        * @brief Handles the uploading of buffers to the GPU
+        * @param handle The handle of the buffer we want to upload to.
+        * @param data The data we want to upload.
+        * @param size The size of the data we want to upload.
+        * @param offset The offset it needs to have inside of the buffer.
+        */
         virtual void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) = 0;
+
+        /**
+        * @brief Handles the uploading of textures to the GPU
+        * @param handle The handle of the texture we want to upload
+        * @param range The description of how many mips, layers ... we want to upload.
+        * @param data The actual data of the texture we want to upload.
+        */
+        virtual void Upload(EOS::TextureHandle handle, const TextureRangeDescription& range, const void* data) = 0;
 
     protected:
         IContext() = default;
@@ -591,6 +675,13 @@ void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const Struct& da
 {
     cmdPushConstants(commandBuffer, &data, sizeof(Struct), offset);
 }
+
+/**
+ * @brief
+ * @param commandBuffer
+ * @param depthState
+ */
+void cmdSetDepthState(const EOS::ICommandBuffer& commandBuffer, const EOS::DepthState& depthState);
 
 /**
  * @brief Adds a debug marker that is visible in debug software.

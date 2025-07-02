@@ -84,10 +84,9 @@ struct ImageDescription final
 };
 
 //TODO: split up in hot and cold data for the pool
+//This allows for more bookeeping while still keep cache in mind
 struct VulkanImage final
 {
-public:
-
     explicit VulkanImage(const ImageDescription& description);
     VulkanImage() = default;
     DELETE_COPY(VulkanImage);
@@ -100,13 +99,19 @@ public:
     [[nodiscard]] static inline bool IsColorAttachment(const VulkanImage& image) { return (image.UsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) > 0; }
     [[nodiscard]] static inline bool IsDepthAttachment(const VulkanImage& image) { return (image.UsageFlags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) > 0; }
     [[nodiscard]] static inline bool IsAttachment(const VulkanImage& image) { return (image.UsageFlags & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) > 0; }
+    [[nodiscard]] static inline bool IsDepthFormat(VkFormat format) { return (format == VK_FORMAT_D16_UNORM) || (format == VK_FORMAT_X8_D24_UNORM_PACK32) || (format == VK_FORMAT_D32_SFLOAT) || (format == VK_FORMAT_D16_UNORM_S8_UINT) || (format == VK_FORMAT_D24_UNORM_S8_UINT) || (format == VK_FORMAT_D32_SFLOAT_S8_UINT); }
+    [[nodiscard]] static inline bool IsStencilFormat(VkFormat format) { return (format == VK_FORMAT_S8_UINT) || (format == VK_FORMAT_D16_UNORM_S8_UINT) || (format == VK_FORMAT_D24_UNORM_S8_UINT) || (format == VK_FORMAT_D32_SFLOAT_S8_UINT); }
     [[nodiscard]] static inline bool IsSwapChainImage(const VulkanImage& image) { return (image.ImageType == EOS::ImageType::SwapChain); }
     [[nodiscard]] static VkImageType ToImageType(EOS::ImageType imageType);
     [[nodiscard]] static VkImageViewType ToImageViewType(EOS::ImageType imageType);
-
-    static void CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, EOS::ImageType imageType, const VkFormat& imageFormat, uint32_t levels, uint32_t layers ,const char* debugName);
+    static void CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, EOS::ImageType imageType, const VkFormat& imageFormat, uint32_t levels, uint32_t layers ,const char* debugName, const EOS::ComponentMapping& componentMapping = {});
 
     [[nodiscard]] VkImageView GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer);
+    [[nodiscard]] VkImageAspectFlags GetImageAspectFlags() const;
+    void GenerateMipmaps(VkCommandBuffer commandBuffer) const;
+
+    //This is a "slow" memory barrier and only intended to be used at setup, not at runtime, as it is better to group together barriers for multiple objects.
+    void InsertMemoryBarrier(VkCommandBuffer commandBuffer, EOS::ResourceState currentState, EOS::ResourceState nextState, const VkImageSubresourceRange& subResourceRange) const;
 
 public:
     VkImage Image                           = VK_NULL_HANDLE;
@@ -235,15 +240,15 @@ public:
     void Signal(const VkSemaphore& semaphore,const uint64_t& signalValue);
     [[nodiscard]] bool IsReady(EOS::SubmitHandle handle, bool fastCheck = false) const;
 
-    VkSemaphore AcquireLastSubmitSemaphore();
+    [[nodiscard]] VkSemaphore AcquireLastSubmitSemaphore();
 
     [[nodiscard]] EOS::SubmitHandle Submit(CommandBufferData& data);
     [[nodiscard]] EOS::SubmitHandle GetNextSubmitHandle() const;
 
-private:
     // returns the current command buffer (creates one if it does not exist)
-    CommandBufferData* AcquireCommandBuffer();
+    [[nodiscard]] CommandBufferData* AcquireCommandBuffer();
 
+private:
     //This will go over all command buffers and try to restore them to their initial state when they are not in use.
     void TryResetCommandBuffers();
 
@@ -368,6 +373,8 @@ public:
     DELETE_COPY_MOVE(VulkanStagingDevice);
 
     void BufferSubData(const EOS::Handle<EOS::Buffer>& buffer, size_t dstOffset, size_t size, const void* data);
+    void ImageData2D(VulkanImage& image, const VkRect2D& imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void* data);
+    //void ImageData3D(VulkanImage& image, const VkOffset3D& offset, const VkExtent3D& extent, VkFormat format, const void* data);
 
 private:
     void EnsureSize(uint32_t sizeNeeded);
@@ -400,9 +407,10 @@ public:
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
     [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
-    [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo &shaderInfo) override;
-    [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription &renderPipelineDescription) override;
-    [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription &bufferDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) override;
+    [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
 
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderModuleHandle handle) override;
@@ -410,6 +418,7 @@ public:
     void Destroy(EOS::BufferHandle handle) override;
 
     void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
+    void Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data) override;
 
     //Deferred Tasks
     void ProcessDeferredTasks() const;
@@ -435,6 +444,7 @@ private:
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
     void CreateAllocator();
+    void GenerateMipmaps(EOS::TextureHandle handle);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 

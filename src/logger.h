@@ -5,7 +5,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/callback_sink.h>
 #include <spdlog/fmt/bundled/ranges.h>
-
+#include <assert.h>
 #include "defines.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 

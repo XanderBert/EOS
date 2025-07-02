@@ -7,6 +7,7 @@
 #include "vkTools.h"
 #include "vulkanClasses.h"
 
+#include <set>
 namespace VkDebug
 {
     const char* ObjectToString(const VkObjectType objectType)
@@ -961,6 +962,76 @@ namespace VkContext
         return VK_FORMAT_UNDEFINED;
     }
 
+    std::vector<VkFormat> GetCompatibleDepthStencilFormats(EOS::Format format)
+    {
+        switch (format)
+        {
+            case EOS::Format::Z_UN16:
+                return {VK_FORMAT_D16_UNORM, VK_FORMAT_D16_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT};
+            case EOS::Format::Z_UN24:
+                return {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM_S8_UINT};
+            case EOS::Format::Z_F32:
+                return {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
+            case EOS::Format::Z_UN24_S_UI8:
+                return {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT};
+            case EOS::Format::Z_F32_S_UI8:
+                return {VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT};
+            default:
+                return {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT};
+        }
+
+        return {VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT};
+    }
+
+
+    VkFormat GetClosestDepthStencilFormat(EOS::Format desiredFormat, const VkPhysicalDevice& physicalDevice)
+    {
+        // Generate a set of device supported formats
+        std::set<VkFormat> availableFormats;
+
+        //TODO: This should maybe in our context config?
+        //These are our base depth formats that should always be supported
+        constexpr VkFormat possibleDepthFormats[] = { VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM };
+        for (const VkFormat& depthFormat : possibleDepthFormats)
+        {
+            VkFormatProperties formatProps;
+            vkGetPhysicalDeviceFormatProperties(physicalDevice, depthFormat, &formatProps);
+
+            if (formatProps.optimalTilingFeatures) availableFormats.insert(depthFormat);
+        }
+
+        // check if any of the format in compatible list is supported
+        // get a list of compatibsle depth formats for a given desired format
+        // The list will contain depth format that are ordered from most to least closest
+        const std::vector<VkFormat> compatibleDepthStencilFormatList = GetCompatibleDepthStencilFormats(desiredFormat);
+        for (VkFormat depthStencilFormat : compatibleDepthStencilFormatList)
+        {
+            if (availableFormats.contains(depthStencilFormat))
+            {
+                return depthStencilFormat;
+            }
+        }
+
+        // no matching found, choose the first supported format
+        return !availableFormats.empty() ? *availableFormats.begin(): VK_FORMAT_D24_UNORM_S8_UINT;
+    }
+
+    uint32_t GetTextureBytesPerLayer(uint32_t width, uint32_t height, EOS::Format format, uint32_t level)
+    {
+        const uint32_t levelWidth = std::max(width >> level, 1u);
+        const uint32_t levelHeight = std::max(height >> level, 1u);
+        const TextureFormatProperties props = VulkanTextureFormatProperties[format];
+
+        if (!props.Compressed) { return props.BytesPerBlock * levelWidth * levelHeight; }
+
+        const uint32_t blockWidth = std::max(static_cast<uint32_t>(props.BlockWidth), 1u);
+        const uint32_t blockHeight = std::max(static_cast<uint32_t>(props.BlockHeight), 1u);
+        const uint32_t widthInBlocks = (levelWidth + props.BlockWidth - 1) / props.BlockWidth;
+        const uint32_t heightInBlocks = (levelHeight + props.BlockHeight - 1) / props.BlockHeight;
+
+        return widthInBlocks * heightInBlocks * props.BytesPerBlock;
+    }
+
     VkBlendFactor BlendFactorToVkBlendFactor(EOS::BlendFactor value)
     {
         switch (value)
@@ -1293,7 +1364,7 @@ namespace VkContext
             usageFlags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
         }
 
-        if (bufferUsageFlags & EOS::BufferUsageFlags::Storage)
+        if (bufferUsageFlags & EOS::BufferUsageFlags::StorageFlag)
         {
             usageFlags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR;
         }
@@ -1623,8 +1694,7 @@ namespace VkSynchronization
         if (state & EOS::ResourceState::RenderTarget)
         {
             aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        }
-        else
+        }else
         {
             aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         }
