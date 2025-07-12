@@ -9,8 +9,9 @@ CREATE_APP(EOS)
 set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
 
-#For now we only use the Vulkan API
-set(EOS_VULKAN TRUE)
+
+set(EOS_VULKAN TRUE)        #For now we only use the Vulkan API
+set(EOS_USE_TRACY TRUE)     #For now we will use tracy
 
 #Setup Platform Defines
 if(WIN32)
@@ -83,3 +84,11 @@ FETCH_SPDLOG(${EOS_DEPENDENCIES_DIR})
 FETCH_ASSIMP(${EOS_DEPENDENCIES_DIR})
 FETCH_SLANG()
 FETCH_GLM(${EOS_DEPENDENCIES_DIR})
+FETCH_STB(${EOS_DEPENDENCIES_DIR})
+FETCH_KTX(${EOS_DEPENDENCIES_DIR})
+
+
+if(EOS_USE_TRACY)
+    target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
+    FETCH_TRACY(${EOS_DEPENDENCIES_DIR})
+endif()
