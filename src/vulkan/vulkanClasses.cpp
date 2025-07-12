@@ -2352,7 +2352,6 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
 
     if (isDepthOrStencil) { vkFormat = VkContext::GetClosestDepthStencilFormat(desc.TextureFormat, VulkanPhysicalDevice); }
 
-
     CHECK(vkFormat != VK_FORMAT_UNDEFINED, "Invalid VkFormat.");
     CHECK(desc.Type == EOS::ImageType::Image_2D || desc.Type == EOS::ImageType::Image_3D || desc.Type == EOS::ImageType::CubeMap || desc.Type == EOS::ImageType::Image_2D_Array || desc.Type == EOS::ImageType::CubeMap_Array , "Only 2D, 3D and Cubemaps are supported");
     CHECK(desc.NumberOfMipLevels >= 1, "The number of mip levels must be bigger then 0");
@@ -2361,7 +2360,7 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
         CHECK(desc.NumberOfMipLevels == 1, "The mip levels for multisamples images should be 1");
         CHECK(desc.Type != EOS::ImageType::Image_3D, "3D images are not supported for multisampling");
     }
-    CHECK(desc.NumberOfMipLevels <= VkContext::CalculateNumberOfMipLevels(desc.TextureDimensions.Width, desc.TextureDimensions.Height), "The number of specified mip-levels is greater than the maximum possible");
+    CHECK(desc.NumberOfMipLevels <= EOS::CalculateNumberOfMipLevels(desc.TextureDimensions.Width, desc.TextureDimensions.Height), "The number of specified mip-levels is greater than the maximum possible");
     CHECK(desc.Usage != 0, "Usage flags are not set");
 
     // Use staging device to transfer data into the image when the storage is private to the device

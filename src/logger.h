@@ -79,7 +79,15 @@ do                                                                              
     }                                                                                       \
 } while (0)
 #else
-#define CHECK(assertion, ...)
+#define CHECK(assertion, ...)                                                               \
+do                                                                                          \
+{                                                                                           \
+if (!(assertion))                                                                       \
+{                                                                                       \
+EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
+assert(false);                                                                      \
+}                                                                                       \
+} while (0)
 #endif
 
 //The Logging and assertion is Stripped Out in release, the if check and returning stays in release.

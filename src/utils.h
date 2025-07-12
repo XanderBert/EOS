@@ -38,4 +38,14 @@ namespace EOS
      */
     [[nodiscard]] uint32_t GetSizeAligned(uint32_t value, uint32_t alignment);
 
+
+    [[nodiscard]] void* LoadTexture(const std::filesystem::path& filePath, Compression compression = NoCompression);
+
+    [[nodiscard]] constexpr uint32_t CalculateNumberOfMipLevels(uint32_t width, uint32_t height)
+    {
+        uint32_t levels = 1;
+        while ((width | height) >> levels) levels++;
+
+        return levels;
+    }
 }

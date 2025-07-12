@@ -8,7 +8,7 @@
 #include "assimp/postprocess.h"
 #include "assimp/scene.h"
 
-#define GLM_ENABLE_EXPERIMENTAL
+#define GLM_ENABLE_EXPERIMENTAL //-> TODO: Define trough cmake
 #include "glm/fwd.hpp"
 #include "glm/detail/type_quat.hpp"
 #include "glm/ext/matrix_clip_space.hpp"
@@ -43,7 +43,30 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
         }
     }
 
-    aiReleaseImport(scene);
+
+
+    // Extract texture path from material
+    if (scene->mNumMaterials > 0 && mesh->mMaterialIndex < scene->mNumMaterials)
+    {
+        const aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+       
+        if (material->GetTextureCount(aiTextureType_DIFFUSE) > 0)
+        {
+            aiString texturePath;
+            aiReturn result = material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath);
+            
+            if (result == aiReturn_SUCCESS)
+            {
+                EOS::Logger->warn("Diffuse texture path: {}", texturePath.C_Str());
+                
+                // Convert relative path to absolute if needed
+                std::filesystem::path fullTexturePath = modelPath.parent_path() / texturePath.C_Str();
+                
+                // Load the texture
+                void* textureData = EOS::LoadTexture(fullTexturePath.string().c_str(), EOS::Compression::BC7);
+            }
+        }
+    }
 }
 
 
@@ -70,12 +93,13 @@ int main()
         .InputBindings = { { .Stride = sizeof(glm::vec3) } },
     };
 
-    EOS::Holder<EOS::TextureHandle> depthTexture = context->CreateTexture({
-    .Type       = EOS::ImageType::Image_2D,
-    .TextureFormat     = EOS::Format::Z_F32,
-    .TextureDimensions = {static_cast<uint32_t>(window->Width), static_cast<uint32_t>(window->Height)},
-    .Usage      = EOS::TextureUsageFlags::Attachment,
-    .DebugName  = "Depth Buffer",
+    EOS::Holder<EOS::TextureHandle> depthTexture = context->CreateTexture(
+{
+        .Type                   = EOS::ImageType::Image_2D,
+        .TextureFormat          = EOS::Format::Z_F32,
+        .TextureDimensions      = {static_cast<uint32_t>(window->Width), static_cast<uint32_t>(window->Height)},
+        .Usage                  = EOS::TextureUsageFlags::Attachment,
+        .DebugName              = "Depth Buffer",
     });
 
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
@@ -122,13 +146,8 @@ int main()
         }
         const float aspectRatio = static_cast<float>(window->Width) / static_cast<float>(window->Height);
 
-        //glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(  static_cast<float>(glfwGetTime() * 20.0f)  ), glm::vec3(1, 0, 0));
-        //constexpr glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -1.5f));
-        //const glm::mat4 projection = glm::perspective(glm::radians(65.0f), aspectRatio, 0.1f, 1000.0f);
-
         using glm::mat4;
         using glm::vec3;
-
         const mat4 m = glm::rotate(mat4(1.0f), glm::radians(-90.0f), vec3(1, 0, 0));
         const mat4 v = glm::rotate(glm::translate(mat4(1.0f), vec3(0.0f, -0.5f, -1.5f)), (float)glfwGetTime(), vec3(0.0f, 1.0f, 0.0f));
         const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);

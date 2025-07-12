@@ -351,4 +351,17 @@ namespace EOS
         B,
         A,
     };
+
+    enum Compression : uint8_t
+    {
+        NoCompression,
+        ETC1,
+        ETC2,
+        BC1,
+        BC3,
+        BC4,
+        BC5,
+        BC7,
+        ASTC,
+    };
 }

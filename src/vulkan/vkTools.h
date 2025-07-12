@@ -153,14 +153,6 @@ namespace VkContext
         TextureFormatProperties { .Format = EOS::Format::YUV_NV12, .BytesPerBlock = 24,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true, .NumberOfPlanes = 2 }, // Subsampled 420
         TextureFormatProperties { .Format = EOS::Format::YUV_420p, .BytesPerBlock = 24,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true, .NumberOfPlanes = 3 }, // Subsampled 420
     };
-
-    [[nodiscard]] constexpr uint32_t CalculateNumberOfMipLevels(uint32_t width, uint32_t height)
-    {
-        uint32_t levels = 1;
-        while ((width | height) >> levels) levels++;
-
-        return levels;
-    }
     
     [[nodiscard]] constexpr uint32_t GetNumberOfImagePlanes(VkFormat format) {
         switch (format) {

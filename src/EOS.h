@@ -424,6 +424,11 @@ namespace EOS
         */
         virtual EOS::Holder<BufferHandle> CreateBuffer(const BufferDescription& description) = 0;
 
+        /**
+         * @brief Createes a texture and uploads its data to the GPU if needed.
+         * @param description describes what type of texture it is.
+         * @return A Holder to the texture.
+         */
         virtual EOS::Holder<TextureHandle> CreateTexture(const TextureDescription& description) = 0;
 
         /**
