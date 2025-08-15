@@ -9,6 +9,7 @@
 #include "assimp/scene.h"
 
 #define GLM_ENABLE_EXPERIMENTAL //-> TODO: Define trough cmake
+#include "utils.h"
 #include "glm/fwd.hpp"
 #include "glm/detail/type_quat.hpp"
 #include "glm/ext/matrix_clip_space.hpp"
@@ -16,7 +17,7 @@
 #include "glm/gtx/transform.hpp"
 
 
-void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices)
+void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices,  EOS::IContext* context)
 {
     const aiScene* scene = aiImportFile(modelPath.string().c_str(), aiProcess_Triangulate);
     CHECK(scene && scene->HasMeshes(), "Could not load mesh");
@@ -42,9 +43,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
             indices.emplace_back(mesh->mFaces[i].mIndices[j]);
         }
     }
-
-
-
+    
     // Extract texture path from material
     if (scene->mNumMaterials > 0 && mesh->mMaterialIndex < scene->mNumMaterials)
     {
@@ -63,7 +62,14 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
                 std::filesystem::path fullTexturePath = modelPath.parent_path() / texturePath.C_Str();
                 
                 // Load the texture
-                void* textureData = EOS::LoadTexture(fullTexturePath.string().c_str(), EOS::Compression::BC7);
+                EOS::TextureLoadingDescription albedoDescription
+                {
+                    .filePath = fullTexturePath,
+                    .compression = EOS::Compression::BC7,
+                    .context = context,
+                };
+                
+                EOS::Holder<EOS::TextureHandle> textureData = EOS::LoadTexture(albedoDescription);
             }
         }
     }
@@ -117,7 +123,7 @@ int main()
 
     std::vector<glm::vec3> positions;
     std::vector<uint32_t> indices;
-    LoadModel("../data/rubber_duck/scene.gltf", positions, indices);
+    LoadModel("../data/rubber_duck/scene.gltf", positions, indices, context.get());
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
     {
@@ -149,7 +155,7 @@ int main()
         using glm::mat4;
         using glm::vec3;
         const mat4 m = glm::rotate(mat4(1.0f), glm::radians(-90.0f), vec3(1, 0, 0));
-        const mat4 v = glm::rotate(glm::translate(mat4(1.0f), vec3(0.0f, -0.5f, -1.5f)), (float)glfwGetTime(), vec3(0.0f, 1.0f, 0.0f));
+        const mat4 v = glm::rotate(glm::translate(mat4(1.0f), vec3(0.0f, -0.5f, -1.5f)), static_cast<float>(glfwGetTime()), vec3(0.0f, 1.0f, 0.0f));
         const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);
         const glm::mat4 mvp = p * v * m;
 

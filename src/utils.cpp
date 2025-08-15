@@ -10,8 +10,9 @@
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include <stb_image.h>
 #include <stb_image_resize2.h>
-#include <ktx.h>
 
+#include <ktx.h>
+#include "EOS.h"
 #include "vulkan/vkTools.h"
 
 namespace EOS
@@ -104,46 +105,67 @@ namespace EOS
         return (value + alignment - 1) & ~(alignment - 1);
     }
 
-    void* LoadTexture(const std::filesystem::path &filePath, Compression compression)
+    EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription)
     {
+        ktxTexture1* texture = nullptr;
+
+        uint8_t* pixels = nullptr;
+        int originalWidth = 0;
+        int originalHeight = 0;
+
         //Check if texture is already stored in the cache if so load in the ktx instead of the other file.
-        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}", filePath.filename().replace_extension(".ktx").string());
+        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}", textureLoadingDescription.filePath.filename().replace_extension(".ktx").string());
         std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
         if (file.is_open())
         {
             file.close();
-            EOS::Logger->debug("{} was already compressed and cached", filePath.filename().string());
-            
-            // Load the cached KTX file
-            ktxTexture1* cachedTexture = nullptr;
-            CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &cachedTexture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
-            void* data = ktxTexture_GetData(ktxTexture(cachedTexture));
-            ktxTexture_Destroy(ktxTexture(cachedTexture));
+            EOS::Logger->debug("{} was already compressed and cached", textureLoadingDescription.filePath.filename().string());
+            CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
+        }
+        else
+        {
+            constexpr int desiredChannels = 4;
+            int channels;
+            pixels = stbi_load(textureLoadingDescription.filePath.string().c_str(), &originalWidth, &originalHeight, &channels, desiredChannels);
+            CHECK(pixels, "Could not load image at location: {}", textureLoadingDescription.filePath.string().c_str());
+            EOS::Logger->debug({"Loading image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
 
-            return data;
+            texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
+            ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
+            stbi_image_free(pixels);
         }
 
+        
+        Holder<EOS::TextureHandle> loadedTexture = textureLoadingDescription.context->CreateTexture(
+        {
+            .Type                   = EOS::ImageType::Image_2D,
+            .TextureFormat          = EOS::Format::RGBA_UN8,
+            .TextureDimensions      = {texture->baseWidth, texture->baseHeight},
+            .NumberOfMipLevels      = texture->numLevels,
+            .Usage                  = EOS::TextureUsageFlags::Sampled,
+            .Data                   = texture->pData,
+            .DataNumberOfMipLevels  = texture->numLevels,
+            .DebugName              = cachedFilePath.string().c_str(),
+        });
 
-        constexpr int desiredChannels = 4;
-        int originalWidth;
-        int originalHeight;
-        int channels;
-        uint8_t* pixels = stbi_load(filePath.string().c_str(), &originalWidth, &originalHeight, &channels, desiredChannels);
-        CHECK(pixels, "Could not load image at location: {}", filePath.string().c_str());
+        
+        ktxTexture_Destroy(ktxTexture(texture));
+        return loadedTexture;
+    }
 
-        EOS::Logger->debug({"Loading image: {} | Size: {}x{} | Channels: {}"},filePath.filename().string(), originalWidth, originalHeight, channels);
-
+    ktxTexture1* CompressTexture(uint8_t* pixels, int width, int height, Compression compression)
+    {
         VkFormat desiredFormat{VK_FORMAT_R8G8B8A8_SRGB}; // Initial format
         uint32_t glInternalFormat = 0x8058; // GL_RGBA8 - default
-        const uint32_t numberOfMipLevels = CalculateNumberOfMipLevels(originalWidth, originalHeight);
+        const uint32_t numberOfMipLevels = CalculateNumberOfMipLevels(width, height);
 
         // create a KTX2 texture for RGBA data
         ktxTextureCreateInfo createInfoKTX2
         {
             .glInternalformat = 0x8058, // = GL_RGBA8 -> i prefer no dependancy on GL
             .vkFormat         = static_cast<uint32_t>(desiredFormat),
-            .baseWidth        = static_cast<uint32_t>(originalWidth),
-            .baseHeight       = static_cast<uint32_t>(originalHeight),
+            .baseWidth        = static_cast<uint32_t>(width),
+            .baseHeight       = static_cast<uint32_t>(height),
             .baseDepth        = 1u,
             .numDimensions    = 2u,
             .numLevels        = numberOfMipLevels,
@@ -153,17 +175,17 @@ namespace EOS
         };
 
         ktxTexture2* textureKTX2 = nullptr;
-        CHECK(ktxTexture2_Create(&createInfoKTX2, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &textureKTX2) == KTX_SUCCESS, "Could not create a KTX texture from the given pixel data for image: {}", filePath.string().c_str());
+        CHECK(ktxTexture2_Create(&createInfoKTX2, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &textureKTX2) == KTX_SUCCESS, "Could not create a KTX texture from the given pixel data for image");
 
-        int w = originalWidth;
-        int h = originalHeight;
+        int w = width;
+        int h = height;
 
         // generate mip-map
         for (uint32_t i = 0; i != numberOfMipLevels; ++i)
         {
             size_t offset = 0;
             ktxTexture_GetImageOffset(ktxTexture(textureKTX2), i, 0, 0, &offset);
-            stbir_resize_uint8_linear(static_cast<const unsigned char *>(pixels), originalWidth, originalHeight, 0, ktxTexture_GetData(ktxTexture(textureKTX2)) + offset, w, h, 0, STBIR_RGBA);
+            stbir_resize_uint8_linear(static_cast<const unsigned char *>(pixels), width, height, 0, ktxTexture_GetData(ktxTexture(textureKTX2)) + offset, w, h, 0, STBIR_RGBA);
 
             h = h > 1 ? h >> 1 : 1;
             w = w > 1 ? w >> 1 : 1;
@@ -223,8 +245,8 @@ namespace EOS
         if (compressionMethod != KTX_TTF_NOSELECTION)
         {
             // compress to Basis and transcode
-            CHECK(ktxTexture2_CompressBasis(textureKTX2, 255) == KTX_SUCCESS, "Could not compress the image to the base compression: {}", filePath.string().c_str());
-            CHECK(ktxTexture2_TranscodeBasis(textureKTX2, compressionMethod, 0) == KTX_SUCCESS, "Could not compress Image {}", filePath.string().c_str());
+            CHECK(ktxTexture2_CompressBasis(textureKTX2, 255) == KTX_SUCCESS, "Could not compress the image to the base compression");
+            CHECK(ktxTexture2_TranscodeBasis(textureKTX2, compressionMethod, 0) == KTX_SUCCESS, "Could not compress Image");
         }
 
         // convert to KTX1 - now using the correct format
@@ -232,8 +254,8 @@ namespace EOS
         {
             .glInternalformat = glInternalFormat, // Now matches the compression format
             .vkFormat         = static_cast<uint32_t>(desiredFormat),
-            .baseWidth        = static_cast<uint32_t>(originalWidth),
-            .baseHeight       = static_cast<uint32_t>(originalHeight),
+            .baseWidth        = static_cast<uint32_t>(width),
+            .baseHeight       = static_cast<uint32_t>(height),
             .baseDepth        = 1u,
             .numDimensions    = 2u,
             .numLevels        = numberOfMipLevels,
@@ -243,7 +265,7 @@ namespace EOS
         };
 
         ktxTexture1* textureKTX1 = nullptr;
-        CHECK(ktxTexture1_Create(&createInfoKTX1, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &textureKTX1) == KTX_SUCCESS, "Could not create KTX1 Texture from: {}", filePath.string().c_str());
+        CHECK(ktxTexture1_Create(&createInfoKTX1, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &textureKTX1) == KTX_SUCCESS, "Could not create KTX1 Texture from");
 
         for (uint32_t i = 0; i != numberOfMipLevels; ++i)
         {
@@ -256,17 +278,8 @@ namespace EOS
             size_t imageSize = ktxTexture_GetImageSize(ktxTexture(textureKTX1), i);
             memcpy(ktxTexture_GetData(ktxTexture(textureKTX1)) + offset1, ktxTexture_GetData(ktxTexture(textureKTX2)) + offset2, imageSize);
         }
-
-        ktxTexture_WriteToNamedFile(ktxTexture(textureKTX1), cachedFilePath.string().c_str());
-        void* data = ktxTexture_GetData(ktxTexture(textureKTX1));
-
-        
-        ktxTexture_Destroy(ktxTexture(textureKTX1));
         ktxTexture_Destroy(ktxTexture(textureKTX2));
-
-        if (pixels) stbi_image_free(pixels);
-
-        return data;
+        return textureKTX1;
     }
 }
 

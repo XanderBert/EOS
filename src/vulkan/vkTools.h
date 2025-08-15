@@ -9,7 +9,6 @@
 // This is terrible because many enumerations have an enumerator named "None".
 // To work around this, we undefine the macro "None", and define a replacement
 // macro named "X11None".
-// Include this header after including X11 headers, where necessary.
 #ifdef None
 #  undef None
 #  define X11None 0L

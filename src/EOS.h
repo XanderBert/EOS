@@ -9,7 +9,6 @@
 #include "defines.h"
 #include "enums.h"
 #include "handle.h"
-#include "utils.h"
 
 
 namespace EOS
@@ -355,6 +354,13 @@ namespace EOS
         uint32_t NumberOfMipLevels = 1;
     };
 
+    struct TextureLoadingDescription final
+    {
+        std::filesystem::path filePath;
+        Compression compression;
+        EOS::IContext* context;
+    };
+
 #pragma region INTERFACES
     //TODO: instead of interfaces use concept and a forward declare. And then every API implements 1 class of that name with the concept.
     //CMake should handle that only 1 type of API is being used at the time.
@@ -488,7 +494,8 @@ namespace EOS
 
         ~Holder()
         {
-            CHECK(HolderContext, "the context of the holder is no longer valid in the destruction of the holder");
+            //CHECK(HolderContext, "the context of the holder is no longer valid in the destruction of the holder");
+            //TODO:
             if (HolderContext)
             {
                 HolderContext->Destroy(Handle);

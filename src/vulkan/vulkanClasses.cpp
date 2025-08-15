@@ -4,6 +4,7 @@
 #include <cstring>
 #include <ranges>
 
+#include "utils.h"
 #include "vulkan/vkTools.h"
 
 #pragma region GLOBAL_FUNCTIONS
@@ -417,20 +418,16 @@ void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, 
 void VulkanBuffer::BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data)
 {
     CHECK(MappedPtr, "buffer is not host-visible");
-    if (!MappedPtr)
-    {
-        return;
-    }
-
     CHECK(offset + size <= BufferSize, "Buffer is not big enough to add the data to it");
 
+    void* dst = static_cast<uint8_t*>(MappedPtr) + offset;
     if (data)
     {
-        memcpy(static_cast<uint8_t*>(MappedPtr) + offset, data, size);
+        memcpy(dst, data, size);
     }
     else
     {
-        memset(static_cast<uint8_t*>(MappedPtr) + offset, 0, size);
+        memset(dst, 0, size);
     }
 
     if (!IsCoherentMemory)
@@ -442,11 +439,6 @@ void VulkanBuffer::BufferSubData(const VulkanContext* vulkanContext, size_t offs
 void VulkanBuffer::FlushMappedMemory(const VulkanContext *vulkanContext, VkDeviceSize offset, VkDeviceSize size) const
 {
     CHECK(IsMapped(), "Buffer needs to be mapped to flush its memory");
-    if (!IsMapped())
-    {
-        return;
-    }
-
     vmaFlushAllocation(vulkanContext->vmaAllocator, VMAAllocation, offset, size);
 }
 
@@ -1718,6 +1710,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
     const uint32_t storageSize = layerStorageSize * numLayers;
     EnsureSize(storageSize);
     CHECK(storageSize <= Size, "storageSize exceeds available size for the staging device");
+    if (storageSize <= 268435456){ EOS::Logger->warn("Texture larger then 256MB, this might not be optimal for a staging buffer"); }
 
     MemoryRegionDescription desc = GetNextFreeOffset(storageSize);
 
@@ -1804,7 +1797,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
         }
     }
 
-    //TODO: Doesn't make sense that aquire returns a pointer and submit requires a reference
+    //TODO: Doesn't make sense that acquire returns a pointer and submit requires a reference
     desc.Handle = VkContext->VulkanCommandPool->Submit(*wrapper);
     Regions.emplace_back(desc);
 }
@@ -1824,17 +1817,23 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
             //Check if region is big enoug
             if (it->Size >= requestedAlignedSize)
             {
-                const uint32_t unusedSize = it->Size - requestedAlignedSize;
-                const uint32_t unusedOffset = it->Offset + requestedAlignedSize;
+                // Store the old offset and size before erasing the iterator
+                const uint32_t oldOffset = it->Offset;
+                const uint32_t oldSize = it->Size;
 
-                //Replace the region with the smaller one.
-                Regions.erase(it);
+                const uint32_t unusedSize = oldSize - requestedAlignedSize;
+                const uint32_t unusedOffset = oldOffset + requestedAlignedSize;
+
+                // Erase the old region.
+                it = Regions.erase(it);
+
                 if (unusedSize > 0)
                 {
                     Regions.push_front({unusedOffset, unusedSize, EOS::SubmitHandle()});
                 }
 
-                return {it->Offset, requestedAlignedSize, EOS::SubmitHandle()}; // New Region that we will use
+                // Return the stored offset
+                return {oldOffset, requestedAlignedSize, EOS::SubmitHandle()};
             }
         }
     }
@@ -2348,9 +2347,8 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
     EOS::TextureDescription desc{textureDescription};
 
     const bool isDepthOrStencil = VkContext::IsDepthOrStencilFormat(desc.TextureFormat);
-    VkFormat vkFormat = VkContext::FormatTovkFormat(desc.TextureFormat);;\
-
-    if (isDepthOrStencil) { vkFormat = VkContext::GetClosestDepthStencilFormat(desc.TextureFormat, VulkanPhysicalDevice); }
+    VkFormat vkFormat = VkContext::FormatTovkFormat(desc.TextureFormat);
+    if (isDepthOrStencil) { vkFormat = VkContext::GetClosestDepthStencilFormat(desc.TextureFormat, VulkanPhysicalDevice); }     // Change to a depth or stencil format
 
     CHECK(vkFormat != VK_FORMAT_UNDEFINED, "Invalid VkFormat.");
     CHECK(desc.Type == EOS::ImageType::Image_2D || desc.Type == EOS::ImageType::Image_3D || desc.Type == EOS::ImageType::CubeMap || desc.Type == EOS::ImageType::Image_2D_Array || desc.Type == EOS::ImageType::CubeMap_Array , "Only 2D, 3D and Cubemaps are supported");
@@ -2632,9 +2630,8 @@ void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDes
     const uint32_t texDepth = std::max(texture->Extent.depth >> range.MipLevel, 1u);
 
     CHECK(range.Dimension.Width > 0 && range.Dimension.Height > 0 || range.Dimension.Depth > 0 || range.NumberOfLayers > 0 || range.NumberOfMipLevels > 0, "The specified range is out of range");
-    CHECK(range.MipLevel > numberOfLayers, "range.mipLevel is bigger then the texture mip levels");
-    CHECK(range.Dimension.Width < texWidth && range.Dimension.Height < texHeight && range.Dimension.Depth < texDepth, "Dimension out of range");
-    CHECK(range.Offset.X < texWidth - range.Dimension.Width && range.Offset.Y < texHeight - range.Dimension.Height && range.Offset.Z < texDepth - range.Dimension.Depth, "range dimensions exceed texture dimensions");
+    CHECK(range.Dimension.Width <= texWidth && range.Dimension.Height <= texHeight && range.Dimension.Depth <= texDepth, "Dimension out of range");
+    CHECK(range.Offset.X <= texWidth - range.Dimension.Width && range.Offset.Y <= texHeight - range.Dimension.Height && range.Offset.Z <= texDepth - range.Dimension.Depth, "range dimensions exceed texture dimensions");
 
     if (VulkanImage::ToImageType(texture->ImageType) == VK_IMAGE_TYPE_3D)
     {
@@ -3138,40 +3135,30 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
         {
             .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
             .usage = VMA_MEMORY_USAGE_AUTO,
-            .requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-            .preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+            .requiredFlags = memFlags,
+            .preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT
         };
 
-        // Check if coherent buffer is available.
-        VK_ASSERT(vkCreateBuffer(VulkanDevice, &createInfo, nullptr, &buffer.VulkanVkBuffer));
+        // Check for coherence by examining memory types
+        uint32_t memTypeIndex;
+        vmaFindMemoryTypeIndexForBufferInfo(vmaAllocator, &createInfo, &vmaAllocInfo, &memTypeIndex);
 
-
-        VkMemoryRequirements requirements{};
-        vkGetBufferMemoryRequirements(VulkanDevice, buffer.VulkanVkBuffer, &requirements);
-
-        //Reset the Buffer
-        vkDestroyBuffer(VulkanDevice, buffer.VulkanVkBuffer, nullptr);
-        buffer.VulkanVkBuffer = VK_NULL_HANDLE;
-
-
-        if (requirements.memoryTypeBits & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-        {
-            vmaAllocInfo.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-            buffer.IsCoherentMemory = true;
-        }
+        VkMemoryPropertyFlags memProps;
+        vmaGetMemoryTypeProperties(vmaAllocator, memTypeIndex, &memProps);
+        buffer.IsCoherentMemory = (memProps & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
     }
 
-    vmaCreateBuffer(vmaAllocator, &createInfo, &vmaAllocInfo, &buffer.VulkanVkBuffer, &buffer.VMAAllocation, nullptr);
+    VK_ASSERT(vmaCreateBuffer(vmaAllocator, &createInfo, &vmaAllocInfo, &buffer.VulkanVkBuffer, &buffer.VMAAllocation, nullptr));
+    CHECK(buffer.VulkanVkBuffer != VK_NULL_HANDLE, "Could not create buffer");
+    CHECK(buffer.VMAAllocation != nullptr, "Allocation failed");
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(buffer.VulkanVkBuffer), debugName));
 
-    // handle memory-mapped buffers
+
+    // Get the mapped pointer
     if (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
     {
         vmaMapMemory(vmaAllocator, buffer.VMAAllocation, &buffer.MappedPtr);
     }
-
-
-    CHECK(buffer.VulkanVkBuffer != VK_NULL_HANDLE, "Could not create buffer");
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(buffer.VulkanVkBuffer), debugName));
 
     // handle shader access
     if (usageFlags & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)

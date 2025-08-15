@@ -336,9 +336,9 @@ namespace EOS
 
     enum TextureUsageFlags : uint8_t
     {
-        Sampled = 0x00,
-        Storage = 0x01,
-        Attachment = 0x2,
+        Sampled = 0x01,
+        Storage = 0x02,
+        Attachment = 0x4,
     };
 
     enum Swizzle : uint8_t
