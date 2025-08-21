@@ -82,11 +82,11 @@ do                                                                              
 #define CHECK(assertion, ...)                                                               \
 do                                                                                          \
 {                                                                                           \
-if (!(assertion))                                                                       \
-{                                                                                       \
-EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
-assert(false);                                                                      \
-}                                                                                       \
+    if (!(assertion))                                                                       \
+    {                                                                                       \
+        EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
+        assert(false);                                                                      \
+    }                                                                                       \
 } while (0)
 #endif
 

@@ -3,6 +3,7 @@
 
 namespace EOS
 {
+    int Window::glfwInstanceCount = 0;
     Window::Window(ContextCreationDescription& contextDescription)
     {
         /// Setup the error callback
@@ -11,15 +12,7 @@ namespace EOS
             printf("GLFW: ERROR (%i): %s\n", error, message);
         });
 
-        // Initialize GLFW
-        if (!glfwInit())
-        {
-            contextDescription.Window = nullptr;
-            contextDescription.Display = nullptr;
-            return;
-        }
-
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        // Set platform hints before GLFW initialization
 #if defined(EOS_PLATFORM_WAYLAND)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #elif defined(EOS_PLATFORM_X11)
@@ -27,6 +20,20 @@ namespace EOS
 #elif defined(EOS_PLATFORM_WIN32)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
 #endif
+
+        // Initialize GLFW only if not already initialized
+        if (glfwInstanceCount == 0)
+        {
+            if (!glfwInit())
+            {
+                contextDescription.Window = nullptr;
+                contextDescription.Display = nullptr;
+                return;
+            }
+        }
+        glfwInstanceCount++;
+
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
         // Determine if we're in fullscreen mode
         const bool fullscreen = !contextDescription.Width || !contextDescription.Height;
@@ -57,7 +64,11 @@ namespace EOS
         GlfwWindow = glfwCreateWindow(Width, Height, contextDescription.ApplicationName , fullscreen ? monitor : nullptr, nullptr);
         if (!GlfwWindow)
         {
-            glfwTerminate();
+            glfwInstanceCount--;
+            if (glfwInstanceCount == 0)
+            {
+                glfwTerminate();
+            }
             contextDescription.Window = nullptr;
             contextDescription.Display = nullptr;
             return;
@@ -97,8 +108,16 @@ namespace EOS
 
     Window::~Window()
     {
-        glfwDestroyWindow(GlfwWindow);
-        glfwTerminate();
+        if (GlfwWindow)
+        {
+            glfwDestroyWindow(GlfwWindow);
+        }
+        
+        glfwInstanceCount--;
+        if (glfwInstanceCount == 0)
+        {
+            glfwTerminate();
+        }
     }
 
     void Window::Poll()
@@ -113,9 +132,7 @@ namespace EOS
 
     bool Window::IsFocused()
     {
-        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
-
-        return Width || Height;
+        return glfwGetWindowAttrib(GlfwWindow, GLFW_FOCUSED) == GLFW_TRUE;
     }
 }
 

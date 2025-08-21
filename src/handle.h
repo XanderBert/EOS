@@ -20,12 +20,21 @@ namespace EOS
     public:
         Handle() = default;
         ~Handle() = default;
-        Handle& operator=(const Handle&) = delete;
-
+        
         Handle(const Handle& other)
         : Idx(other.Idx)
         , Generation(other.Gen())
         {}
+
+        Handle& operator=(const Handle& other)
+        {
+            if (this != &other)
+            {
+                Idx = other.Idx;
+                Generation = other.Generation;
+            }
+            return *this;
+        }
 
         Handle(Handle&& other) noexcept
         : Idx(std::exchange(other.Idx, 0))
