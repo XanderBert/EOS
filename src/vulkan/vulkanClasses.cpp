@@ -2579,7 +2579,10 @@ void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
     }
 
     //TODO: Questionable solution ....
-    free(renderPipelineState->SpecConstantDataStorage);
+    if (renderPipelineState->SpecConstantDataStorage)
+    {
+        free(renderPipelineState->SpecConstantDataStorage);
+    }
 
     Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = renderPipelineState->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
     Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
