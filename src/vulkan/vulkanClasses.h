@@ -131,7 +131,7 @@ public:
     // precached image views
     VkImageView ImageView                                   = VK_NULL_HANDLE;       // default view with all mip-levels
     VkImageView ImageViewStorage                            = VK_NULL_HANDLE;       // default view with identity swizzle (all mip-levels)
-    VkImageView ImageViewForFramebuffer[EOS_MAX_MIP_LEVELS][6]  = {};                   // max 6 faces for cubemap rendering
+    VkImageView ImageViewForFramebuffer[EOS_MAX_MIP_LEVELS][EOS_MAX_CUBE_FACES]  = {};                   // max faces for cubemap rendering
 };
 
 struct VulkanSwapChainCreationDescription final

@@ -18,3 +18,4 @@ DELETE_MOVE(ClassName)
 
 #define EOS_MAX_MIP_LEVELS 16
 #define EOS_MAX_COLOR_ATTACHMENTS 8
+#define EOS_MAX_CUBE_FACES 6  // Maximum faces for cubemap rendering

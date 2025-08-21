@@ -45,4 +45,5 @@ dependencies/src
 
 
 # Linux build folder
-/bin/
+/bin/build/
+build/
