@@ -7,7 +7,7 @@ Eos the goddess of dawn, aka the first light of the day. A wordplay on lighting.
 Eos aims to be:
 
 - Bindless Rendering Framework. Mainly targetting Vulkan.
-- As GPU-friendly as possible, while providing a high-level API for ease of use.
+- As GPU-friendly as possible, while providing a "higher" level API for ease of use.
 - only targets Windows and Linux.
 
 # Dependencies
