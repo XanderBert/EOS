@@ -1,3 +1,5 @@
+[![CMake Build Test](https://github.com/XanderBert/EOS/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/XanderBert/EOS/actions/workflows/cmake-multi-platform.yml)
+
 # EOS
 Eos the goddess of dawn, aka the first light of the day. A wordplay on lighting.
 
@@ -21,8 +23,8 @@ Eos aims to be:
 - [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [SPDLOG](https://github.com/gabime/spdlog)
 - [SLANG](https://github.com/shader-slang/slang)
-- [ASSIMP]()
-- [GLM]()
+- [ASSIMP](https://github.com/assimp/assimp)
+- [GLM](https://github.com/g-truc/glm)
 
 
 # Building
@@ -59,10 +61,3 @@ Once this projects ages enough it will be converted to a separate Rendering libr
 
 # Inspiration
 This project is heavily inspired by LVK and The Forge
-
-
-# Rules
-- AvoidC-style Casts
-- Use `[[nodiscard]]` whenever you return a value
-- For each dependency a separate Fetch macro will be made in `FetchMacros.cmake` for ease of use and separation 
-- Whenever possible `.reserve(n)` must be called on std::vector's and other dynamic array like objects
