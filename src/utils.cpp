@@ -22,9 +22,9 @@ namespace EOS
         std::ifstream file(filePath, std::ios::in | std::ios::binary);
 
         // Check if the file opened successfully
+        CHECK(file.is_open(), "I/O error. Cannot open file '{}'", filePath.string());
         if (!file.is_open())
         {
-            EOS::Logger->error("I/O error. Cannot open file '{}'", filePath.string());
             return std::string();
         }
 
@@ -54,10 +54,7 @@ namespace EOS
     void WriteFile(const std::filesystem::path& filePath, const std::string& content)
     {
         std::ofstream out( filePath, std::ios::out | std::ios::binary);
-        if (!out.is_open())
-        {
-            EOS::Logger->error("I/O error. Cannot Open File '{}'", filePath.string());
-        }
+        CHECK(out.is_open(), "I/O error. Cannot Open File '{}'", filePath.string());
 
         out.write(content.data(), content.size());
         out.close();
@@ -107,8 +104,7 @@ namespace EOS
 
     EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription)
     {
-        ktxTexture1* texture = nullptr;
-
+        //ktxTexture1* texture = nullptr;
         uint8_t* pixels = nullptr;
         int originalWidth = 0;
         int originalHeight = 0;
@@ -116,40 +112,44 @@ namespace EOS
         //Check if texture is already stored in the cache if so load in the ktx instead of the other file.
         const std::filesystem::path cachedFilePath = fmt::format(".cache/{}", textureLoadingDescription.filePath.filename().replace_extension(".ktx").string());
         std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-        if (file.is_open())
-        {
-            file.close();
-            EOS::Logger->debug("{} was already compressed and cached", textureLoadingDescription.filePath.filename().string());
-            CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
-        }
-        else
-        {
+        //if (file.is_open())
+        //{
+        //    file.close();
+        //    EOS::Logger->debug("{} was already compressed and cached", textureLoadingDescription.filePath.filename().string());
+        //    CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
+        //}
+        //else
+        //{
             constexpr int desiredChannels = 4;
             int channels;
             pixels = stbi_load(textureLoadingDescription.filePath.string().c_str(), &originalWidth, &originalHeight, &channels, desiredChannels);
             CHECK(pixels, "Could not load image at location: {}", textureLoadingDescription.filePath.string().c_str());
             EOS::Logger->debug({"Loading image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
+            size_t imageSize = originalWidth * originalHeight * 4;
+            //texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
+            //ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
 
-            texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
-            ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
-            stbi_image_free(pixels);
-        }
+        //}
 
+
+        //std::vector<uint8_t> textureCopy(texture->dataSize);
+        //memcpy(textureCopy.data(), texture->pData, texture->dataSize);
         
         Holder<EOS::TextureHandle> loadedTexture = textureLoadingDescription.context->CreateTexture(
         {
             .Type                   = EOS::ImageType::Image_2D,
             .TextureFormat          = EOS::Format::RGBA_UN8,
-            .TextureDimensions      = {texture->baseWidth, texture->baseHeight},
-            .NumberOfMipLevels      = texture->numLevels,
+            .TextureDimensions      = {static_cast<uint32_t>(originalWidth), static_cast<uint32_t>(originalHeight)},
+            .NumberOfMipLevels      = 1,
             .Usage                  = EOS::TextureUsageFlags::Sampled,
-            .Data                   = texture->pData,
-            .DataNumberOfMipLevels  = texture->numLevels,
+            .Data                   = pixels,
+            .DataNumberOfMipLevels  = 1,
             .DebugName              = cachedFilePath.string().c_str(),
         });
 
         
-        ktxTexture_Destroy(ktxTexture(texture));
+        //ktxTexture_Destroy(ktxTexture(texture));
+        stbi_image_free(pixels);
         return loadedTexture;
     }
 

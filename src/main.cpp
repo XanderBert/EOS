@@ -17,7 +17,7 @@
 #include "glm/gtx/transform.hpp"
 
 
-void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices,  EOS::IContext* context)
+void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices, EOS::Holder<EOS::TextureHandle>& albedoHandle, EOS::IContext* context)
 {
     const aiScene* scene = aiImportFile(modelPath.string().c_str(), aiProcess_Triangulate);
     CHECK(scene && scene->HasMeshes(), "Could not load mesh");
@@ -69,7 +69,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
                     .context = context,
                 };
                 
-                EOS::Holder<EOS::TextureHandle> textureData = EOS::LoadTexture(albedoDescription);
+                albedoHandle = EOS::LoadTexture(albedoDescription);
             }
         }
     }
@@ -88,10 +88,10 @@ int main()
     std::unique_ptr<EOS::Window> window = std::make_unique<EOS::Window>(contextDescr);
     std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
     std::unique_ptr<EOS::ShaderCompiler> shaderCompiler = EOS::CreateShaderCompiler("./");
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context, shaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context, shaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
 
-    //TODO First check if the shader is not already compiled
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context, shaderCompiler, "triangleVert");
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context, shaderCompiler, "triangleFrag");
+
 
     constexpr EOS::VertexInputData vdesc
     {
@@ -117,13 +117,14 @@ int main()
         .ColorAttachments = {{ .ColorFormat = context->GetSwapchainFormat()}},
         .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
         .PipelineCullMode = EOS::CullMode::Back,
-        .DebugName = "Basic Render Pipeline"
-    };
+        .DebugName = "Basic Render Pipeline",
+        };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
 
     std::vector<glm::vec3> positions;
     std::vector<uint32_t> indices;
-    LoadModel("../data/rubber_duck/scene.gltf", positions, indices, context.get());
+    EOS::Holder<EOS::TextureHandle> albedo;
+    LoadModel("../data/rubber_duck/scene.gltf", positions, indices,albedo, context.get());
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
     {
@@ -159,8 +160,22 @@ int main()
         const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);
         const glm::mat4 mvp = p * v * m;
 
+
+        const struct PerFrameData final
+        {
+            glm::mat4 mvp;
+            uint32_t textureID;
+        }
+        pc
+        {
+            .mvp = mvp,
+            .textureID = albedo.Index(),
+        };
+
+
+
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
-        cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::Present}});
+
 
         EOS::Framebuffer framebuffer
         {
@@ -181,18 +196,27 @@ int main()
             .IsDepthWriteEnabled = true,
         };
 
+
+        cmdPipelineBarrier(cmdBuffer, {},
+            {
+                { context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+                { depthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
+            });
+
         cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
         {
             cmdPushMarker(cmdBuffer, "Render Duck", 0xff0000ff);
             cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
             cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
-            cmdPushConstants(cmdBuffer, mvp);
+            cmdPushConstants(cmdBuffer, pc);
             cmdSetDepthState(cmdBuffer, depthState);
             cmdDrawIndexed(cmdBuffer, indices.size());
             cmdPopMarker(cmdBuffer);
         }
         cmdEndRendering(cmdBuffer);
+
+        cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
         context->Submit(cmdBuffer, context->GetSwapChainTexture());
     }
 

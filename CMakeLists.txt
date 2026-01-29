@@ -88,6 +88,12 @@ FETCH_STB(${EOS_DEPENDENCIES_DIR})
 FETCH_KTX(${EOS_DEPENDENCIES_DIR})
 
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-g) # Add debug symbols
+    add_compile_options(-O0) # The -O0 flag disables optimization
+endif()
+
+
 if(EOS_USE_TRACY)
     target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
     FETCH_TRACY(${EOS_DEPENDENCIES_DIR})

@@ -74,6 +74,7 @@ add_library(slang::gfx SHARED IMPORTED)
 
 set_target_properties(slang::gfx PROPERTIES
   INTERFACE_COMPILE_DEFINITIONS "SLANG_GFX_DYNAMIC"
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include;${_IMPORT_PREFIX}/include"
 )
 
 # Create imported target slang::slang-glsl-module
@@ -84,6 +85,7 @@ add_library(slang::slang SHARED IMPORTED)
 
 set_target_properties(slang::slang PROPERTIES
   INTERFACE_COMPILE_DEFINITIONS "SLANG_DYNAMIC"
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
 )
 
 # Create imported target slang::slangc

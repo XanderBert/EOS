@@ -42,8 +42,16 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
         VkImageAspectFlags aspectMask = VkSynchronization::ConvertToVkImageAspectFlags(CurrentState);
         if (VulkanImage::IsDepthAttachment(currentImage))
         {
-            aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+            if (VulkanImage::IsStencilFormat(currentImage.ImageFormat))
+            {
+                aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+            }
+            else if (VulkanImage::IsDepthFormat(currentImage.ImageFormat))
+            {
+                aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            }
         }
+
 
         VkImageMemoryBarrier2 vkBarrier
         {
@@ -1749,7 +1757,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
     // https://registry.khronos.org/KTX/specs/1.0/ktxspec.v1.html
     for (uint32_t mipLevel{}; mipLevel < numMipLevels; ++mipLevel)
     {
-        for (constexpr uint32_t currentLayer{}; layer != numLayers; layer++)
+        for (uint32_t currentLayer = 0; currentLayer < numLayers; ++currentLayer)
         {
             const uint32_t currentMipLevel = baseMipLevel + mipLevel;
             CHECK(currentMipLevel < image.Levels, "");
@@ -1782,7 +1790,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
                     .bufferRowLength = 0,
                     .bufferImageHeight = 0,
                     .imageSubresource =
-                    VkImageSubresourceLayers{numPlanes > 1 ? VK_IMAGE_ASPECT_PLANE_0_BIT << plane : imageAspect, currentMipLevel, layer, 1},
+                    VkImageSubresourceLayers{numPlanes > 1 ? VK_IMAGE_ASPECT_PLANE_0_BIT << plane : imageAspect, currentMipLevel, currentLayer, 1},
                     .imageOffset = {.x = region.offset.x, .y = region.offset.y, .z = 0},
                     .imageExtent = {.width = region.extent.width, .height = region.extent.height, .depth = 1u},
                 };
@@ -1792,7 +1800,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
             }
 
             // 3. Transition TRANSFER_DST_OPTIMAL into SHADER_READ_ONLY_OPTIMAL
-            image.InsertMemoryBarrier(wrapper->VulkanCommandBuffer, EOS::CopyDest, EOS::ShaderResource, VkImageSubresourceRange{imageAspect, currentMipLevel, 1, layer, 1});
+            image.InsertMemoryBarrier(wrapper->VulkanCommandBuffer, EOS::CopyDest, EOS::ShaderResource, VkImageSubresourceRange{imageAspect, currentMipLevel, 1, currentLayer, 1});
             offset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, currentMipLevel);
         }
     }
@@ -2713,6 +2721,7 @@ void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSampler
         stageFlags |= VK_SHADER_STAGE_RAYGEN_BIT_KHR;
     }
 
+
     const VkDescriptorSetLayoutBinding bindings[EOS::Bindings::Count]
     {
         VkContext::GetDSLBinding(EOS::Bindings::Textures, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures, stageFlags),
@@ -3133,7 +3142,7 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
     {
         vmaAllocInfo =
         {
-            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
             .usage = VMA_MEMORY_USAGE_AUTO,
             .requiredFlags = memFlags,
             .preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT
@@ -3148,16 +3157,17 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
         buffer.IsCoherentMemory = (memProps & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
     }
 
-    VK_ASSERT(vmaCreateBuffer(vmaAllocator, &createInfo, &vmaAllocInfo, &buffer.VulkanVkBuffer, &buffer.VMAAllocation, nullptr));
+    VmaAllocationInfo allocInfo;
+    VK_ASSERT(vmaCreateBuffer(vmaAllocator, &createInfo, &vmaAllocInfo, &buffer.VulkanVkBuffer, &buffer.VMAAllocation, &allocInfo));
     CHECK(buffer.VulkanVkBuffer != VK_NULL_HANDLE, "Could not create buffer");
     CHECK(buffer.VMAAllocation != nullptr, "Allocation failed");
     VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(buffer.VulkanVkBuffer), debugName));
-
 
     // Get the mapped pointer
     if (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
     {
         vmaMapMemory(vmaAllocator, buffer.VMAAllocation, &buffer.MappedPtr);
+        CHECK(buffer.MappedPtr != nullptr, "Failed to get mapped pointer from VMA");
     }
 
     // handle shader access

@@ -8,10 +8,9 @@
 
 namespace EOS
 {
-    struct ShaderCompilationDescription
+    struct ShaderCompilationDescription final
     {
         const char* Name;
-        const char* EntryPoint = "main";
         bool WriteToDisk = true;
     };
 
@@ -20,11 +19,16 @@ namespace EOS
     public:
         explicit ShaderCompiler(const std::filesystem::path& shaderFolder);
         DELETE_COPY_MOVE(ShaderCompiler);
+        
+        void CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo);
 
-        void CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, ShaderInfo& outShaderInfo);
+        static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
 
     private:
-        static EOS::ShaderStage ToShaderStage(slang::EntryPointReflection* entryPointReflection);
+        static EOS::ShaderStage ToShaderStage(SlangStage slangStage);
+
+        void WriteShaderToDisk(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const;
+        void HandleEntryPoint(ShaderInfo& outShaderInfo, slang::IModule* module, const char* shaderName, SlangInt32 entryPointIndex);
 
         Slang::ComPtr<slang::IGlobalSession> GlobalSession;
         Slang::ComPtr<slang::ISession> Session;
@@ -41,6 +45,6 @@ namespace EOS
     * @param 
     * @return a Holder Handle to the compiled shader
     */
-    Holder<ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const std::unique_ptr<EOS::ShaderCompiler>& shaderCompiler, const char* fileName);
+    Holder<ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const std::unique_ptr<EOS::ShaderCompiler>& shaderCompiler, const char* fileName, const ShaderStage& shaderStage);
 
 }

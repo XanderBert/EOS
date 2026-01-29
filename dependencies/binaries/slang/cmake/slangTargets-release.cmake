@@ -67,12 +67,12 @@ list(APPEND _cmake_import_check_files_for_slang::slang-glsl-module "${_IMPORT_PR
 # Import target "slang::slang" for configuration "Release"
 set_property(TARGET slang::slang APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(slang::slang PROPERTIES
-  IMPORTED_IMPLIB_RELEASE "${_IMPORT_PREFIX}/lib/slang.lib"
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/bin/slang.dll"
+  IMPORTED_IMPLIB_RELEASE "${_IMPORT_PREFIX}/lib/slang-compiler.lib"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/bin/slang-compiler.dll"
   )
 
 list(APPEND _cmake_import_check_targets slang::slang )
-list(APPEND _cmake_import_check_files_for_slang::slang "${_IMPORT_PREFIX}/lib/slang.lib" "${_IMPORT_PREFIX}/bin/slang.dll" )
+list(APPEND _cmake_import_check_files_for_slang::slang "${_IMPORT_PREFIX}/lib/slang-compiler.lib" "${_IMPORT_PREFIX}/bin/slang-compiler.dll" )
 
 # Import target "slang::slangc" for configuration "Release"
 set_property(TARGET slang::slangc APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
