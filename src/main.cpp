@@ -16,8 +16,13 @@
 #include "glm/gtc/quaternion.hpp"
 #include "glm/gtx/transform.hpp"
 
+struct Vertex
+{
+    glm::vec3 position;
+    glm::vec2 uv;
+};
 
-void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& vertices, std::vector<uint32_t>& indices, EOS::Holder<EOS::TextureHandle>& albedoHandle, EOS::IContext* context)
+void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, EOS::Holder<EOS::TextureHandle>& albedoHandle, EOS::IContext* context)
 {
     const aiScene* scene = aiImportFile(modelPath.string().c_str(), aiProcess_Triangulate);
     CHECK(scene && scene->HasMeshes(), "Could not load mesh");
@@ -33,7 +38,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
     for (unsigned int i{}; i != mesh->mNumVertices; ++i)
     {
         const aiVector3D v = mesh->mVertices[i];
-        vertices.emplace_back(glm::vec3(v.x, v.y, v.z));
+        vertices.emplace_back(glm::vec3(v.x, v.y, v.z) ,glm::vec2(mesh->mTextureCoords[0][i].x, 1 - mesh->mTextureCoords[0][i].y));
     }
 
     for (unsigned int i{}; i != mesh->mNumFaces; ++i)
@@ -96,9 +101,18 @@ int main()
 
     constexpr EOS::VertexInputData vdesc
     {
-        .Attributes    = { { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = 0 } },
-        .InputBindings = { { .Stride = sizeof(glm::vec3) } },
+        .Attributes =
+    {
+            { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) },
+            { .Location = 1, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) }
+        },
+
+        .InputBindings =
+        {
+            { .Stride = sizeof(Vertex) }
+        }
     };
+
 
     EOS::Holder<EOS::TextureHandle> depthTexture = context->CreateTexture(
 {
@@ -130,17 +144,18 @@ int main()
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
 
-    std::vector<glm::vec3> positions;
+
     std::vector<uint32_t> indices;
+    std::vector<Vertex> vertices;
     EOS::Holder<EOS::TextureHandle> albedo;
-    LoadModel("../data/rubber_duck/scene.gltf", positions, indices,albedo, context.get());
+    LoadModel("../data/rubber_duck/scene.gltf", vertices, indices,albedo, context.get());
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
     {
       .Usage     = EOS::BufferUsageFlags::Vertex,
       .Storage   = EOS::StorageType::Device,
-      .Size      = sizeof(glm::vec3) * positions.size(),
-      .Data      = positions.data(),
+      .Size      = sizeof(Vertex) * vertices.size(),
+      .Data      = vertices.data(),
       .DebugName = "Buffer: vertex"
       });
 
@@ -169,7 +184,6 @@ int main()
         const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);
         const glm::mat4 mvp = p * v * m;
 
-
         const struct PerFrameData final
         {
             glm::mat4 mvp;
@@ -182,10 +196,7 @@ int main()
         };
 
 
-
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
-
-
         EOS::Framebuffer framebuffer
         {
             .Color = {{.Texture = context->GetSwapChainTexture()}},

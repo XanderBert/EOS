@@ -19,26 +19,26 @@ namespace EOS
 
     void ShaderCompiler::CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo)
     {
-        slang::CompilerOptionEntry compilerOptions[] =
+        CompilerOptionEntry compilerOptions[] =
         {
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "SPV_GOOGLE_user_type"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvDerivativeControl"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvImageQuery"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvImageGatherExtended"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvSparseResidency"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvMinLod"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvFragmentFullyCoveredEXT"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvRayTracingPositionFetchKHR"}},
-            {.name = slang::CompilerOptionName::Capability,
-             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvRayQueryKHR"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "SPV_GOOGLE_user_type"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvDerivativeControl"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvImageQuery"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvImageGatherExtended"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvSparseResidency"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvMinLod"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvFragmentFullyCoveredEXT"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvRayTracingPositionFetchKHR"}},
+            {.name = CompilerOptionName::Capability,
+             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvRayQueryKHR"}},
         };
 
         const TargetDesc targetDesc
@@ -51,9 +51,7 @@ namespace EOS
             .compilerOptionEntryCount = ARRAY_COUNT(compilerOptions),
         };
 
-
-        const char* path = ShaderFolder.string().c_str();
-        const slang::SessionDesc sessionDesc
+        const SessionDesc sessionDesc
         {
             .targets = &targetDesc,
             .targetCount = 1,
@@ -71,8 +69,10 @@ namespace EOS
 
         // Load All Entry Points (a EntryPoint is a shader within a file) and write to disk if desired
         const uint32_t entryPointCount = module->getDefinedEntryPointCount();
+
         outShaderInfo.clear();
         outShaderInfo.resize(entryPointCount);
+
         for (SlangInt32 i{}; i < entryPointCount; ++i)
         {
             // Read out the data for this entry point and store it in the shader info.
@@ -238,7 +238,6 @@ namespace EOS
         IComponentType* components[] = { module, entryPoint };
         Slang::ComPtr<IComponentType> program;
         Session->createCompositeComponentType(components, 2, program.writeRef());
-        slang::ProgramLayout* layout = program->getLayout();
 
         // resolve all cross-module references
         // also used to resolve link time specializaions (https://shader-slang.org/slang/user-guide/link-time-specialization)
@@ -254,17 +253,6 @@ namespace EOS
             CHECK(false, "Shader Compile Error");
             Diagnostics.setNull();
         }
-
-        Slang::ComPtr<IMetadata> metadata;
-        linkedProgram->getEntryPointMetadata(0,0, metadata.writeRef(), Diagnostics.writeRef());
-        if(Diagnostics)
-        {
-            EOS::Logger->critical("Slang Shader Compiler Diagnostics:\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
-            CHECK(false, "Shader Compile Error");
-            Diagnostics.setNull();
-        }
-
-        bool isUsed;
         if (kernelBlob)
         {
             const void* bufferPtr = kernelBlob->getBufferPointer();
@@ -282,30 +270,32 @@ namespace EOS
         }
 
 
-        // Start getting data out of the shader
-        slang::ProgramLayout* reflection = linkedProgram->getLayout();
-        slang::EntryPointReflection* entryPointLayout = reflection->getEntryPointByIndex(0);
+        // Start Reflection
+        Slang::ComPtr<IMetadata> metadata;
+        linkedProgram->getEntryPointMetadata(0,0, metadata.writeRef(), Diagnostics.writeRef());
+        if(Diagnostics)
+        {
+            EOS::Logger->critical("Slang Shader Compiler Diagnostics:\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
+            CHECK(false, "Shader Compile Error");
+            Diagnostics.setNull();
+        }
+
+        ProgramLayout* reflection = linkedProgram->getLayout();
+        EntryPointReflection* entryPointLayout = reflection->getEntryPointByIndex(0);
         outShaderInfo.ShaderStage = ToShaderStage(entryPointLayout->getStage());
 
-        // Get the size of the push constant.
-        int totalPushConstantSize = 0;
+        //TODO: this code will count the size of the pushconstants used in the file
+        uint32_t totalPushConstantSize = 0;
         for (int i{}; i < reflection->getParameterCount(); ++i)
         {
             VariableLayoutReflection* variableLayout = reflection->getParameterByIndex(i);
-            auto category = variableLayout->getCategory();
-
-            // Whenever our pushconstant holds a struct of data
-            //TODO: i need to know in what stage this pushConstant is actually used
-            if ( category == slang::PushConstantBuffer)
+            if ( variableLayout->getCategory() == slang::PushConstantBuffer)
             {
-                metadata->isParameterLocationUsed(SLANG_PARAMETER_CATEGORY_VARYING_INPUT, variableLayout->getBindingSpace(), variableLayout->getBindingIndex(), isUsed);
                 totalPushConstantSize += variableLayout->getTypeLayout()->getElementVarLayout()->getTypeLayout()->getSize();
-                EOS::Logger->info("Found Shader Variable: {}, of Type: {}, as PushConstant in Shader: {}, with Stage: {}", variableLayout->getName(), variableLayout->getType()->getName(), shaderName, ShaderStageToString(outShaderInfo.ShaderStage));
+                EOS::Logger->debug("Found Shader Variable: {}, of Type: {}, as PushConstant in Shader: {}, with Stage: {}", variableLayout->getName(), variableLayout->getType()->getName(), shaderName, ShaderStageToString(outShaderInfo.ShaderStage));
             }
         }
 
-        //TODO: this code will count the size of the pushconstants used in the file.
-        EOS::Logger->info("PushConstantSize:{}", totalPushConstantSize);
         outShaderInfo.PushConstantSize = totalPushConstantSize;
         outShaderInfo.DebugName = shaderName;
     }

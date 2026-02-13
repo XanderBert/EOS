@@ -2,11 +2,13 @@
 void vertexMain(
     uint vertexID : SV_VertexID,
     float3 inPos : POSITION,
+    float2 inUV  : TEXCOORD0,
+
     out float4 outPosition : SV_Position,
-    out float3 outColor : COLOR0)
+    out float2 outUV       : TEXCOORD0)
 {
     outPosition = mul(float4(inPos, 1.0), perFrameData.MVP);
-    outColor = inPos.xzy;
+    outUV = inUV;
 }
 
 public struct PerFrameData
@@ -26,8 +28,9 @@ float4 textureBindless2D(uint textureid, uint samplerid, float2 uv)
 }
 
 [shader("fragment")]
-void fragmentMain(float3 inColor : COLOR0, out float4 outFragColor : SV_Target)
+void fragmentMain(
+    float2 inUV : TEXCOORD0,
+    out float4 outFragColor : SV_Target)
 {
-    float2 uv = inColor.xy * 0.5 + 0.5;
-    outFragColor = textureBindless2D(perFrameData.textureID, 0, uv);
+    outFragColor = textureBindless2D(perFrameData.textureID, 0, inUV);
 }
