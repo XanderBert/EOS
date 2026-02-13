@@ -32,6 +32,7 @@
 struct DeviceQueues;
 namespace EOS
 {
+    struct SamplerDescription;
     struct SpecializationConstantDescription;
     struct HardwareDeviceDescription;
     enum class ColorSpace : uint8_t;
@@ -211,6 +212,10 @@ namespace VkContext
     [[nodiscard]] VkFormat GetClosestDepthStencilFormat(EOS::Format desiredFormat, const VkPhysicalDevice& physicalDevice);
     [[nodiscard]] uint32_t GetTextureBytesPerLayer(uint32_t width, uint32_t height, EOS::Format format, uint32_t level);
 
+    [[nodiscard]] VkSamplerCreateInfo SamplerDescriptionToVkSamplerCreateInfo(const EOS::SamplerDescription& description);
+    [[nodiscard]] VkFilter SamplerFilterToVkFilter(EOS::SamplerFilter filter);
+    [[nodiscard]] VkSamplerMipmapMode SamplerMipMapToVkSamplerMipmapMode(EOS::SamplerMip filter);
+    [[nodiscard]] VkSamplerAddressMode SamplerWrapModeToVkSamplerAddressMode(EOS::SamplerWrap mode);
 
     [[nodiscard]] VkBlendFactor BlendFactorToVkBlendFactor(EOS::BlendFactor value);
     [[nodiscard]] VkBlendOp BlendOpToVkBlendOp(EOS::BlendOp value);

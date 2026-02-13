@@ -19,24 +19,44 @@ namespace EOS
 
     void ShaderCompiler::CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo)
     {
-        const TargetDesc targetDesc
+        slang::CompilerOptionEntry compilerOptions[] =
         {
-#if defined(EOS_VULKAN)
-        .format = SLANG_SPIRV,
-#elif defined(EOS_DIRECTX)
-        .format = SLANG_DXBC
-#endif
-        .profile = GlobalSession->findProfile("spirv_1_5"),
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "SPV_GOOGLE_user_type"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvDerivativeControl"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvImageQuery"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvImageGatherExtended"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvSparseResidency"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvMinLod"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvFragmentFullyCoveredEXT"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvRayTracingPositionFetchKHR"}},
+            {.name = slang::CompilerOptionName::Capability,
+             .value = {.kind = slang::CompilerOptionValueKind::String, .stringValue0 = "spvRayQueryKHR"}},
         };
 
+        const TargetDesc targetDesc
+        {
+            .format = SLANG_SPIRV,
+            .profile = GlobalSession->findProfile("spirv_1_6"),
+            .flags = SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY,
+            .forceGLSLScalarBufferLayout = true,
+            .compilerOptionEntries = &compilerOptions[0],
+            .compilerOptionEntryCount = ARRAY_COUNT(compilerOptions),
+        };
+
+
         const char* path = ShaderFolder.string().c_str();
-        const SessionDesc sessionDesc
+        const slang::SessionDesc sessionDesc
         {
             .targets = &targetDesc,
             .targetCount = 1,
-            .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_ROW_MAJOR,
-            .searchPaths = &path,
-            .searchPathCount = 1,
         };
         GlobalSession->createSession(sessionDesc, Session.writeRef());
 

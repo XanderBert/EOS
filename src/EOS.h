@@ -361,6 +361,22 @@ namespace EOS
         EOS::IContext* context;
     };
 
+    struct SamplerDescription final
+    {
+        SamplerFilter minFilter = LinearFilter;
+        SamplerFilter magFilter = LinearFilter;
+        SamplerMip mipMap = Disabled;
+        SamplerWrap wrapU = Repeat;
+        SamplerWrap wrapV = Repeat;
+        SamplerWrap wrapW = Repeat;
+        CompareOp depthCompareOp = CompareOp::LessEqual;
+        uint8_t mipLodMin = 0;
+        uint8_t mipLodMax = 15;
+        uint8_t maxAnisotropic = 1;
+        bool depthCompareEnabled = false;
+        const char* debugName = "";
+    };
+
 #pragma region INTERFACES
     //TODO: instead of interfaces use concept and a forward declare. And then every API implements 1 class of that name with the concept.
     //CMake should handle that only 1 type of API is being used at the time.
@@ -431,11 +447,19 @@ namespace EOS
         virtual EOS::Holder<BufferHandle> CreateBuffer(const BufferDescription& description) = 0;
 
         /**
-         * @brief Createes a texture and uploads its data to the GPU if needed.
+         * @brief Creates a texture and uploads its data to the GPU if needed.
          * @param description describes what type of texture it is.
          * @return A Holder to the texture.
          */
         virtual EOS::Holder<TextureHandle> CreateTexture(const TextureDescription& description) = 0;
+
+
+        /**
+         * @brief Creates a sampler.
+         * @param samplerDescription description of the sampler
+         * @return A holder to the sampler
+         */
+        virtual EOS::Holder<EOS::SamplerHandle> CreateSampler(const EOS::SamplerDescription& samplerDescription) = 0;
 
         /**
         * @brief Handles the destruction of a TextureHandle and what it holds.
@@ -461,6 +485,12 @@ namespace EOS
         * @param handle The handle to the Buffer you want to destroy.
         */
         virtual void Destroy(BufferHandle handle) = 0;
+
+        /**
+         * @brief Handles the destruction of a SamplerHandle and what it holds.
+         * @param handle The handle to the Sampler you want to destroy
+         */
+        virtual void Destroy(EOS::SamplerHandle handle) = 0;
 
         /**
         * @brief Handles the uploading of buffers to the GPU
@@ -494,8 +524,7 @@ namespace EOS
 
         ~Holder()
         {
-            //CHECK(HolderContext, "the context of the holder is no longer valid in the destruction of the holder");
-            //TODO:
+            //TODO: CHECK(HolderContext, "the context of the holder is no longer valid in the destruction of the holder");
             if (HolderContext)
             {
                 HolderContext->Destroy(Handle);

@@ -364,4 +364,26 @@ namespace EOS
         BC7,
         ASTC,
     };
+
+    enum SamplerFilter : uint8_t
+    {
+        NearestFilter = 0,
+        LinearFilter = 1
+    };
+
+    enum SamplerMip : uint8_t
+    {
+        Disabled = 0,
+        Nearest = 1,
+        Linear = 2
+    };
+
+    enum SamplerWrap : uint8_t
+    {
+        Repeat = 0,
+        Clamp,
+        ClampToBorder,
+        MirrorRepeat,
+        MirrorClampToEdge,
+    };
 }

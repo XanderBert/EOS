@@ -56,7 +56,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
             
             if (result == aiReturn_SUCCESS)
             {
-                EOS::Logger->warn("Diffuse texture path: {}", texturePath.C_Str());
+
                 
                 // Convert relative path to absolute if needed
                 std::filesystem::path fullTexturePath = modelPath.parent_path() / texturePath.C_Str();
@@ -70,6 +70,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<glm::vec3>& v
                 };
                 
                 albedoHandle = EOS::LoadTexture(albedoDescription);
+                //EOS::Logger->warn("Diffuse texture path: {} ,Loaded with ID: {}", texturePath.C_Str(), albedoHandle.Index());
             }
         }
     }
@@ -108,6 +109,14 @@ int main()
         .DebugName              = "Depth Buffer",
     });
 
+    EOS::SamplerDescription samplerDescription
+    {
+        .mipLodMax = EOS_MAX_MIP_LEVELS,
+        .maxAnisotropic = 0,
+        .debugName = "Linear Sampler",
+    };
+    EOS::Holder<EOS::SamplerHandle> sampler = context->CreateSampler(samplerDescription);
+
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineDescription
     {
@@ -118,7 +127,7 @@ int main()
         .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
-        };
+    };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
 
     std::vector<glm::vec3> positions;

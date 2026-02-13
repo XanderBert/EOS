@@ -22,6 +22,7 @@ using VulkanRenderPipelinePool = EOS::Pool<EOS::RenderPipeline, VulkanRenderPipe
 using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleState>;
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
 using VulkanBufferPool = EOS::Pool<EOS::Buffer, VulkanBuffer>;
+using VulkanSamplerPool = EOS::Pool<EOS::Sampler, VkSampler>;
 
 //TODO: Split up in hot and cold data
 struct VulkanBuffer final
@@ -411,11 +412,13 @@ public:
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
     [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::SamplerHandle> CreateSampler(const EOS::SamplerDescription& samplerDescription) override;
 
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderModuleHandle handle) override;
     void Destroy(EOS::RenderPipelineHandle handle) override;
     void Destroy(EOS::BufferHandle handle) override;
+    void Destroy(EOS::SamplerHandle handle) override;
 
     void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
     void Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data) override;
@@ -427,6 +430,7 @@ public:
 
     void GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
     void BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const;
+    void UpdateDescriptorSet();
     [[nodiscard]] VkDevice GetDevice() const;
     [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
@@ -436,6 +440,7 @@ public:
     VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
     VulkanBufferPool BufferPool{};
+    VulkanSamplerPool SamplerPool{};
     VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
 
 private:
@@ -463,13 +468,15 @@ private:
     VkDescriptorSetLayout DescriptorSetLayout       = VK_NULL_HANDLE;
     VkDescriptorPool DescriptorPool                 = VK_NULL_HANDLE;
     VkDescriptorSet DescriptorSet                   = VK_NULL_HANDLE;
+    bool ShouldDescriptorSetBeUpdated               = false;
+    EOS::Holder<EOS::TextureHandle> DummyTexture    = {};
 
     uint32_t CurrentMaxTextures;
     uint32_t CurrentMaxSamplers;
     uint32_t CurrentMaxAccelStructs;
 
-    bool HasAccelerationStructure                   = false; //TOOD: Just check size of the pipeline pool for raytracing
-    bool HasRaytracingPipeline                      = false; //TOOD: Just check size of the pipeline pool for raytracing
+    bool HasAccelerationStructure                   = false; //TODO: Just check size of the pipeline pool for raytracing
+    bool HasRaytracingPipeline                      = false; //TODO: Just check size of the pipeline pool for raytracing
     bool UseStagingDevice                           = false;
 
 

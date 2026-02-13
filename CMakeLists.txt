@@ -75,7 +75,7 @@ if(EOS_VULKAN)
 
     FETCH_VOLK(${VOLK_VERSION} ${EOS_DEPENDENCIES_DIR})
     FETCH_VMA(${EOS_DEPENDENCIES_DIR})
-elseif ()
+else ()
     message(FATAL_ERROR "No Usable Graphics API Found")
 endif ()
 

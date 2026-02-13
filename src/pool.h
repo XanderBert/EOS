@@ -203,7 +203,7 @@ namespace EOS
         if (handle.Empty()) { return nullptr; }
 
         const uint32_t index = handle.Index();
-        CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
+        CHECK(index < Objects.size(), "The index: {} is bigger then the amount of objects in the pool: {}", index, Objects.size());
 
         //Check if the version in the pool is the same as the version we are referencing
         CHECK(handle.Gen() == Objects[index].Generation, "The generation of the handle is not the same as the one in the pool");

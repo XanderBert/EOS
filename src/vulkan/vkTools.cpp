@@ -1032,6 +1032,97 @@ namespace VkContext
         return widthInBlocks * heightInBlocks * props.BytesPerBlock;
     }
 
+    VkSamplerCreateInfo SamplerDescriptionToVkSamplerCreateInfo(const EOS::SamplerDescription& description)
+    {
+        CHECK(description.mipLodMax >= description.mipLodMin, "mipLodMax {} must be greater than or equal to mipLodMin {}", description.mipLodMax, description.mipLodMin);
+
+        const VkSamplerCreateInfo ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .magFilter = SamplerFilterToVkFilter(description.magFilter),
+            .minFilter = SamplerFilterToVkFilter(description.minFilter),
+            .mipmapMode = SamplerMipMapToVkSamplerMipmapMode(description.mipMap),
+            .addressModeU = SamplerWrapModeToVkSamplerAddressMode(description.wrapU),
+            .addressModeV = SamplerWrapModeToVkSamplerAddressMode(description.wrapV),
+            .addressModeW = SamplerWrapModeToVkSamplerAddressMode(description.wrapW),
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = VK_FALSE,
+            .maxAnisotropy = 0.0f,
+            .compareEnable = description.depthCompareEnabled ? VK_TRUE : VK_FALSE,
+            .compareOp = description.depthCompareEnabled ? CompareOpToVkCompareOp(description.depthCompareOp) : VK_COMPARE_OP_ALWAYS,
+            .minLod = static_cast<float>(description.mipLodMin),
+            .maxLod = description.mipMap == EOS::SamplerMip::Disabled ? static_cast<float>(description.mipLodMin) : static_cast<float>(description.mipLodMax),
+            .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+            .unnormalizedCoordinates = VK_FALSE,
+        };
+
+        //TODO: Pass and Check Device Limits
+        //if (description.maxAnisotropic > 1)
+        //{
+        //    const bool isAnisotropicFilteringSupported = limits.maxSamplerAnisotropy > 1;
+        //    CHECK(isAnisotropicFilteringSupported, "Anisotropic filtering is not supported!");
+        //    ci.anisotropyEnable = isAnisotropicFilteringSupported ? VK_TRUE : VK_FALSE;
+        //    if (limits.maxSamplerAnisotropy < description.maxAnisotropic)
+        //    {
+        //        EOS::Logger->warn("Given anisotropic value greater then max supported, setting to {}", static_cast<double>(limits.maxSamplerAnisotropy));
+        //    }
+        //    ci.maxAnisotropy = std::min(static_cast<float>(limits.maxSamplerAnisotropy), static_cast<float>(desc.maxAnisotropic));
+        //}
+
+        return ci;
+    }
+
+    VkFilter SamplerFilterToVkFilter(EOS::SamplerFilter filter)
+    {
+        switch (filter)
+        {
+        case EOS::SamplerFilter::NearestFilter:
+            return VK_FILTER_NEAREST;
+        case EOS::SamplerFilter::LinearFilter:
+            return VK_FILTER_LINEAR;
+        }
+
+        CHECK(false, "SamplerFilter not found: {}", static_cast<int>(filter));
+        return VK_FILTER_LINEAR;
+    }
+
+    VkSamplerMipmapMode SamplerMipMapToVkSamplerMipmapMode(EOS::SamplerMip filter)
+    {
+        switch (filter)
+        {
+        case EOS::Disabled:
+        case EOS::Nearest:
+            return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        case EOS::Linear:
+            return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        }
+
+        CHECK(false, "SamplerMipMap not found: {}", static_cast<int>(filter));
+        return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    }
+
+    VkSamplerAddressMode SamplerWrapModeToVkSamplerAddressMode(EOS::SamplerWrap mode)
+    {
+        switch (mode)
+        {
+        case EOS::Repeat:
+            return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        case EOS::Clamp:
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        case EOS::ClampToBorder:
+            return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        case EOS::MirrorRepeat:
+            return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        case EOS::MirrorClampToEdge:
+            return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+        }
+
+        CHECK(false, "SamplerWrapMode not found: {}", static_cast<int>(mode));
+        return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    }
+
     VkBlendFactor BlendFactorToVkBlendFactor(EOS::BlendFactor value)
     {
         switch (value)

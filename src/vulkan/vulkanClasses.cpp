@@ -262,7 +262,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     EOS::DepthState state{};
     cmdSetDepthState(commandBuffer, state);
 
-    //CheckAndUpdateDescriptorSets(); -> TODO: this is a solution but we can avoid to check this every frame, what about we add any descriptor sets...
+    vulkanCommandBuffer->VkContext->UpdateDescriptorSet();
     vkCmdSetDepthBiasEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_FALSE);
     vkCmdBeginRendering(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &renderingInfo);
 }
@@ -1718,8 +1718,12 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
     const uint32_t storageSize = layerStorageSize * numLayers;
     EnsureSize(storageSize);
     CHECK(storageSize <= Size, "storageSize exceeds available size for the staging device");
-    if (storageSize <= 268435456){ EOS::Logger->warn("Texture larger then 256MB, this might not be optimal for a staging buffer"); }
 
+    constexpr size_t MAX_STAGING_TEXTURE_SIZE = 256ull * 1024ull * 1024ull;
+    if (storageSize >= MAX_STAGING_TEXTURE_SIZE)
+    {
+        EOS::Logger->warn("Texture larger than 256MB, this might not be optimal for a staging buffer");
+    }
     MemoryRegionDescription desc = GetNextFreeOffset(storageSize);
 
     // No support for copying image in multiple smaller chunk sizes. If we get smaller buffer size than storageSize, we will wait for GPU idle
@@ -1907,6 +1911,18 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     VulkanStagingBuffer = std::make_unique<VulkanStagingDevice>(this);
 
     GrowDescriptorPool(16, 16, 1);
+
+    // Create Dummy Texture
+    constexpr uint32_t pixel = 0xFF000000;
+    DummyTexture = CreateTexture(
+    {
+        .Type                   = EOS::ImageType::Image_2D,
+        .TextureFormat          = EOS::Format::RGBA_UN8,
+        .TextureDimensions      = {1,1, 1},
+        .Usage                  = EOS::TextureUsageFlags::Sampled | EOS::TextureUsageFlags::Storage,
+        .Data                   = &pixel,
+        .DebugName              = "Dummy Texture",
+    });
 }
 
 VulkanContext::~VulkanContext()
@@ -1918,6 +1934,7 @@ VulkanContext::~VulkanContext()
     VulkanStagingBuffer.reset(nullptr);
 
     vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
+    DummyTexture.Reset();
 
     if (TexturePool.NumObjects())
     {
@@ -1942,6 +1959,12 @@ VulkanContext::~VulkanContext()
         EOS::Logger->error("{} Leaked Buffers", BufferPool.NumObjects());
     }
     BufferPool.Clear();
+
+    if (SamplerPool.NumObjects())
+    {
+        EOS::Logger->error("{} Leaked Samplers", SamplerPool.NumObjects());
+    }
+    SamplerPool.Clear();
 
     WaitOnDeferredTasks();
 
@@ -2490,6 +2513,8 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
 
     EOS::TextureHandle handle = TexturePool.Create(std::move(image));
 
+    ShouldDescriptorSetBeUpdated = true;
+
     if (desc.Data)
     {
         CHECK(desc.Type == EOS::ImageType::Image_2D || desc.Type == EOS::ImageType::CubeMap || desc.Type == EOS::ImageType::Image_2D_Array || desc.Type == EOS::ImageType::CubeMap_Array, "Can only upload data to the GPU is texture is 2D or Cubemap");
@@ -2511,6 +2536,23 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
             GenerateMipmaps(handle);
         }
     }
+
+    return {this, handle};
+}
+
+EOS::Holder<EOS::SamplerHandle> VulkanContext::CreateSampler(const EOS::SamplerDescription& samplerDescription)
+{
+    const VkSamplerCreateInfo info = VkContext::SamplerDescriptionToVkSamplerCreateInfo(samplerDescription);
+
+    VkSampler sampler = VK_NULL_HANDLE;
+    VK_ASSERT(vkCreateSampler(VulkanDevice, &info, nullptr, &sampler));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SAMPLER, reinterpret_cast<uint64_t>(sampler), samplerDescription.debugName));
+
+    EOS::SamplerHandle handle = SamplerPool.Create(static_cast<VkSampler>(sampler));
+
+    CHECK(!handle.Empty(), "Could not create sampler: {}", samplerDescription.debugName);
+
+    ShouldDescriptorSetBeUpdated = true;
 
     return {this, handle};
 }
@@ -2614,6 +2656,13 @@ void VulkanContext::Destroy(EOS::BufferHandle handle)
     }));
 
     BufferPool.Destroy(handle);
+}
+
+void VulkanContext::Destroy(EOS::SamplerHandle handle)
+{
+    VkSampler sampler = *SamplerPool.Get(handle);
+    SamplerPool.Destroy(handle);
+    Defer(std::packaged_task<void()>([device = VulkanDevice, sampler = sampler]() { vkDestroySampler(device, sampler, nullptr); }));
 }
 
 void VulkanContext::Upload(EOS::BufferHandle handle, const void *data, size_t size, size_t offset)
@@ -3080,6 +3129,135 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
     }
 
     CHECK(!hardwareDevices.empty(), "Couldn't find a physical hardware device!");
+}
+
+void VulkanContext::UpdateDescriptorSet()
+{
+    if (!ShouldDescriptorSetBeUpdated) return;
+
+    //TODO: Descriptor Sets that are waiting to be submitted in a draw call (when a texture is created in frame) or is still being proccesed
+    // cannot be reused, That's why a new empty descriptor set should be created.
+
+    CHECK(TexturePool.NumObjects() >= 1, "There should be at least 1 texture");
+    CHECK(SamplerPool.NumObjects() >= 1, "There should be at least 1 sampler");
+
+    uint32_t newMaxTextures = 16u;
+    uint32_t newMaxSamplers = 16u;
+    uint32_t newMaxAccelStructs = 1;
+
+    while (TexturePool.Objects.size() > newMaxTextures) newMaxTextures *= 2;
+    while (SamplerPool.Objects.size() > newMaxSamplers) newMaxSamplers *= 2;
+    //TODO: AccelStructuresPool
+
+    GrowDescriptorPool(newMaxTextures, newMaxSamplers, newMaxAccelStructs);
+
+    std::vector<VkDescriptorImageInfo> infoSampledImages;
+    std::vector<VkDescriptorImageInfo> infoStorageImages;
+    std::vector<VkDescriptorImageInfo> infoYUVImages;
+
+    infoSampledImages.reserve(TexturePool.NumObjects());
+    infoStorageImages.reserve(TexturePool.NumObjects());
+
+    // use dummies to avoid sparse arrays
+    VkImageView dummyImageView = TexturePool.Objects[DummyTexture.Index()].Object.ImageView;
+    VkSampler dummySampler = SamplerPool.Objects[0].Object;
+
+
+    // 1. Sampled and Storage images
+    for (const auto& obj : TexturePool.Objects)
+    {
+        const VulkanImage& img = obj.Object;
+        const VkImageView view = obj.Object.ImageView;
+        const VkImageView storageView = obj.Object.ImageViewStorage ? obj.Object.ImageViewStorage : view;
+
+        // multisampled images cannot be directly accessed from shaders
+        const bool isTextureAvailable = (img.Samples & VK_SAMPLE_COUNT_1_BIT) == VK_SAMPLE_COUNT_1_BIT;
+        const bool isYUVImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && VkContext::GetNumberOfImagePlanes(img.ImageFormat) > 1;
+        const bool isSampledImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && !isYUVImage;
+        const bool isStorageImage = isTextureAvailable && VulkanImage::IsStorageImage(img);
+
+        infoSampledImages.emplace_back(VkDescriptorImageInfo
+        {
+            .sampler = VK_NULL_HANDLE,
+            .imageView = isSampledImage ? view : dummyImageView,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+
+        CHECK(infoSampledImages.back().imageView != VK_NULL_HANDLE, "sampled Image is not valid");
+
+        infoStorageImages.push_back(VkDescriptorImageInfo
+        {
+            .sampler = VK_NULL_HANDLE,
+            .imageView = isStorageImage ? storageView : dummyImageView,
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+        });
+    }
+
+    // 2. Samplers
+    std::vector<VkDescriptorImageInfo> infoSamplers;
+    infoSamplers.reserve(SamplerPool.Objects.size());
+
+    for (const auto& sampler : SamplerPool.Objects)
+    {
+        infoSamplers.push_back(
+    {
+            .sampler = sampler.Object ? sampler.Object : dummySampler,
+            .imageView = VK_NULL_HANDLE,
+            .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        });
+    }
+
+    //TODO: 3. Acceleration structures
+
+
+    // 4. Count
+    VkWriteDescriptorSet write[EOS::Bindings::Count]{};
+    uint32_t numWrites = 0;
+
+    if (!infoSampledImages.empty())
+    {
+        write[numWrites++] = VkWriteDescriptorSet
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = DescriptorSet,
+            .dstBinding = EOS::Bindings::Textures,
+            .dstArrayElement = 0,
+            .descriptorCount = static_cast<uint32_t>(infoSampledImages.size()),
+            .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            .pImageInfo = infoSampledImages.data(),
+        };
+    }
+
+    if (!infoSamplers.empty())
+    {
+        write[numWrites++] = VkWriteDescriptorSet
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = DescriptorSet,
+            .dstBinding = EOS::Bindings::Samplers,
+            .dstArrayElement = 0,
+            .descriptorCount = static_cast<uint32_t>(infoSamplers.size()),
+            .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+            .pImageInfo = infoSamplers.data(),
+        };
+    }
+
+    if (!infoStorageImages.empty())
+    {
+        write[numWrites++] = VkWriteDescriptorSet
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = DescriptorSet,
+            .dstBinding = EOS::Bindings::StorageImages,
+            .dstArrayElement = 0,
+            .descriptorCount = static_cast<uint32_t>(infoStorageImages.size()),
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo = infoStorageImages.data(),
+        };
+    }
+
+    if (numWrites) vkUpdateDescriptorSets(VulkanDevice, numWrites, write, 0, nullptr);
+    ShouldDescriptorSetBeUpdated = false;
 }
 
 void VulkanContext::WaitOnDeferredTasks() const
