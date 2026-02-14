@@ -780,6 +780,8 @@ namespace VkContext
                 return EOS::Format::ETC2_SRGB8;
             case VK_FORMAT_D16_UNORM:
                 return EOS::Format::Z_UN16;
+            case VK_FORMAT_BC5_UNORM_BLOCK:
+                return EOS::Format::BC5_RG;
             case VK_FORMAT_BC7_UNORM_BLOCK:
                 return EOS::Format::BC7_RGBA;
             case VK_FORMAT_X8_D24_UNORM_PACK32:
@@ -848,6 +850,8 @@ namespace VkContext
                 return VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK;
             case EOS::Format::Z_UN16:
                 return VK_FORMAT_D16_UNORM;
+            case EOS::Format::BC5_RG:
+                return VK_FORMAT_BC5_UNORM_BLOCK;
             case EOS::Format::BC7_RGBA:
                 return VK_FORMAT_BC7_UNORM_BLOCK;
             case EOS::Format::Z_UN24:

@@ -2,13 +2,11 @@
 #include "logger.h"
 #include "shaders/shaderUtils.h"
 
-
 #include "assimp/cimport.h"
 #include "assimp/mesh.h"
 #include "assimp/postprocess.h"
 #include "assimp/scene.h"
 
-#define GLM_ENABLE_EXPERIMENTAL //-> TODO: Define trough cmake
 #include "utils.h"
 #include "glm/fwd.hpp"
 #include "glm/detail/type_quat.hpp"

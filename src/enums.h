@@ -204,6 +204,7 @@ namespace EOS
         ETC2_RGB8,
         ETC2_SRGB8,
 
+        BC5_RG,
         BC7_RGBA,
 
         Z_UN16,
@@ -355,14 +356,9 @@ namespace EOS
     enum Compression : uint8_t
     {
         NoCompression,
-        ETC1,
-        ETC2,
-        BC1,
-        BC3,
-        BC4,
-        BC5,
-        BC7,
-        ASTC,
+        ETC2, // Useful for mobile RGBA
+        BC5,  // Useful for RG
+        BC7,  // Useful for RGBA
     };
 
     enum SamplerFilter : uint8_t

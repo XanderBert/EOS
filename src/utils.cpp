@@ -17,6 +17,7 @@
 
 namespace EOS
 {
+
     std::string ReadFile(const std::filesystem::path& filePath)
     {
         std::ifstream file(filePath, std::ios::in | std::ios::binary);
@@ -104,7 +105,7 @@ namespace EOS
 
     EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription)
     {
-        //ktxTexture1* texture = nullptr;
+        ktxTexture1* texture = nullptr;
         uint8_t* pixels = nullptr;
         int originalWidth = 0;
         int originalHeight = 0;
@@ -112,44 +113,43 @@ namespace EOS
         //Check if texture is already stored in the cache if so load in the ktx instead of the other file.
         const std::filesystem::path cachedFilePath = fmt::format(".cache/{}", textureLoadingDescription.filePath.filename().replace_extension(".ktx").string());
         std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-        //if (file.is_open())
-        //{
-        //    file.close();
-        //    EOS::Logger->debug("{} was already compressed and cached", textureLoadingDescription.filePath.filename().string());
-        //    CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
-        //}
-        //else
-        //{
+
+        if (file.is_open())
+        {
+            file.close();
+            EOS::Logger->debug("{} was already compressed and cached. Loading image from cache", textureLoadingDescription.filePath.filename().string());
+            CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
+        }
+        else
+        {
+            //Load raw pixel data
             constexpr int desiredChannels = 4;
             int channels;
             pixels = stbi_load(textureLoadingDescription.filePath.string().c_str(), &originalWidth, &originalHeight, &channels, desiredChannels);
             CHECK(pixels, "Could not load image at location: {}", textureLoadingDescription.filePath.string().c_str());
             EOS::Logger->debug({"Loading image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
-            size_t imageSize = originalWidth * originalHeight * 4;
-            //texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
-            //ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
 
-        //}
+            // Compress the texture and cache it
+            texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
+            ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
+        }
 
-
-        //std::vector<uint8_t> textureCopy(texture->dataSize);
-        //memcpy(textureCopy.data(), texture->pData, texture->dataSize);
-        
+        //Upload the texture to the GPU
         Holder<EOS::TextureHandle> loadedTexture = textureLoadingDescription.context->CreateTexture(
         {
-            .Type                   = EOS::ImageType::Image_2D,
-            .TextureFormat          = EOS::Format::RGBA_UN8,
-            .TextureDimensions      = {static_cast<uint32_t>(originalWidth), static_cast<uint32_t>(originalHeight)},
-            .NumberOfMipLevels      = 1,
-            .Usage                  = EOS::TextureUsageFlags::Sampled,
-            .Data                   = pixels,
+            .Type                   = ImageType::Image_2D,
+            .TextureFormat          = CompressionToFormat(textureLoadingDescription.compression),
+            .TextureDimensions      = {texture->baseWidth, texture->baseHeight},
+            .NumberOfMipLevels      = texture->numLevels,
+            .Usage                  = Sampled,
+            .Data                   = texture->pData,
             .DataNumberOfMipLevels  = 1,
             .DebugName              = cachedFilePath.string().c_str(),
         });
 
-        
-        //ktxTexture_Destroy(ktxTexture(texture));
+        ktxTexture_Destroy(ktxTexture(texture));
         stbi_image_free(pixels);
+
         return loadedTexture;
     }
 
@@ -194,30 +194,10 @@ namespace EOS
         ktx_transcode_fmt_e compressionMethod;
         switch (compression)
         {
-            case ETC1:
-                compressionMethod = KTX_TTF_ETC1_RGB;
-                desiredFormat = VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK; // ETC1 uses ETC2 format
-                glInternalFormat = 0x8D64; // GL_COMPRESSED_RGB8_ETC2
-                break;
             case ETC2:
                 compressionMethod = KTX_TTF_ETC2_RGBA;
                 desiredFormat = VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK; // Fixed to include alpha
                 glInternalFormat = 0x8D68; // GL_COMPRESSED_RGBA8_ETC2_EAC
-                break;
-            case BC1:
-                compressionMethod = KTX_TTF_BC1_RGB;
-                desiredFormat = VK_FORMAT_BC1_RGB_UNORM_BLOCK;
-                glInternalFormat = 0x83F1; // GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
-                break;
-            case BC3:
-                compressionMethod = KTX_TTF_BC3_RGBA;
-                desiredFormat = VK_FORMAT_BC3_UNORM_BLOCK;
-                glInternalFormat = 0x83F3; // GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
-                break;
-            case BC4:
-                compressionMethod = KTX_TTF_BC4_R;
-                desiredFormat = VK_FORMAT_BC4_UNORM_BLOCK;
-                glInternalFormat = 0x8DBB; // GL_COMPRESSED_RED_RGTC1
                 break;
             case BC5:
                 compressionMethod = KTX_TTF_BC5_RG;
@@ -228,11 +208,6 @@ namespace EOS
                 compressionMethod = KTX_TTF_BC7_RGBA;
                 desiredFormat = VK_FORMAT_BC7_UNORM_BLOCK;
                 glInternalFormat = 0x8E8C; // GL_COMPRESSED_RGBA_BPTC_UNORM
-                break;
-            case ASTC:
-                compressionMethod = KTX_TTF_ASTC_4x4_RGBA;
-                desiredFormat = VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
-                glInternalFormat = 0x93B0; // GL_COMPRESSED_RGBA_ASTC_4x4_KHR
                 break;
             case NoCompression:
             default:
@@ -278,6 +253,7 @@ namespace EOS
             size_t imageSize = ktxTexture_GetImageSize(ktxTexture(textureKTX1), i);
             memcpy(ktxTexture_GetData(ktxTexture(textureKTX1)) + offset1, ktxTexture_GetData(ktxTexture(textureKTX2)) + offset2, imageSize);
         }
+
         ktxTexture_Destroy(ktxTexture(textureKTX2));
         return textureKTX1;
     }

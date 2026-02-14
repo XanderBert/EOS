@@ -144,6 +144,7 @@ namespace VkContext
         TextureFormatProperties { .Format = EOS::Format::BGRA_SRGB8, .BytesPerBlock = 4 },
         TextureFormatProperties { .Format = EOS::Format::ETC2_RGB8, .BytesPerBlock = 8,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
         TextureFormatProperties { .Format = EOS::Format::ETC2_SRGB8, .BytesPerBlock = 8,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
+        TextureFormatProperties { .Format = EOS::Format::BC5_RG, .BytesPerBlock = 16,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
         TextureFormatProperties { .Format = EOS::Format::BC7_RGBA, .BytesPerBlock = 16,.BlockWidth = 4, .BlockHeight = 4, .Compressed = true },
         TextureFormatProperties { .Format = EOS::Format::Z_UN16, .BytesPerBlock = 2,.Depth = true },
         TextureFormatProperties { .Format = EOS::Format::Z_UN24, .BytesPerBlock = 3,.Depth = true },

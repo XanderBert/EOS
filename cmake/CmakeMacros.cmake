@@ -10,7 +10,6 @@
     endforeach()
 endmacro()
 
-
 macro(CREATE_APP name)
     set(PROJECT_NAME ${name})
     project(${PROJECT_NAME} CXX)
@@ -60,4 +59,25 @@ macro(CREATE_APP name)
                 COMMENT "Copying shader file: ${SHADER_NAME}"
         )
     endforeach()
+endmacro()
+
+macro(DEFINE_PLATFORM)
+    #Setup Platform Defines
+    if(WIN32)
+        message(STATUS "Windows session detected")
+        target_compile_definitions(EOS PRIVATE NOMINMAX)
+        target_compile_definitions(EOS PRIVATE WIN32_LEAN_AND_MEAN)
+        target_compile_definitions(EOS PRIVATE EOS_PLATFORM_WINDOWS)
+        set(USE_WINDOWS TRUE)
+    elseif (UNIX AND NOT APPLE)
+        if (DEFINED ENV{WAYLAND_DISPLAY})
+            message(STATUS "Wayland session detected")
+            target_compile_definitions(EOS PRIVATE EOS_PLATFORM_WAYLAND)
+            set(USE_WAYLAND TRUE)
+        else ()
+            message(STATUS "X11 session detected")
+            target_compile_definitions(EOS PRIVATE EOS_PLATFORM_X11)
+            set(USE_X11 TRUE)
+        endif ()
+    endif ()
 endmacro()
