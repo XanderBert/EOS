@@ -94,7 +94,7 @@ namespace EOS
         std::vector<uint32_t> Spirv;
         EOS::ShaderStage ShaderStage;
         uint32_t PushConstantSize;
-        const char* DebugName;
+        std::string DebugName;
     };
 
     struct VertexInputData final

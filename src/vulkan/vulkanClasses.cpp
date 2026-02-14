@@ -2070,7 +2070,7 @@ EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS
     VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &vkShaderModule);)
     CHECK(vkShaderModule != VK_NULL_HANDLE, "Failed to create shader module from ShaderInfo");
 
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(vkShaderModule), shaderInfo.DebugName));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(vkShaderModule), shaderInfo.DebugName.c_str()));
 
     VulkanShaderModuleState state
     {

@@ -79,9 +79,9 @@ namespace EOS
             HandleEntryPoint(outShaderInfo[i], module, shaderCompilationDescription.Name, i);
 
             // Write the SPIR-V to disk if requested
-            if (shaderCompilationDescription.WriteToDisk)
+            if (shaderCompilationDescription.Cache)
             {
-                WriteShaderToDisk(shaderCompilationDescription, outShaderInfo[i]);
+                CacheShader(shaderCompilationDescription, outShaderInfo[i]);
             }
         }
     }
@@ -166,29 +166,27 @@ namespace EOS
 
     EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const std::unique_ptr<EOS::ShaderCompiler>& shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
     {
-        // First we check if the coresponding shaderfile and all of its entry points have been compiled yet,
-        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderCompiler::ShaderStageToString(shaderStage),".spirv");
+        // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
+        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderCompiler::ShaderStageToString(shaderStage), ShaderCompiler::ShaderFileFormat);
 
         std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
         if (file.is_open())
         {
             file.close();
-            EOS::Logger->info("{} was already compiled and cached", fileName);
-            //TODO: return the binary
+            EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
+
+            ShaderInfo shaderInfo{};
+
+            //TODO: Add Cache invalidation
+            shaderCompiler->LoadShaderFromCache(cachedFilePath, shaderInfo);
+            return context->CreateShaderModule(shaderInfo);
         }
 
-        //Compile and write to disk
+        //Compile all shaders in the file and cache if needed
+        EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
         std::vector<ShaderInfo> shaderInfos{};
-
-
-        // TODO: shaderinfo can be concidered as POD
-        // What if we wrote our shaderInfo to our own file together with the .spirv
-        // Then it could be loaded in and shaderInfo could be red from that file.
-        // Then we also don't need to pass a ref to a vector<ShaderInfo> it can just be written? or why would we, we can stil search for it in the vector
         shaderCompiler->CompileShader({fileName}, shaderInfos);
 
-        // We could already return the correct shaderinfo instead of filling up a vector,
-        // The vector doesn't make sense because we store the data in the file and only need 1.
         for (const auto& shaderInfo : shaderInfos)
         {
             if (shaderInfo.ShaderStage == shaderStage)
@@ -197,11 +195,11 @@ namespace EOS
             }
         }
 
-
-        //TODO: Always return sth;
+        CHECK(false, "No Shader has been loaded or compiled!");
+        return{};
     }
 
-    void ShaderCompiler::WriteShaderToDisk(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const
+    void ShaderCompiler::CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const
     {
         std::string baseName = shaderCompilationDescription.Name;
 
@@ -213,20 +211,42 @@ namespace EOS
         }
 
         // Construct the full output path
-        //TODO: this will write it to a .cache folder in the shader folder, i don't know if this is what i want
         std::filesystem::path outputPath = ShaderFolder;
         EOS::ShaderStage shaderStage = shaderInfo.ShaderStage;
-        outputPath.append(".cache").append(baseName + ShaderStageToString(shaderStage) + ".spirv"); //will become .cache/ShaderNameShaderStage.spirv
+        outputPath.append(".cache").append(baseName + ShaderStageToString(shaderStage) + ShaderFileFormat); //will become .cache/ShaderNameShaderStage.ShaderFileFormat
 
 
-        // create a std::string that contains the raw binary data from outShaderInfo.spirv.
-        const char* rawDataBytes = reinterpret_cast<const char*>(shaderInfo.Spirv.data());
-        size_t rawDataSizeBytes = shaderInfo.Spirv.size() * sizeof(uint32_t);
-        std::string contentToWrite(rawDataBytes, rawDataSizeBytes);
+        //Write Binary
+        std::ofstream file(outputPath, std::ios::binary);
 
+        CachedShaderHeader header;
+        header.stage = shaderStage;
+        header.pushConstantSize = shaderInfo.PushConstantSize;
+        header.debugNameLength = shaderInfo.DebugName.length();
+        header.spirvSize = shaderInfo.Spirv.size() * sizeof(uint32_t);
 
-        //Write to disk
-        EOS::WriteFile(outputPath, contentToWrite);
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        file.write(shaderInfo.DebugName.c_str(), header.debugNameLength);
+        file.write(reinterpret_cast<const char*>(shaderInfo.Spirv.data()), header.spirvSize);
+    }
+
+    void ShaderCompiler::LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo)
+    {
+        std::ifstream file(path, std::ios::binary);
+        CHECK(file, "Could not find cached shader file: {}", path.c_str());
+
+        CachedShaderHeader header;
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        CHECK(header.checksum == EOS_SHADER_CHECKSUM,"Loaded shader cache: {}, got corrupted!", path.c_str());
+
+        outInfo.ShaderStage = header.stage;
+        outInfo.PushConstantSize = header.pushConstantSize;
+
+        outInfo.DebugName.resize(header.debugNameLength);
+        file.read(outInfo.DebugName.data(), header.debugNameLength);
+
+        outInfo.Spirv.resize(header.spirvSize / sizeof(uint32_t));
+        file.read(reinterpret_cast<char*>(outInfo.Spirv.data()), header.spirvSize);
     }
 
     void ShaderCompiler::HandleEntryPoint(ShaderInfo& outShaderInfo, IModule* module, const char* shaderName, SlangInt32 entryPointIndex)
@@ -240,7 +260,7 @@ namespace EOS
         Session->createCompositeComponentType(components, 2, program.writeRef());
 
         // resolve all cross-module references
-        // also used to resolve link time specializaions (https://shader-slang.org/slang/user-guide/link-time-specialization)
+        // also used to resolve link time specializations (https://shader-slang.org/slang/user-guide/link-time-specialization)
         Slang::ComPtr<IComponentType> linkedProgram;
         Slang::ComPtr<ISlangBlob> diagnosticBlob;
         program->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());

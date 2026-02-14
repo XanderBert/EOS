@@ -11,23 +11,35 @@ namespace EOS
     struct ShaderCompilationDescription final
     {
         const char* Name;
-        bool WriteToDisk = true;
+        bool Cache = true;
     };
 
-    class ShaderCompiler
+    struct CachedShaderHeader final
+    {
+        uint32_t checksum = EOS_SHADER_CHECKSUM;
+        uint32_t version = 1;
+        ShaderStage stage;
+        uint32_t pushConstantSize;
+        uint32_t debugNameLength;
+        uint32_t spirvSize;
+    };
+
+    class ShaderCompiler final
     {
     public:
         explicit ShaderCompiler(const std::filesystem::path& shaderFolder);
         DELETE_COPY_MOVE(ShaderCompiler);
         
         void CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo);
+        static void LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo);
 
         static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
-
+        static inline const char* ShaderFileFormat = ".EOS";
     private:
         static EOS::ShaderStage ToShaderStage(SlangStage slangStage);
 
-        void WriteShaderToDisk(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const;
+        void CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& info) const;
+
         void HandleEntryPoint(ShaderInfo& outShaderInfo, slang::IModule* module, const char* shaderName, SlangInt32 entryPointIndex);
 
         Slang::ComPtr<slang::IGlobalSession> GlobalSession;
