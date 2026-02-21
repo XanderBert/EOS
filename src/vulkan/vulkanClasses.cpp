@@ -384,6 +384,65 @@ void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
     vkCmdEndDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
 }
 
+void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle buffer, size_t size, const void* data, size_t bufferOffset)
+{
+    CHECK(buffer.Valid(), "The buffer is not valid");
+    CHECK(data, "No data was provided for the buffer");
+    CHECK(size && size <= 65536, "No size was provided for the data or the data is too big");
+    CHECK(size % 4 == 0, "Size is not a multiple of 4");
+    CHECK(bufferOffset % 4 == 0, "Offset is not a multiple of 4");
+
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    CHECK(vulkanCommandBuffer, "The commandBuffer is not valid");
+
+    VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
+    VulkanBuffer* buf = vkContext->BufferPool.Get(buffer);
+
+    VkPipelineStageFlagBits2 srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    VkPipelineStageFlagBits2 dstStage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+
+    VkBufferMemoryBarrier2 barrier
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .pNext = nullptr,
+        .srcStageMask   = srcStage,
+        .srcAccessMask  = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask   = dstStage,
+        .dstAccessMask  = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buf->VulkanVkBuffer,
+        .offset = 0,
+        .size = VK_WHOLE_SIZE,
+
+    };
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT)  barrier.dstAccessMask |= VK_ACCESS_2_INDEX_READ_BIT;
+
+    const VkDependencyInfoKHR dependencyInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR,
+        .pNext = nullptr,
+        .dependencyFlags = 0,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &barrier,
+    };
+
+    vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
+    vkCmdUpdateBuffer(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, buf->VulkanVkBuffer, bufferOffset, size, data);
+
+    srcStage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    dstStage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)  dstStage |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)  dstStage |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.srcStageMask = srcStage;
+    barrier.dstStageMask = dstStage;
+    if (dstStage & VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT) barrier.dstAccessMask |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT)  barrier.dstAccessMask |= VK_ACCESS_2_INDEX_READ_BIT;
+    vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
+}
+
 void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
 {
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
@@ -2671,6 +2730,15 @@ void VulkanContext::Upload(EOS::BufferHandle handle, const void *data, size_t si
     CHECK(size, "Data size should be non-zero");
 
     VulkanStagingBuffer->BufferSubData(handle, offset, size, data);
+}
+
+unsigned long VulkanContext::GetGPUAddress(EOS::BufferHandle handle, size_t offset) const
+{
+    CHECK((offset & 7) == 0, "Buffer offset must be a multiple of 8");
+    const VulkanBuffer* buf = BufferPool.Get(handle);
+    CHECK(buf && buf->VulkanDeviceAddress, "The buffer or the Device Address is not valid");
+
+    return buf ? static_cast<uint64_t>(buf->VulkanDeviceAddress) + offset : 0u;
 }
 
 void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data)

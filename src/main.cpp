@@ -14,16 +14,27 @@
 #include "glm/gtc/quaternion.hpp"
 #include "glm/gtx/transform.hpp"
 
-struct Vertex
+struct Vertex final
 {
     glm::vec3 position;
+    glm::vec3 normal;
     glm::vec2 uv;
 };
 
-void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, EOS::Holder<EOS::TextureHandle>& albedoHandle, EOS::IContext* context)
+struct TextureHandles final
 {
-    const aiScene* scene = aiImportFile(modelPath.string().c_str(), aiProcess_Triangulate);
-    CHECK(scene && scene->HasMeshes(), "Could not load mesh");
+    EOS::Holder<EOS::TextureHandle> albedo;
+    EOS::Holder<EOS::TextureHandle> normal;
+    EOS::Holder<EOS::TextureHandle> metallicRoughness;
+};
+
+void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, TextureHandles& handles , EOS::IContext* context)
+{
+    const aiScene* scene = aiImportFile(
+       modelPath.string().c_str(),
+       aiProcess_Triangulate
+   );
+    CHECK(scene && scene->HasMeshes(), "Could not load mesh: {}", modelPath.c_str());
 
     const aiMesh* mesh = scene->mMeshes[0];
 
@@ -36,7 +47,9 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vert
     for (unsigned int i{}; i != mesh->mNumVertices; ++i)
     {
         const aiVector3D v = mesh->mVertices[i];
-        vertices.emplace_back(glm::vec3(v.x, v.y, v.z) ,glm::vec2(mesh->mTextureCoords[0][i].x, 1 - mesh->mTextureCoords[0][i].y));
+        const aiVector3D uv = mesh->mTextureCoords[0][i];
+        const aiVector3D n = mesh->mNormals[i];
+        vertices.emplace_back(glm::vec3(v.x, v.y, v.z), glm::vec3(n.x, n.y, n.z),glm::vec2(uv.x, 1 - uv.y));
     }
 
     for (unsigned int i{}; i != mesh->mNumFaces; ++i)
@@ -51,34 +64,41 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vert
     if (scene->mNumMaterials > 0 && mesh->mMaterialIndex < scene->mNumMaterials)
     {
         const aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-       
-        if (material->GetTextureCount(aiTextureType_DIFFUSE) > 0)
-        {
-            aiString texturePath;
-            aiReturn result = material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath);
-            
-            if (result == aiReturn_SUCCESS)
-            {
 
-                
-                // Convert relative path to absolute if needed
-                std::filesystem::path fullTexturePath = modelPath.parent_path() / texturePath.C_Str();
-                
-                // Load the texture
-                EOS::TextureLoadingDescription albedoDescription
+        //Lambda for texture extraction
+        auto loadTextureOfType = [&](aiTextureType textureType) -> EOS::Holder<EOS::TextureHandle>
+        {
+            if (material->GetTextureCount(textureType) > 0)
+            {
+                aiString texturePath;
+                aiReturn result = material->GetTexture(textureType, 0, &texturePath);
+
+                if (result == aiReturn_SUCCESS)
                 {
-                    .filePath = fullTexturePath,
-                    .compression = EOS::Compression::BC7,
-                    .context = context,
-                };
-                
-                albedoHandle = EOS::LoadTexture(albedoDescription);
-                //EOS::Logger->warn("Diffuse texture path: {} ,Loaded with ID: {}", texturePath.C_Str(), albedoHandle.Index());
+                    // Convert relative path to absolute if needed
+                    std::filesystem::path fullTexturePath = modelPath.parent_path() / texturePath.C_Str();
+
+                    // Load the texture
+                    EOS::TextureLoadingDescription textureDescription
+                    {
+                        .filePath = fullTexturePath,
+                        .compression = textureType == aiTextureType_NORMALS ? EOS::Compression::BC5 : EOS::Compression::BC7,
+                        .context = context,
+                    };
+
+                    return EOS::LoadTexture(textureDescription);
+                }
             }
-        }
+
+            CHECK(false, "Could not find texture");
+            return {};
+        };
+
+        handles.albedo = loadTextureOfType(aiTextureType_DIFFUSE);
+        handles.normal = loadTextureOfType(aiTextureType_NORMALS);
+        handles.metallicRoughness = loadTextureOfType(aiTextureType_GLTF_METALLIC_ROUGHNESS);
     }
 }
-
 
 int main()
 {
@@ -95,14 +115,14 @@ int main()
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context, shaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context, shaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
 
-
-
+    //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vdesc
     {
         .Attributes =
     {
             { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) },
-            { .Location = 1, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) }
+            { .Location = 1, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, normal) },
+            { .Location = 2, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) }
         },
 
         .InputBindings =
@@ -110,7 +130,6 @@ int main()
             { .Stride = sizeof(Vertex) }
         }
     };
-
 
     EOS::Holder<EOS::TextureHandle> depthTexture = context->CreateTexture(
 {
@@ -142,12 +161,10 @@ int main()
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
 
-
     std::vector<uint32_t> indices;
     std::vector<Vertex> vertices;
-    EOS::Holder<EOS::TextureHandle> albedo;
-    LoadModel("../data/rubber_duck/scene.gltf", vertices, indices,albedo, context.get());
-
+    TextureHandles handles;
+    LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", vertices, indices,handles, context.get());
     EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
     {
       .Usage     = EOS::BufferUsageFlags::Vertex,
@@ -156,7 +173,6 @@ int main()
       .Data      = vertices.data(),
       .DebugName = "Buffer: vertex"
       });
-
     EOS::Holder<EOS::BufferHandle> indexBuffer = context->CreateBuffer(
     {
         .Usage     = EOS::BufferUsageFlags::Index,
@@ -164,6 +180,23 @@ int main()
         .Size      = sizeof(uint32_t) * indices.size(),
         .Data      = indices.data(),
         .DebugName = "Buffer: index"
+    });
+
+    struct PerFrameData final
+    {
+        glm::mat4 model;
+        glm::mat4 mvp;
+        uint32_t albedoID;
+        uint32_t normalID;
+        uint32_t metallicRoughnessID;
+    };
+
+    EOS::Holder<EOS::BufferHandle> perFrameBuffer = context->CreateBuffer(
+{
+        .Usage     = EOS::BufferUsageFlags::StorageFlag,
+        .Storage   = EOS::StorageType::HostVisible,
+        .Size      = sizeof(PerFrameData),
+        .DebugName = "perFrameBuffer",
     });
 
     while (!window->ShouldClose())
@@ -177,20 +210,20 @@ int main()
 
         using glm::mat4;
         using glm::vec3;
-        const mat4 m = glm::rotate(mat4(1.0f), glm::radians(-90.0f), vec3(1, 0, 0));
-        const mat4 v = glm::rotate(glm::translate(mat4(1.0f), vec3(0.0f, -0.5f, -1.5f)), static_cast<float>(glfwGetTime()), vec3(0.0f, 1.0f, 0.0f));
+        constexpr vec3 position {0.0f, 0.0f, -3.5f};
+        const mat4 m = glm::rotate(mat4(1.0f), glm::radians(90.0f), vec3(1, 0, 0));
+        const mat4 v = glm::rotate(glm::translate(mat4(1.0f), position), static_cast<float>(glfwGetTime()), vec3(0.0f, 1.0f, 0.0f));
         const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);
         const glm::mat4 mvp = p * v * m;
 
-        const struct PerFrameData final
+
+        const PerFrameData perFrameData
         {
-            glm::mat4 mvp;
-            uint32_t textureID;
-        }
-        pc
-        {
+            .model = m,
             .mvp = mvp,
-            .textureID = albedo.Index(),
+            .albedoID = handles.albedo.Index(),
+            .normalID = handles.normal.Index(),
+            .metallicRoughnessID = handles.metallicRoughness.Index(),
         };
 
 
@@ -221,12 +254,22 @@ int main()
                 { depthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
             });
 
+        cmdUpdateBuffer(cmdBuffer, perFrameBuffer, perFrameData);
         cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
         {
-            cmdPushMarker(cmdBuffer, "Render Duck", 0xff0000ff);
+            cmdPushMarker(cmdBuffer, "Damaged Helmet", 0xff0000ff);
             cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
             cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
+
+            struct PerFrameData
+            {
+                uint64_t draw;
+            }pc
+            {
+                .draw = context->GetGPUAddress(perFrameBuffer)
+            };
+
             cmdPushConstants(cmdBuffer, pc);
             cmdSetDepthState(cmdBuffer, depthState);
             cmdDrawIndexed(cmdBuffer, indices.size());

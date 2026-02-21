@@ -29,15 +29,17 @@ namespace EOS
     public:
         explicit ShaderCompiler(const std::filesystem::path& shaderFolder);
         DELETE_COPY_MOVE(ShaderCompiler);
+
+        ShaderInfo LoadShader(const char* fileName, EOS::ShaderStage shaderStage, bool invalidate = false);
+        static inline const char* ShaderFileFormat = ".EOS";
         
+    private:
+
+        static EOS::ShaderStage ToShaderStage(SlangStage slangStage);
+        static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
+
         void CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo);
         static void LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo);
-
-        static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
-        static inline const char* ShaderFileFormat = ".EOS";
-    private:
-        static EOS::ShaderStage ToShaderStage(SlangStage slangStage);
-
         void CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& info) const;
 
         void HandleEntryPoint(ShaderInfo& outShaderInfo, slang::IModule* module, const char* shaderName, SlangInt32 entryPointIndex);

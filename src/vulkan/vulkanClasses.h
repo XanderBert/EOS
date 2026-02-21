@@ -421,6 +421,7 @@ public:
     void Destroy(EOS::SamplerHandle handle) override;
 
     void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
+    unsigned long GetGPUAddress(EOS::BufferHandle handle, size_t offset) const override;
     void Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data) override;
 
     //Deferred Tasks

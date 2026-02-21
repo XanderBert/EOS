@@ -497,9 +497,16 @@ namespace EOS
         * @param handle The handle of the buffer we want to upload to.
         * @param data The data we want to upload.
         * @param size The size of the data we want to upload.
-        * @param offset The offset it needs to have inside of the buffer.
+        * @param offset The offset it needs to have inside the buffer.
         */
         virtual void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) = 0;
+
+        /**
+         *
+         * @param handle The handle of the buffer that has been uploaded.
+         * @param offset The offset it needs to have inside the buffer.
+         */
+        virtual unsigned long GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
 
         /**
         * @brief Handles the uploading of textures to the GPU
@@ -737,6 +744,30 @@ void cmdPushMarker(const EOS::ICommandBuffer& commandBuffer, const char* label, 
  * @param commandBuffer  The commandbuffer we want to record into.
  */
 void cmdPopMarker(const EOS::ICommandBuffer& commandBuffer);
+
+
+/**
+ *
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param buffer The handle to the buffer we want to update
+ * @param size The size of data we want to update
+ * @param data The new data
+ * @param bufferOffset The offset inside the buffer from where you want to start the update
+ */
+void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle buffer, size_t size, const void* data, size_t bufferOffset);
+
+/**
+ *
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param buffer The handle to the buffer we want to update
+ * @param data The new data
+ * @param bufferOffset The offset inside the buffer from where you want to start the update
+ */
+template<typename Struct>
+void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle buffer, const Struct& data, size_t bufferOffset = 0)
+{
+    cmdUpdateBuffer(commandBuffer, buffer, sizeof(Struct), &data, bufferOffset);
+}
 
 
 

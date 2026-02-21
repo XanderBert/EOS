@@ -3,6 +3,7 @@
 
 #include "logger.h"
 #include "utils.h"
+#include "spdlog/fmt/bundled/os.h"
 
 namespace EOS
 {
@@ -125,6 +126,43 @@ namespace EOS
         }
     }
 
+    ShaderInfo ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, bool invalidate)
+    {
+        if (!invalidate)
+        {
+            // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
+            const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderStageToString(shaderStage), ShaderFileFormat);
+            std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
+            if (file.is_open())
+            {
+                file.close();
+                EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
+
+                ShaderInfo shaderInfo{};
+                LoadShaderFromCache(cachedFilePath, shaderInfo);
+
+                return shaderInfo;
+            }
+        }
+
+
+        //Compile all shaders in the file and cache if needed
+        EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
+        std::vector<ShaderInfo> shaderInfos{};
+        CompileShader({fileName}, shaderInfos);
+
+        for (const auto& shaderInfo : shaderInfos)
+        {
+            if(shaderInfo.ShaderStage == shaderStage)
+            {
+                return shaderInfo;
+            }
+        }
+
+        CHECK(false, "Could not Load: {} - {}", fileName, ShaderStageToString(shaderStage));
+        return {};
+    }
+
     std::string ShaderCompiler::ShaderStageToString(EOS::ShaderStage shaderStage)
     {
         switch (shaderStage)
@@ -166,37 +204,8 @@ namespace EOS
 
     EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const std::unique_ptr<EOS::ShaderCompiler>& shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
     {
-        // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
-        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderCompiler::ShaderStageToString(shaderStage), ShaderCompiler::ShaderFileFormat);
-
-        std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-        if (file.is_open())
-        {
-            file.close();
-            EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
-
-            ShaderInfo shaderInfo{};
-
-            //TODO: Add Cache invalidation
-            shaderCompiler->LoadShaderFromCache(cachedFilePath, shaderInfo);
-            return context->CreateShaderModule(shaderInfo);
-        }
-
-        //Compile all shaders in the file and cache if needed
-        EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
-        std::vector<ShaderInfo> shaderInfos{};
-        shaderCompiler->CompileShader({fileName}, shaderInfos);
-
-        for (const auto& shaderInfo : shaderInfos)
-        {
-            if (shaderInfo.ShaderStage == shaderStage)
-            {
-                return context->CreateShaderModule(shaderInfo);
-            }
-        }
-
-        CHECK(false, "No Shader has been loaded or compiled!");
-        return{};
+        const ShaderInfo info = shaderCompiler->LoadShader(fileName, shaderStage);
+        return context->CreateShaderModule(info);
     }
 
     void ShaderCompiler::CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const
