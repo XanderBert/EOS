@@ -16,15 +16,12 @@ Eos aims to be:
 > [!NOTE] 
 > These dependencies are used by EOS and are fetched automatically by CMake during the configuration step using FetchContent
 >
-
  
 - [GLFW](https://github.com/glfw/glfw)
 - [VOLK](https://github.com/zeux/volk)
 - [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [SPDLOG](https://github.com/gabime/spdlog)
 - [SLANG](https://github.com/shader-slang/slang)
-- [ASSIMP](https://github.com/assimp/assimp)
-- [GLM](https://github.com/g-truc/glm)
 
 
 # Building
@@ -51,11 +48,6 @@ This project is built using CMake and Ninja.
 2.  **Run the appropriate build script:**
     * Linux: `build.sh` script in the root directory of the project.
     * Windows: `build.bat` script in the root directory of the project.
-
-
-
-# Future
-Once this projects ages enough it will be converted to a separate Rendering library, and main loop will be moved to a separate project.
 
 
 
