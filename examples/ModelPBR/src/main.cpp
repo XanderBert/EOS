@@ -34,7 +34,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vert
        modelPath.string().c_str(),
        aiProcess_Triangulate
    );
-    CHECK(scene && scene->HasMeshes(), "Could not load mesh: {}", modelPath.c_str());
+    CHECK(scene && scene->HasMeshes(), "Could not load mesh: {}", modelPath.string());
 
     const aiMesh* mesh = scene->mMeshes[0];
 

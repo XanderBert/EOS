@@ -2,6 +2,8 @@ name: CMake Build Test
 on: [push, pull_request]
 
 jobs:
+  # ─── Reusable setup steps are handled via composite or just duplicated minimally ───
+
   linux-lib:
     name: Linux Lib (${{ matrix.display_server }})
     runs-on: ubuntu-latest
@@ -37,7 +39,6 @@ jobs:
         run: |
           cmake -B build \
             -DEOS_BUILD_EXAMPLES=OFF \
-            -DWAYLAND_DISPLAY=${{ matrix.display_server == 'Wayland' && 'wayland-0' || '' }} \
             -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }} \
             -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }} \
             -DCMAKE_BUILD_TYPE=Release
@@ -79,7 +80,6 @@ jobs:
         run: |
           cmake -B build \
             -DEOS_BUILD_EXAMPLES=ON \
-            -DWAYLAND_DISPLAY=${{ matrix.display_server == 'Wayland' && 'wayland-0' || '' }} \
             -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }} \
             -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }} \
             -DCMAKE_BUILD_TYPE=Release
