@@ -5,14 +5,15 @@ include(FetchContent)
 include(cmake/FetchMacros.cmake)
 include(cmake/CmakeMacros.cmake)
 
-CREATE_APP(EOS)
+CREATE_LIB(EOS)
 DEFINE_PLATFORM()
 
 set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
 
-set(EOS_VULKAN TRUE)        #For now we only use the Vulkan API
-set(EOS_USE_TRACY TRUE)     #For now we will use tracy
+set(EOS_VULKAN TRUE)         #For now we only use the Vulkan API
+set(EOS_USE_TRACY FALSE)
+set(EOS_BUILD_EXAMPLES TRUE)
 
 # Set Debug or Release Define
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -63,9 +64,7 @@ endif ()
 
 FETCH_GLFW(${EOS_DEPENDENCIES_DIR})
 FETCH_SPDLOG(${EOS_DEPENDENCIES_DIR})
-FETCH_ASSIMP(${EOS_DEPENDENCIES_DIR})
 FETCH_SLANG()
-FETCH_GLM(${EOS_DEPENDENCIES_DIR})
 FETCH_STB(${EOS_DEPENDENCIES_DIR})
 FETCH_KTX(${EOS_DEPENDENCIES_DIR})
 
@@ -80,3 +79,7 @@ if(EOS_USE_TRACY)
     target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
     FETCH_TRACY(${EOS_DEPENDENCIES_DIR})
 endif()
+
+if(EOS_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif ()

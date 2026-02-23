@@ -242,11 +242,11 @@ namespace EOS
     void ShaderCompiler::LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo)
     {
         std::ifstream file(path, std::ios::binary);
-        CHECK(file, "Could not find cached shader file: {}", path.c_str());
+        CHECK(file, "Could not find cached shader file: {}", path.string());
 
         CachedShaderHeader header;
         file.read(reinterpret_cast<char*>(&header), sizeof(header));
-        CHECK(header.checksum == EOS_SHADER_CHECKSUM,"Loaded shader cache: {}, got corrupted!", path.c_str());
+        CHECK(header.checksum == EOS_SHADER_CHECKSUM,"Loaded shader cache: {}, got corrupted!", path.string());
 
         outInfo.ShaderStage = header.stage;
         outInfo.PushConstantSize = header.pushConstantSize;

@@ -2,7 +2,6 @@
     foreach(FILE ${src_files})
         get_filename_component(PARENT_DIR "${FILE}" PATH)
 
-        # skip src or include and changes /'s to \\'s
         set(GROUP "${PARENT_DIR}")
         string(REPLACE "." "\\" GROUP "${GROUP}")
 
@@ -10,9 +9,46 @@
     endforeach()
 endmacro()
 
-macro(CREATE_APP name)
+macro(COPY_SHADERS_TO_BIN targetName shaderFiles)
+    if(UNIX)
+        set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/bin")
+    else()
+        set(SHADER_OUTPUT_DIR "$<TARGET_FILE_DIR:${targetName}>")
+    endif()
+
+    # Unique name per target to avoid clashes between lib and examples
+    set(COPY_TARGET_NAME "CopyShaders_${targetName}")
+
+    set(SHADER_COPY_COMMANDS)
+    foreach(SHADER ${shaderFiles})
+        get_filename_component(SHADER_NAME ${SHADER} NAME)
+        list(APPEND SHADER_COPY_COMMANDS
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SHADER}" "${SHADER_OUTPUT_DIR}/${SHADER_NAME}"
+        )
+    endforeach()
+
+    # Runs on every build, before the target is linked
+    add_custom_target(${COPY_TARGET_NAME} ALL ${SHADER_COPY_COMMANDS})
+    add_dependencies(${targetName} ${COPY_TARGET_NAME})
+endmacro()
+
+macro(SETUP_TARGET_DEFAULTS targetName)
+    set_property(TARGET ${targetName} PROPERTY CXX_STANDARD 20)
+    set_property(TARGET ${targetName} PROPERTY CXX_STANDARD_REQUIRED ON)
+
+    if(MSVC)
+        set_property(TARGET ${targetName} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    endif()
+endmacro()
+
+macro(CREATE_LIB name)
     set(PROJECT_NAME ${name})
     project(${PROJECT_NAME} CXX)
+
+    if(NOT DEFINED LIB_TYPE)
+        set(LIB_TYPE STATIC)
+    endif()
 
     file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false src/*.c??)
     file(GLOB_RECURSE HEADER_FILES LIST_DIRECTORIES false src/*.h)
@@ -22,8 +58,13 @@ macro(CREATE_APP name)
     message(STATUS "HEADER_FILES: ${HEADER_FILES}")
     message(STATUS "SHADER_FILES: ${SHADER_FILES}")
 
-    include_directories(${CMAKE_SOURCE_DIR}/src)
-    add_executable(${PROJECT_NAME} ${SRC_FILES} ${HEADER_FILES} ${SHADER_FILES})
+    add_library(${PROJECT_NAME} ${LIB_TYPE} ${SRC_FILES} ${HEADER_FILES} ${SHADER_FILES})
+
+    target_include_directories(${PROJECT_NAME}
+            PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+            $<INSTALL_INTERFACE:include>
+    )
 
     SETUP_GROUPS("${SRC_FILES}")
     SETUP_GROUPS("${HEADER_FILES}")
@@ -33,51 +74,60 @@ macro(CREATE_APP name)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_RELEASE ${PROJECT_NAME}_Release)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_RELWITHDEBINFO ${PROJECT_NAME}_ReleaseDebInfo)
 
-    # On Linux the binaries are stored in the bin folder
-    if (UNIX)
+    if(UNIX)
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/lib"
+                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/lib"
+        )
+    endif()
+
+    SETUP_TARGET_DEFAULTS(${PROJECT_NAME})
+
+    if(MSVC)
+        set_property(TARGET ${PROJECT_NAME} PROPERTY WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    endif()
+
+    COPY_SHADERS_TO_BIN(${PROJECT_NAME} "${SHADER_FILES}")
+endmacro()
+
+macro(CREATE_EXAMPLE name)
+    set(PROJECT_NAME ${name})
+    project(${PROJECT_NAME} CXX)
+
+    file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false src/*.c??)
+    file(GLOB_RECURSE SHADER_FILES LIST_DIRECTORIES false src/*.slang)
+
+    add_executable(${PROJECT_NAME} ${SRC_FILES})
+
+    target_link_libraries(${PROJECT_NAME} PRIVATE EOS)
+
+    SETUP_GROUPS("${SRC_FILES}")
+    SOURCE_GROUP(shaders FILES "${SHADER_FILES}")
+
+    if(UNIX)
         set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
     endif()
 
-    set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 20)
-    set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
-    set_property(TARGET ${PROJECT_NAME} PROPERTY CMAKE_CXX_EXTENSIONS OFF)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lstdc++")
-
-    if(MSVC)
-        add_definitions(-D_CONSOLE)
-        set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    endif()
-
-    # Copy shaders
-    foreach(SHADER ${SHADER_FILES})
-        get_filename_component(SHADER_NAME ${SHADER} NAME)
-        add_custom_command(
-                TARGET ${PROJECT_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${SHADER}"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${SHADER_NAME}"
-                COMMENT "Copying shader file: ${SHADER_NAME}"
-        )
-    endforeach()
+    SETUP_TARGET_DEFAULTS(${PROJECT_NAME})
+    COPY_SHADERS_TO_BIN(${PROJECT_NAME} "${SHADER_FILES}")
 endmacro()
 
 macro(DEFINE_PLATFORM)
-    #Setup Platform Defines
     if(WIN32)
         message(STATUS "Windows session detected")
         target_compile_definitions(EOS PRIVATE NOMINMAX)
         target_compile_definitions(EOS PRIVATE WIN32_LEAN_AND_MEAN)
-        target_compile_definitions(EOS PRIVATE EOS_PLATFORM_WINDOWS)
+        target_compile_definitions(EOS PUBLIC EOS_PLATFORM_WINDOWS)
         set(USE_WINDOWS TRUE)
-    elseif (UNIX AND NOT APPLE)
-        if (DEFINED ENV{WAYLAND_DISPLAY})
+    elseif(UNIX AND NOT APPLE)
+        if(DEFINED ENV{WAYLAND_DISPLAY})
             message(STATUS "Wayland session detected")
-            target_compile_definitions(EOS PRIVATE EOS_PLATFORM_WAYLAND)
+            target_compile_definitions(EOS PUBLIC EOS_PLATFORM_WAYLAND)
             set(USE_WAYLAND TRUE)
-        else ()
+        else()
             message(STATUS "X11 session detected")
-            target_compile_definitions(EOS PRIVATE EOS_PLATFORM_X11)
+            target_compile_definitions(EOS PUBLIC EOS_PLATFORM_X11)
             set(USE_X11 TRUE)
-        endif ()
-    endif ()
+        endif()
+    endif()
 endmacro()

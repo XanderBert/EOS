@@ -1,7 +1,6 @@
 macro(FETCH_GLFW depsDir)
     set(DEPS_DIR ${depsDir})
 
-    # Fetch GLFW and Setup
     set(GLFW_BUILD_EXAMPLES          OFF CACHE BOOL "")
     set(GLFW_BUILD_TESTS             OFF CACHE BOOL "")
     set(GLFW_BUILD_DOCS              OFF CACHE BOOL "")
@@ -27,7 +26,6 @@ macro(FETCH_GLFW depsDir)
     else ()
         message(FATAL_ERROR "Could not detect OS for GLFW")
     endif ()
-
 
     set(GLFW_ROOT_DIR ${DEPS_DIR}/src/glfw)
     FetchContent_Populate(
@@ -82,29 +80,24 @@ macro(FETCH_SPDLOG depsDir)
             SOURCE_DIR     ${SPDLOG_ROOT_DIR}
     )
     add_subdirectory(${SPDLOG_ROOT_DIR})
-    target_link_libraries(EOS PRIVATE spdlog)
+    target_link_libraries(EOS PUBLIC spdlog)
 endmacro()
 
 macro(FETCH_SLANG)
-    # Set the base path for Slang
     set(SLANG_BASE_PATH "${CMAKE_SOURCE_DIR}/dependencies/binaries/slang")
 
-    # Find the library
     find_library(SLANG_LIBRARY
             NAMES slang libslang slang.lib
             PATHS "${SLANG_BASE_PATH}/lib"
             NO_DEFAULT_PATH
     )
 
-    # Check if library was found
     if(NOT SLANG_LIBRARY)
         message(WARNING "Slang library not found at ${SLANG_BASE_PATH}/lib")
     else()
-
         message(STATUS "Found Slang library: ${SLANG_LIBRARY}")
         target_link_libraries(EOS PRIVATE ${SLANG_LIBRARY})
 
-        # Add include directory if it exists
         if(EXISTS "${SLANG_BASE_PATH}/include")
             include_directories("${SLANG_BASE_PATH}/include")
             message(STATUS "Added Slang include directory: ${SLANG_BASE_PATH}/include")
@@ -114,28 +107,19 @@ macro(FETCH_SLANG)
     endif()
 endmacro()
 
-macro(FETCH_ASSIMP depsDir)
+macro(FETCH_ASSIMP depsDir targetName)
     set(ASSIMP_ROOT_DIR ${depsDir}/src/assimp)
 
-    # Disable tests and tools
     set(ASSIMP_BUILD_TESTS OFF)
     set(ASSIMP_INSTALL_PDB OFF)
     set(ASSIMP_BUILD_ASSIMP_TOOLS OFF)
     set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
-
-    # Disable all exporters
     set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF)
-
-    # Disable all importers by default
     set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF)
-
-    # Enable only GLTF importer
     set(ASSIMP_BUILD_GLTF_IMPORTER ON)
-
-    # Disable samples and other extras
     set(ASSIMP_BUILD_SAMPLES OFF)
     set(ASSIMP_NO_EXPORT ON)
-    set(ASSIMP_BUILD_ZLIB ON)  # GLTF needs zlib for compression
+    set(ASSIMP_BUILD_ZLIB ON)
 
     FetchContent_Populate(
             assimp
@@ -145,23 +129,22 @@ macro(FETCH_ASSIMP depsDir)
             SOURCE_DIR ${ASSIMP_ROOT_DIR}
     )
 
-    add_subdirectory(${ASSIMP_ROOT_DIR})
-    target_link_libraries(EOS PRIVATE assimp::assimp)
+    add_subdirectory(${ASSIMP_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/assimp)
+    target_link_libraries(${targetName} PRIVATE assimp::assimp)
 endmacro()
 
-macro(FETCH_GLM depsDir)
-
+macro(FETCH_GLM depsDir targetName)
     set(GLM_ROOT_DIR ${depsDir}/src/glm)
+
     FetchContent_Populate(
-            assimp
+            glm
             GIT_REPOSITORY https://github.com/g-truc/glm
             GIT_TAG        1.0.1
             SOURCE_DIR     ${GLM_ROOT_DIR}
     )
-    add_subdirectory(${GLM_ROOT_DIR})
-    target_link_libraries(EOS PRIVATE glm::glm)
-    target_compile_definitions(EOS PRIVATE GLM_ENABLE_EXPERIMENTAL)
-
+    add_subdirectory(${GLM_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/glm)
+    target_link_libraries(${targetName} PRIVATE glm::glm)
+    target_compile_definitions(${targetName} PRIVATE GLM_ENABLE_EXPERIMENTAL)
 endmacro()
 
 macro(FETCH_TRACY depsDir)
@@ -191,11 +174,11 @@ endmacro()
 macro(FETCH_KTX depsDir)
     set(KTX_ROOT_DIR ${depsDir}/src/ktx)
     FetchContent_Populate (
-        fetch_ktx
-        GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software
-        GIT_TAG v4.4.2
-        GIT_SHALLOW TRUE
-        SOURCE_DIR     ${KTX_ROOT_DIR}
+            fetch_ktx
+            GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software
+            GIT_TAG v4.4.2
+            GIT_SHALLOW TRUE
+            SOURCE_DIR     ${KTX_ROOT_DIR}
     )
     add_subdirectory(${KTX_ROOT_DIR})
     target_link_libraries(EOS PUBLIC ktx)

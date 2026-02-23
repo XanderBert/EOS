@@ -42,6 +42,7 @@ cmake-build-wsldebug/
 
 #Depandancies source folder -> They are fetched by CMake
 dependencies/src
+examples/dependencies/src
 
 
 # Linux build folder

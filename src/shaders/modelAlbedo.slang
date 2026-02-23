@@ -5,6 +5,7 @@ struct PerFrameData
 {
     float4x4 Model;
     float4x4 MVP;
+    float3 cameraPos;
     MaterialHandles material;
 };
 
@@ -48,9 +49,8 @@ float4 fragmentMain(VSOutput input)
     mat.metallic  = metallic;
     mat.roughness = roughness;
 
-    float3 cameraPos = float3(0, 0, -3.5);
     float3 N = normalize(input.Normal);
-    float3 V = normalize(cameraPos - input.Pos.xyz);
+    float3 V = normalize(frameData.cameraPos - input.Pos.xyz);
 
     // Specular contribution
     // Simple directional light pointing down-right

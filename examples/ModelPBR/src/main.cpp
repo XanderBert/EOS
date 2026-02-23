@@ -59,7 +59,7 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vert
             indices.emplace_back(mesh->mFaces[i].mIndices[j]);
         }
     }
-    
+
     // Extract texture path from material
     if (scene->mNumMaterials > 0 && mesh->mMaterialIndex < scene->mNumMaterials)
     {
@@ -186,6 +186,7 @@ int main()
     {
         glm::mat4 model;
         glm::mat4 mvp;
+        glm::vec3 cameraPos;
         uint32_t albedoID;
         uint32_t normalID;
         uint32_t metallicRoughnessID;
@@ -219,8 +220,9 @@ int main()
 
         const PerFrameData perFrameData
         {
-            .model = m,
+            .model = glm::transpose(glm::inverse(m)),
             .mvp = mvp,
+            .cameraPos = position,
             .albedoID = handles.albedo.Index(),
             .normalID = handles.normal.Index(),
             .metallicRoughnessID = handles.metallicRoughness.Index(),
