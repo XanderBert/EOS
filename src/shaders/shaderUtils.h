@@ -30,7 +30,7 @@ namespace EOS
         explicit ShaderCompiler(const std::filesystem::path& shaderFolder);
         DELETE_COPY_MOVE(ShaderCompiler);
 
-        ShaderInfo LoadShader(const char* fileName, EOS::ShaderStage shaderStage, bool invalidate = false);
+        ShaderInfo LoadShader(const char* fileName, EOS::ShaderStage shaderStage, bool invalidate = true);
         static inline const char* ShaderFileFormat = ".EOS";
         
     private:

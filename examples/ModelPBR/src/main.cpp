@@ -220,9 +220,9 @@ int main()
 
         const PerFrameData perFrameData
         {
-            .model = glm::transpose(glm::inverse(m)),
+            .model = m,
             .mvp = mvp,
-            .cameraPos = position,
+            .cameraPos = glm::vec3(glm::inverse(v) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
             .albedoID = handles.albedo.Index(),
             .normalID = handles.normal.Index(),
             .metallicRoughnessID = handles.metallicRoughness.Index(),

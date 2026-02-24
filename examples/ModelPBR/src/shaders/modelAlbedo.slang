@@ -1,5 +1,29 @@
-import common;
 import pbr;
+import common;
+
+public struct MaterialHandles
+{
+    public uint albedo;
+    public uint normal;
+    public uint metallicRoughness;
+}
+
+
+public struct VSInput
+{
+    public uint vertexID : SV_VertexID;
+    public float3 Pos : POSITION;
+    public float3 Normal;
+    public float2 UV  : TEXCOORD0;
+};
+
+public struct VSOutput
+{
+    public float4 Pos : SV_Position;
+    public float3 WorldPos : TEXCOORD1;
+    public float3 Normal;
+    public float2 UV  : TEXCOORD0;
+};
 
 struct PerFrameData
 {
@@ -23,7 +47,8 @@ VSOutput vertexMain(VSInput input)
 
     VSOutput output;
     output.Pos = mul(float4(input.Pos, 1.0), frameData.MVP);
-    output.Normal = mul((float3x3)frameData.Model, input.Normal);
+    output.WorldPos = mul(float4(input.Pos, 1.0), frameData.Model).xyz;
+    output.Normal = mul(float4(input.Normal, 1.0), frameData.Model).xyz;
     output.UV = input.UV;
 
     return output;
@@ -50,7 +75,7 @@ float4 fragmentMain(VSOutput input)
     mat.roughness = roughness;
 
     float3 N = normalize(input.Normal);
-    float3 V = normalize(frameData.cameraPos - input.Pos.xyz);
+    float3 V = normalize(frameData.cameraPos - input.WorldPos.xyz);
 
     // Specular contribution
     // Simple directional light pointing down-right
@@ -58,7 +83,7 @@ float4 fragmentMain(VSOutput input)
     float3 Lo = BRDF(L, V, N, mat);
 
     // Combine with ambient
-    float3 color = float3(mat.r, mat.g, mat.b) * 0.02;
+    float3 color = float3(mat.r, mat.g, mat.b) * 0.3;
     color += Lo;
 
     // Gamma correct

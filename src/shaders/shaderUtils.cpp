@@ -63,7 +63,7 @@ namespace EOS
         IModule* module = Session->loadModule(shaderCompilationDescription.Name, Diagnostics.writeRef());
         if(Diagnostics)
         {
-            EOS::Logger->warn("Slang Shader Compiler Diagnostics:\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
+            EOS::Logger->error("Slang Shader Compiler Error:\n\n\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
             Diagnostics.setNull();
         }
 

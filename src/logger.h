@@ -63,12 +63,12 @@ namespace EOS
         static inline std::shared_ptr<spdlog::async_logger> LoggerInstance;
     };
 
+
     // Global instance (externally linked)
-    extern Logger Logger;
+    extern EOS::Logger Logger;
 
 
-// This Check is stripped out in Release
-#if defined(EOS_DEBUG)
+
 #define CHECK(assertion, ...)                                                               \
 do                                                                                          \
 {                                                                                           \
@@ -78,21 +78,7 @@ do                                                                              
         assert(false);                                                                      \
     }                                                                                       \
 } while (0)
-#else
-#define CHECK(assertion, ...)                                                               \
-do                                                                                          \
-{                                                                                           \
-if (!(assertion))                                                                       \
-{                                                                                       \
-EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
-assert(false);                                                                      \
-}                                                                                       \
-} while (0)
-#endif
 
-//The Logging and assertion is Stripped Out in release, the if check and returning stays in release.
-//Don't use this if you don't want branching in release.
-#if defined(EOS_DEBUG)
 #define CHECK_RETURN(assertion, ...)                                                        \
 do                                                                                          \
 {                                                                                           \
@@ -103,11 +89,5 @@ do                                                                              
         return;                                                                             \
     }                                                                                       \
 } while (0)
-#else
-#define CHECK_RETURN(assertion, ...)                                                        \
-    if (!(assertion))                                                                       \
-    {                                                                                       \
-        return;                                                                             \
-    }
-#endif
+
 }

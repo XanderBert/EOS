@@ -1,2 +1,3 @@
 set(EOS_EXAMPLES_DEPENDENCIES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies)
 add_subdirectory(ModelPBR)
+add_subdirectory(Triangle)
