@@ -26,7 +26,6 @@ int main()
     };
     EOS::Holder<EOS::SamplerHandle> sampler = context->CreateSampler(samplerDescription);
 
-    //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexShader = shaderHandleVert,
@@ -38,7 +37,7 @@ int main()
 
     while (!window->ShouldClose())
     {
-        window->Poll();
+        EOS::Window::Poll();
         if (!window->IsFocused()) continue;
 
 

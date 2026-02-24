@@ -111,9 +111,8 @@ namespace EOS
         int originalHeight = 0;
 
         //Check if texture is already stored in the cache if so load in the ktx instead of the other file.
-        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}", textureLoadingDescription.filePath.filename().replace_extension(".ktx").string());
+        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}_{}.ktx", textureLoadingDescription.filePath.stem().string(),static_cast<int>(textureLoadingDescription.compression));
         std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-
         if (file.is_open())
         {
             file.close();
@@ -127,7 +126,7 @@ namespace EOS
             int channels;
             pixels = stbi_load(textureLoadingDescription.filePath.string().c_str(), &originalWidth, &originalHeight, &channels, desiredChannels);
             CHECK(pixels, "Could not load image at location: {}", textureLoadingDescription.filePath.string().c_str());
-            EOS::Logger->debug({"Loading image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
+            EOS::Logger->info({"Compressing image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
 
             // Compress the texture and cache it
             texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
@@ -191,6 +190,11 @@ namespace EOS
             w = w > 1 ? w >> 1 : 1;
         }
 
+        ktxBasisParams basisCompressionParams = {};
+        basisCompressionParams.structSize = sizeof(basisCompressionParams);
+        basisCompressionParams.noSSE = KTX_FALSE;
+        basisCompressionParams.uastc = KTX_FALSE;
+
         ktx_transcode_fmt_e compressionMethod;
         switch (compression)
         {
@@ -203,6 +207,11 @@ namespace EOS
                 compressionMethod = KTX_TTF_BC5_RG;
                 desiredFormat = VK_FORMAT_BC5_UNORM_BLOCK;
                 glInternalFormat = 0x8DBD; // GL_COMPRESSED_RG_RGTC2
+
+                basisCompressionParams.uastc = KTX_TRUE;
+                basisCompressionParams.uastcFlags = KTX_PACK_UASTC_LEVEL_DEFAULT;
+                basisCompressionParams.normalMap = KTX_TRUE;
+
                 break;
             case BC7:
                 compressionMethod = KTX_TTF_BC7_RGBA;
@@ -220,14 +229,14 @@ namespace EOS
         if (compressionMethod != KTX_TTF_NOSELECTION)
         {
             // compress to Basis and transcode
-            CHECK(ktxTexture2_CompressBasis(textureKTX2, 255) == KTX_SUCCESS, "Could not compress the image to the base compression");
+            CHECK(ktxTexture2_CompressBasisEx(textureKTX2, &basisCompressionParams) == KTX_SUCCESS, "Could not compress the image to the base compression");
             CHECK(ktxTexture2_TranscodeBasis(textureKTX2, compressionMethod, 0) == KTX_SUCCESS, "Could not compress Image");
         }
 
         // convert to KTX1 - now using the correct format
         const ktxTextureCreateInfo createInfoKTX1
         {
-            .glInternalformat = glInternalFormat, // Now matches the compression format
+            .glInternalformat = glInternalFormat,
             .vkFormat         = static_cast<uint32_t>(desiredFormat),
             .baseWidth        = static_cast<uint32_t>(width),
             .baseHeight       = static_cast<uint32_t>(height),

@@ -1,6 +1,6 @@
 module pbr;
 import common;
-#define PI 3.1415
+#define PI      3.14159265358979323846
 
 // Normal Distribution function
 public float D_GGX(float dotNH, float roughness)
@@ -24,7 +24,7 @@ float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness)
 // Fresnel function
 float3 F_Schlick(float cosTheta, Material material)
 {
-    float3 F0 = lerp(float3(0.04, 0.04, 0.04), float3(material.r, material.g, material.b), material.metallic); // * material.specular
+    float3 F0 = lerp(float3(0.04), material.albedo, material.metallic);
 	float3 F = F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 	return F;
 }
