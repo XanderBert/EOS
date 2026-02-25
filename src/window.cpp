@@ -115,8 +115,6 @@ namespace EOS
     bool Window::IsFocused()
     {
         glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
-        Logger->warn("{} , {}", Width, Height);
-
         return Width || Height;
     }
 }

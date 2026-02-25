@@ -108,41 +108,46 @@ macro(FETCH_SLANG)
 endmacro()
 
 macro(FETCH_ASSIMP depsDir targetName)
-    set(ASSIMP_ROOT_DIR ${depsDir}/src/assimp)
+    if(NOT TARGET assimp::assimp)
+        set(ASSIMP_ROOT_DIR ${depsDir}/src/assimp)
 
-    set(ASSIMP_BUILD_TESTS OFF)
-    set(ASSIMP_INSTALL_PDB OFF)
-    set(ASSIMP_BUILD_ASSIMP_TOOLS OFF)
-    set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
-    set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF)
-    set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF)
-    set(ASSIMP_BUILD_GLTF_IMPORTER ON)
-    set(ASSIMP_BUILD_SAMPLES OFF)
-    set(ASSIMP_NO_EXPORT ON)
-    set(ASSIMP_BUILD_ZLIB ON)
+         set(ASSIMP_BUILD_TESTS OFF)
+         set(ASSIMP_INSTALL_PDB OFF)
+         set(ASSIMP_BUILD_ASSIMP_TOOLS OFF)
+         set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
+         set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF)
+         set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF)
+         set(ASSIMP_BUILD_GLTF_IMPORTER ON)
+         set(ASSIMP_BUILD_SAMPLES OFF)
+         set(ASSIMP_NO_EXPORT ON)
+         set(ASSIMP_BUILD_ZLIB ON)
 
-    FetchContent_Populate(
-            assimp
-            GIT_REPOSITORY https://github.com/assimp/assimp
-            GIT_TAG v6.0.4
-            GIT_SHALLOW TRUE
-            SOURCE_DIR ${ASSIMP_ROOT_DIR}
-    )
+         FetchContent_Populate(
+                 assimp
+                 GIT_REPOSITORY https://github.com/assimp/assimp
+                 GIT_TAG v6.0.4
+                 GIT_SHALLOW TRUE
+                 SOURCE_DIR ${ASSIMP_ROOT_DIR}
+         )
+         add_subdirectory(${ASSIMP_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/assimp)
+    endif ()
 
-    add_subdirectory(${ASSIMP_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/assimp)
-    target_link_libraries(${targetName} PRIVATE assimp::assimp)
+         target_link_libraries(${targetName} PRIVATE assimp::assimp)
+
 endmacro()
 
 macro(FETCH_GLM depsDir targetName)
-    set(GLM_ROOT_DIR ${depsDir}/src/glm)
+    if(NOT TARGET glm::glm)
+        set(GLM_ROOT_DIR ${depsDir}/src/glm)
+        FetchContent_Populate(
+                glm
+                GIT_REPOSITORY https://github.com/g-truc/glm
+                GIT_TAG        1.0.1
+                SOURCE_DIR     ${GLM_ROOT_DIR}
+        )
+        add_subdirectory(${GLM_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/glm)
+    endif()
 
-    FetchContent_Populate(
-            glm
-            GIT_REPOSITORY https://github.com/g-truc/glm
-            GIT_TAG        1.0.1
-            SOURCE_DIR     ${GLM_ROOT_DIR}
-    )
-    add_subdirectory(${GLM_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/glm)
     target_link_libraries(${targetName} PRIVATE glm::glm)
     target_compile_definitions(${targetName} PRIVATE GLM_ENABLE_EXPERIMENTAL)
 endmacro()
