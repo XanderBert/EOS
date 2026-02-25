@@ -18,7 +18,6 @@ struct PerFrameData final
     uint32_t pad02;
 };
 
-
 int main()
 {
     EOS::ContextCreationDescription contextDescr
@@ -27,11 +26,23 @@ int main()
         .PreferredHardwareType  = EOS::HardwareDeviceType::Discrete,
         .ApplicationName        = "EOS - Model PBR",
     };
-    std::unique_ptr<EOS::Window> window = std::make_unique<EOS::Window>(contextDescr);
-    std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
-    std::unique_ptr<EOS::ShaderCompiler> shaderCompiler = EOS::CreateShaderCompiler("./");
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context, shaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context, shaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
+
+    CameraDescription cameraDescription
+    {
+        .origin = {0.0f, 0.0f, -3.5f},
+        .rotation = {0, 90.0f}
+    };
+
+    ExampleAppDescription appDescription
+    {
+        .contextDescription = contextDescr,
+        .cameraDescription = cameraDescription
+    };
+
+    ExampleApp App{appDescription};
+
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vdesc
@@ -49,22 +60,7 @@ int main()
         }
     };
 
-    EOS::Holder<EOS::TextureHandle> depthTexture = context->CreateTexture(
-{
-        .Type                   = EOS::ImageType::Image_2D,
-        .TextureFormat          = EOS::Format::Z_F32,
-        .TextureDimensions      = {static_cast<uint32_t>(window->Width), static_cast<uint32_t>(window->Height)},
-        .Usage                  = EOS::TextureUsageFlags::Attachment,
-        .DebugName              = "Depth Buffer",
-    });
-
-    EOS::SamplerDescription samplerDescription
-    {
-        .mipLodMax = EOS_MAX_MIP_LEVELS,
-        .maxAnisotropic = 0,
-        .debugName = "Linear Sampler",
-    };
-    EOS::Holder<EOS::SamplerHandle> sampler = context->CreateSampler(samplerDescription);
+    EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
 
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineDescription
@@ -72,19 +68,20 @@ int main()
         .VertexInput = vdesc,
         .VertexShader = shaderHandleVert,
         .FragmentShader = shaderHandleFrag,
-        .ColorAttachments = {{ .ColorFormat = context->GetSwapchainFormat()}},
+        .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
         .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
-    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
+    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
+
 
     std::vector<uint32_t> indices;
     std::vector<Vertex> vertices;
     TextureHandles handles;
-    LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", vertices, indices,handles, context.get());
+    LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", vertices, indices,handles, App.Context.get());
 
-    EOS::Holder<EOS::BufferHandle> vertexBuffer = context->CreateBuffer(
+    EOS::Holder<EOS::BufferHandle> vertexBuffer = App.Context->CreateBuffer(
     {
       .Usage     = EOS::BufferUsageFlags::Vertex,
       .Storage   = EOS::StorageType::Device,
@@ -92,7 +89,8 @@ int main()
       .Data      = vertices.data(),
       .DebugName = "Buffer: vertex"
       });
-    EOS::Holder<EOS::BufferHandle> indexBuffer = context->CreateBuffer(
+
+    EOS::Holder<EOS::BufferHandle> indexBuffer = App.Context->CreateBuffer(
     {
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
@@ -101,7 +99,7 @@ int main()
         .DebugName = "Buffer: index"
     });
 
-    EOS::Holder<EOS::BufferHandle> perFrameBuffer = context->CreateBuffer(
+    EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer(
 {
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
@@ -109,38 +107,30 @@ int main()
         .DebugName = "perFrameBuffer",
     });
 
-    using glm::mat4;
-    using glm::vec3;
 
-    while (!window->ShouldClose())
+    App.Run([&]()
     {
-        window->Poll();
-        if (!window->IsFocused()) continue;
+        const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
 
-        const float aspectRatio = static_cast<float>(window->Width) / static_cast<float>(window->Height);
-
-        mat4 m = rotate(mat4(1.0f),glm::radians(90.0f) , vec3(1.0f, 0.0f, 0.0f));
-        m = rotate(m, static_cast<float>(glfwGetTime()), vec3(0.0f, 0.0f, 1.0f));
-        constexpr vec3 position {0.0f, 0.0f, -3.5f};
-        constexpr mat4 v = glm::translate(mat4(1.0f), position);
-        const mat4 p = glm::perspective(45.0f, aspectRatio, 0.1f, 1000.0f);
-        const mat4 mvp = p * v * m;
+        glm::mat4 m = glm::rotate(glm::mat4(1.0f),glm::radians(90.0f) , glm::vec3(1.0f, 0.0f, 0.0f));
+        m = rotate(m, static_cast<float>(glfwGetTime()), glm::vec3(0.0f, 0.0f, 1.0f));
+        const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
         const PerFrameData perFrameData
         {
             .model = m,
             .mvp = mvp,
-            .cameraPos = vec3(glm::inverse(v) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
+            .cameraPos = App.MainCamera.GetPosition(),
             .albedoID = handles.albedo.Index(),
             .normalID = handles.normal.Index(),
             .metallicRoughnessID = handles.metallicRoughness.Index(),
         };
 
 
-        EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
+        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         EOS::Framebuffer framebuffer
         {
-            .Color = {{.Texture = context->GetSwapChainTexture()}},
+            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
             .DepthStencil = { .Texture = depthTexture },
             .DebugName = "Basic Color Depth Framebuffer"
         };
@@ -160,7 +150,7 @@ int main()
 
         cmdPipelineBarrier(cmdBuffer, {},
             {
-                { context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+                { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
                 { depthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
             });
 
@@ -177,7 +167,7 @@ int main()
                 uint64_t draw;
             }pc
             {
-                .draw = context->GetGPUAddress(perFrameBuffer)
+                .draw = App.Context->GetGPUAddress(perFrameBuffer)
             };
 
             cmdPushConstants(cmdBuffer, pc);
@@ -187,9 +177,9 @@ int main()
         }
         cmdEndRendering(cmdBuffer);
 
-        cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        context->Submit(cmdBuffer, context->GetSwapChainTexture());
-    }
+        cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
+        App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
+    });
 
     return 0;
 }

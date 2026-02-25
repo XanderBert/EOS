@@ -83,6 +83,8 @@ namespace EOS
             }
         });
 
+        glfwSetInputMode(GlfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
 #if defined(EOS_PLATFORM_WAYLAND)
         contextDescription.Window     = static_cast<void*>(glfwGetWaylandWindow(GlfwWindow));
         contextDescription.Display    = static_cast<void*>(glfwGetWaylandDisplay());
