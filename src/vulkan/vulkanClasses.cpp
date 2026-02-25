@@ -869,6 +869,8 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
         Textures.emplace_back(vulkanSwapChainDescription.vulkanContext->TexturePool.Create(std::move(swapChainImage)));
     }
+
+    EOS::Logger->debug("Created Swapchain with {} images of size {}x{}.", NumberOfSwapChainImages, vulkanSwapChainDescription.width, vulkanSwapChainDescription.height);
 }
 
 VulkanSwapChain::~VulkanSwapChain()

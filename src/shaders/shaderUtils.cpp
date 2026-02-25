@@ -67,7 +67,6 @@ namespace EOS
             Diagnostics.setNull();
         }
 
-
         // Load All Entry Points (a EntryPoint is a shader within a file) and write to disk if desired
         const uint32_t entryPointCount = module->getDefinedEntryPointCount();
 

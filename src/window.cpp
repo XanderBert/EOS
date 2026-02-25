@@ -8,7 +8,7 @@ namespace EOS
         /// Setup the error callback
         glfwSetErrorCallback([](int error, const char* message)
         {
-            printf("GLFW: ERROR (%i): %s\n", error, message);
+            Logger->error("GLFW: {}, {}", error, message);
         });
 
         // Initialize GLFW
@@ -70,7 +70,6 @@ namespace EOS
         }
 
         // Get the actual window size and store it
-        glfwGetWindowSize(GlfwWindow, &Width, &Height);
         contextDescription.Width  = Width;
         contextDescription.Height = Height;
 
@@ -116,6 +115,7 @@ namespace EOS
     bool Window::IsFocused()
     {
         glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
+        Logger->warn("{} , {}", Width, Height);
 
         return Width || Height;
     }

@@ -51,7 +51,8 @@ int main()
     {
             { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) },
             { .Location = 1, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, normal) },
-            { .Location = 2, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) }
+            { .Location = 2, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) },
+            { .Location = 3, .Format = EOS::VertexFormat::Float4, .Offset = offsetof(Vertex, tangent) }
         },
 
         .InputBindings =
@@ -162,7 +163,7 @@ int main()
             cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
 
-            struct PerFrameData
+            struct FramePointers
             {
                 uint64_t draw;
             }pc

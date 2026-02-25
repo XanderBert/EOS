@@ -20,10 +20,7 @@
 #  endif
 #endif
 
-
 #include "defines.h"
-
-
 namespace EOS
 {
     //Forward declare
@@ -43,8 +40,4 @@ namespace EOS
         int Width;
         int Height;
     };
-
-
-
-
 }

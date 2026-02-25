@@ -18,6 +18,7 @@ struct Vertex final
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 uv;
+    glm::vec4 tangent;
 };
 
 struct TextureHandles final
@@ -130,7 +131,6 @@ private:
     float Far;
 };
 
-
 struct ExampleAppDescription final
 {
     EOS::ContextCreationDescription contextDescription;
@@ -158,7 +158,6 @@ public:
     }
 
     DELETE_COPY_MOVE(ExampleApp)
-
 
     EOS::Holder<EOS::TextureHandle> CreateDepthTexture() const
     {
@@ -188,7 +187,7 @@ public:
         while (!Window.ShouldClose())
         {
             Window.Poll();
-            if (!Window.IsFocused()) sleep(0.01);
+            if (!Window.IsFocused()) std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
             //Update time
             const float currentTime = glfwGetTime();
@@ -266,7 +265,7 @@ private:
     float lastTime{};
 };
 
-void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, TextureHandles& handles , EOS::IContext* context)
+inline void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, TextureHandles& handles , EOS::IContext* context)
 {
     const aiScene* scene = aiImportFile(modelPath.string().c_str(),aiProcess_Triangulate | aiProcess_CalcTangentSpace);
     CHECK(scene && scene->HasMeshes(), "Could not load mesh: {}", modelPath.string());
@@ -278,13 +277,24 @@ void LoadModel(const std::filesystem::path& modelPath, std::vector<Vertex>& vert
     indices.clear();
     indices.reserve(mesh->mNumFaces * 3);
 
+
+
     for (unsigned int i{}; i != mesh->mNumVertices; ++i)
     {
         const aiVector3D v = mesh->mVertices[i];
         const aiVector3D uv = mesh->mTextureCoords[0][i];
         const aiVector3D n = mesh->mNormals[i];
         const aiVector3D t   = mesh->mTangents[i];
-        vertices.emplace_back(glm::vec3(v.x, v.y, v.z), glm::vec3(n.x, n.y, n.z), glm::vec2(uv.x, 1 - uv.y));
+
+        Vertex vertex
+        {
+            .position       = glm::vec3(v.x, v.y, v.z),
+            .normal         = glm::vec3(n.x, n.y, n.z),
+            .uv             = glm::vec2(uv.x, 1 - uv.y),
+            .tangent        = glm::vec4{t.x, t.y, t.z, 1.0f}
+        };
+
+        vertices.emplace_back(vertex);
     }
 
     for (unsigned int i{}; i != mesh->mNumFaces; ++i)
