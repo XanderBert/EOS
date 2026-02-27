@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <filesystem>
 #include <memory>
@@ -377,6 +377,15 @@ namespace EOS
         const char* debugName = "";
     };
 
+    struct DrawIndexedIndirectCommand final
+    {
+        uint32_t indexCount{};
+        uint32_t instanceCount{};
+        uint32_t firstIndex{};
+        int32_t vertexOffset{};
+        uint32_t firstInstance{};
+    };
+
 #pragma region INTERFACES
     //TODO: instead of interfaces use concept and a forward declare. And then every API implements 1 class of that name with the concept.
     //CMake should handle that only 1 type of API is being used at the time.
@@ -702,9 +711,22 @@ void cmdDraw(const EOS::ICommandBuffer& commandBuffer, uint32_t vertexCount, uin
  */
 void cmdDrawIndexed(const EOS::ICommandBuffer& commandBuffer, uint32_t indexCount, uint32_t instanceCount = 1, uint32_t firstIndex = 0, int32_t vertexOffset = 0, uint32_t baseInstance = 0);
 
+
+/**
+ *
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param indirectBuffer The handle to the uploaded Indirect buffer containing the scene information.
+ * @param indirectBufferOffset The offset inside the Indirect buffer.
+ * @param drawCount How many meshes are in the scene.
+ * @param stride Number of bytes between consecutive DrawIndexedIndirectCommand
+              entries in the indirect buffer. Pass 0 to use the default
+              packed stride (sizeof(DrawIndexedIndirectCommand)).
+ */
+void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, EOS:: BufferHandle indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride = 0);
+
 /**
  * @brief Binds push constants.
- * @param commandBuffer The commandbuffer we want to record to to bind our push constants.
+ * @param commandBuffer The commandbuffer we want to record to bind our push constants.
  * @param data The actual data we want to bind.
  * @param size The size of the data we want to bind.
  * @param offset At what offset we would like to start to bind the data from.

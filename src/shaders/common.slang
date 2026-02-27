@@ -16,6 +16,11 @@ public T LoadBuffer<T>(uint64_t address)
     return *((Ptr<T>)address);
 }
 
+public T LoadBufferArray<T>(uint64_t address, uint index)
+{
+    return *((Ptr<T>)address + index);
+}
+
 public struct Material
 {
     public float3 albedo;

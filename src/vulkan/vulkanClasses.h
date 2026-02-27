@@ -472,9 +472,9 @@ private:
     bool ShouldDescriptorSetBeUpdated               = false;
     EOS::Holder<EOS::TextureHandle> DummyTexture    = {};
 
-    uint32_t CurrentMaxTextures;
-    uint32_t CurrentMaxSamplers;
-    uint32_t CurrentMaxAccelStructs;
+    uint32_t CurrentMaxTextures{};
+    uint32_t CurrentMaxSamplers{};
+    uint32_t CurrentMaxAccelStructs{};
 
     bool HasAccelerationStructure                   = false; //TODO: Just check size of the pipeline pool for raytracing
     bool HasRaytracingPipeline                      = false; //TODO: Just check size of the pipeline pool for raytracing

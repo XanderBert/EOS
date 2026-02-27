@@ -24,14 +24,24 @@ struct VSOutput
     float3 Normal   : TEXCOORD2;
     float3 Tangent  : TANGENT;
     float2 UV       : TEXCOORD0;
+    uint   DrawIndex : TEXCOORD3;
+};
+
+struct DrawData
+{
+    uint albedo;
+    uint normal;
+    uint metallicRoughness;
+    uint pad;
 };
 
 struct PerFrameData
 {
     float4x4 Model;
     float4x4 MVP;
-    float3 cameraPos;
-    MaterialHandles material;
+    float3   cameraPos;
+    uint     pad;
+    uint64_t drawDataPtr;
 };
 
 struct PushConstants
@@ -41,7 +51,7 @@ struct PushConstants
 
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
-VSOutput vertexMain(VSInput input)
+VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
 
@@ -51,6 +61,7 @@ VSOutput vertexMain(VSInput input)
     output.Normal       = normalize(mul(input.Normal, float3x3(frameData.Model)));
     output.Tangent      = mul(input.Tangent.xyz, float3x3(frameData.Model));
     output.UV           = input.UV;
+    output.DrawIndex    = drawIndex;
 
     return output;
 }
@@ -58,12 +69,14 @@ VSOutput vertexMain(VSInput input)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input)
 {
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-
     // Sample textures
-    float3 albedoSample = TextureBindless2D(frameData.material.albedo, 0, input.UV).rgb;
-    float2 normalSample = TextureBindless2D(frameData.material.normal, 0, input.UV).rg;
-    float4 metallicRoughnessSample = TextureBindless2D(frameData.material.metallicRoughness, 0, input.UV);
+    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
+    DrawData draw = LoadBufferArray<DrawData>(frameData.drawDataPtr, input.DrawIndex);
+
+
+    float3 albedoSample = TextureBindless2D(draw.albedo, 0, input.UV).rgb;
+    float2 normalSample = TextureBindless2D(draw.normal, 0, input.UV).rg;
+    float4 metallicRoughnessSample = TextureBindless2D(draw.metallicRoughness, 0, input.UV);
 
     // Material properties
     Material material;

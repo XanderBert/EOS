@@ -18,6 +18,14 @@ struct PerFrameData final
     uint32_t pad02;
 };
 
+struct Vertex final
+{
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 uv;
+    glm::vec4 tangent;
+};
+
 int main()
 {
     EOS::ContextCreationDescription contextDescr
@@ -77,10 +85,10 @@ int main()
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
 
 
-    std::vector<uint32_t> indices;
+    Scene scene = LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", App.Context.get());
     std::vector<Vertex> vertices;
-    TextureHandles handles;
-    LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", vertices, indices,handles, App.Context.get());
+    vertices.reserve(scene.vertices.size());
+    for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = App.Context->CreateBuffer(
     {
@@ -95,8 +103,8 @@ int main()
     {
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
-        .Size      = sizeof(uint32_t) * indices.size(),
-        .Data      = indices.data(),
+        .Size      = sizeof(uint32_t) * scene.indices.size(),
+        .Data      = scene.indices.data(),
         .DebugName = "Buffer: index"
     });
 
@@ -122,9 +130,9 @@ int main()
             .model = m,
             .mvp = mvp,
             .cameraPos = App.MainCamera.GetPosition(),
-            .albedoID = handles.albedo.Index(),
-            .normalID = handles.normal.Index(),
-            .metallicRoughnessID = handles.metallicRoughness.Index(),
+            .albedoID = scene.meshes[0].textures.albedo.Index(),
+            .normalID = scene.meshes[0].textures.normal.Index(),
+            .metallicRoughnessID = scene.meshes[0].textures.metallicRoughness.Index(),
         };
 
 
@@ -173,7 +181,7 @@ int main()
 
             cmdPushConstants(cmdBuffer, pc);
             cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexed(cmdBuffer, indices.size());
+            cmdDrawIndexed(cmdBuffer, scene.indices.size());
             cmdPopMarker(cmdBuffer);
         }
         cmdEndRendering(cmdBuffer);

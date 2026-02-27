@@ -357,6 +357,15 @@ void cmdDrawIndexed(const EOS::ICommandBuffer &commandBuffer, uint32_t indexCoun
     vkCmdDrawIndexed(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, baseInstance);
 }
 
+void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride)
+{
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    VulkanBuffer* bufferIndirect = vulkanCommandBuffer->VkContext->BufferPool.Get(indirectBuffer);
+    CHECK(bufferIndirect, "Could not get the indirectDrawwingbuffer");
+
+    vkCmdDrawIndexedIndirect(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, bufferIndirect->VulkanVkBuffer, indirectBufferOffset, drawCount, stride ? stride : sizeof(VkDrawIndexedIndirectCommand));
+}
+
 void cmdPushConstants(const EOS::ICommandBuffer &commandBuffer, const void *data, size_t size, size_t offset)
 {
     CHECK(size % 4 == 0, "A push constant must be a multiple of 4");
@@ -1971,7 +1980,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     VulkanStagingBuffer = std::make_unique<VulkanStagingDevice>(this);
 
-    GrowDescriptorPool(16, 16, 1);
+    GrowDescriptorPool(512, 16, 1);
 
     // Create Dummy Texture
     constexpr uint32_t pixel = 0xFF000000;
@@ -2817,6 +2826,8 @@ void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSampler
 
     //CHECK(maxTextures <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSampledImages, "Max Textures exceeded, Current:{}, Max:{}", maxTextures, vkPhysicalDeviceVulkan12Properties_.maxDescriptorSetUpdateAfterBindSampledImages);
     //CHECK(maxSamplers <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSamplers, "Max Samplers exceeded, Current:{}, Max:{}", maxSamplers);
+    if (CurrentMaxAccelStructs == maxAccelStructs && CurrentMaxTextures == maxTextures && CurrentMaxSamplers == maxSamplers) return;
+    EOS::Logger->warn("\nGrowing Descriptorpool:\nTextures - \tOld:{}, New:{}\nSamplers - \tOld:{}, New{}\nAcceleration Structures - \tOld:{}, New:{}", CurrentMaxTextures, maxTextures, CurrentMaxSamplers, maxSamplers, CurrentMaxAccelStructs, maxAccelStructs);
 
     CurrentMaxTextures      = maxTextures;
     CurrentMaxSamplers      = maxSamplers;
@@ -3198,6 +3209,20 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
         compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
     }
 
+    if (compatibleDevices.empty())
+    {
+        for (VkPhysicalDevice& hardwareDevice : hardwareDevices)
+        {
+            VkPhysicalDeviceProperties deviceProperties;
+            vkGetPhysicalDeviceProperties(hardwareDevice, &deviceProperties);
+            const auto deviceType = static_cast<EOS::HardwareDeviceType>(deviceProperties.deviceType);
+
+
+            //Convert the device to a unsigned (long) int (size dependant on building for 32 or 64 bit) and use that as the GUID of the physical device.
+            compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
+        }
+    }
+
     CHECK(!hardwareDevices.empty(), "Couldn't find a physical hardware device!");
 }
 
@@ -3211,9 +3236,9 @@ void VulkanContext::UpdateDescriptorSet()
     CHECK(TexturePool.NumObjects() >= 1, "There should be at least 1 texture");
     CHECK(SamplerPool.NumObjects() >= 1, "There should be at least 1 sampler");
 
-    uint32_t newMaxTextures = 16u;
-    uint32_t newMaxSamplers = 16u;
-    uint32_t newMaxAccelStructs = 1;
+    uint32_t newMaxTextures = CurrentMaxTextures;
+    uint32_t newMaxSamplers = CurrentMaxSamplers;
+    uint32_t newMaxAccelStructs = CurrentMaxAccelStructs;
 
     while (TexturePool.Objects.size() > newMaxTextures) newMaxTextures *= 2;
     while (SamplerPool.Objects.size() > newMaxSamplers) newMaxSamplers *= 2;

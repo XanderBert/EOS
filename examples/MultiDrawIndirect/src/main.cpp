@@ -10,13 +10,26 @@ struct PerFrameData final
     glm::mat4 mvp;
 
     glm::vec3 cameraPos;
-    uint32_t  albedoID;
+    uint32_t  pad01;
+    uint64_t  drawDataPtr;
+};
 
+struct DrawData final
+{
+    uint32_t albedoID;
     uint32_t normalID;
     uint32_t metallicRoughnessID;
-    uint32_t pad01;
-    uint32_t pad02;
+    uint32_t pad;
 };
+
+struct Vertex final
+{
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 uv;
+    glm::vec4 tangent;
+};
+
 
 int main()
 {
@@ -29,8 +42,9 @@ int main()
 
     CameraDescription cameraDescription
     {
-        .origin = {0.0f, 0.0f, -3.5f},
-        .rotation = {0, 90.0f}
+        .origin = {0.0f, 10.0f, -3.5f},
+        .rotation = {0, 0.0f},
+        .acceleration = 200.0f
     };
 
     ExampleAppDescription appDescription
@@ -63,24 +77,14 @@ int main()
 
     EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
 
-    //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
-    EOS::RenderPipelineDescription renderPipelineDescription
-    {
-        .VertexInput = vdesc,
-        .VertexShader = shaderHandleVert,
-        .FragmentShader = shaderHandleFrag,
-        .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
-        .PipelineCullMode = EOS::CullMode::Back,
-        .DebugName = "Basic Render Pipeline",
-    };
-    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
 
 
-    std::vector<uint32_t> indices;
+
+    Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
     std::vector<Vertex> vertices;
-    TextureHandles handles;
-    LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", vertices, indices,handles, App.Context.get());
+    vertices.reserve(scene.vertices.size());
+    for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
+
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = App.Context->CreateBuffer(
     {
@@ -95,10 +99,31 @@ int main()
     {
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
-        .Size      = sizeof(uint32_t) * indices.size(),
-        .Data      = indices.data(),
+        .Size      = sizeof(uint32_t) * scene.indices.size(),
+        .Data      = scene.indices.data(),
         .DebugName = "Buffer: index"
     });
+
+
+    std::vector<DrawData> drawData;
+    drawData.reserve(scene.meshes.size());
+    for (auto& mesh : scene.meshes)
+    {
+        drawData.push_back({
+            .albedoID            = mesh.textures.albedo.Index(),
+            .normalID            = mesh.textures.normal.Index(),
+            .metallicRoughnessID = mesh.textures.metallicRoughness.Index(),
+        });
+    }
+
+    EOS::Holder<EOS::BufferHandle> drawDataBuffer = App.Context->CreateBuffer({
+        .Usage     = EOS::BufferUsageFlags::StorageFlag,
+        .Storage   = EOS::StorageType::HostVisible,
+        .Size      = sizeof(DrawData) * drawData.size(),
+        .Data      = drawData.data(),
+        .DebugName = "drawDataBuffer",
+    });
+
 
     EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer(
 {
@@ -109,12 +134,49 @@ int main()
     });
 
 
+    std::vector<EOS::DrawIndexedIndirectCommand> indirectCmds;
+    indirectCmds.reserve(scene.meshes.size());
+    for (auto& mesh : scene.meshes)
+    {
+        indirectCmds.emplace_back(
+        EOS::DrawIndexedIndirectCommand
+        {
+            .indexCount    = mesh.indexCount,
+            .instanceCount = 1,
+            .firstIndex    = mesh.indexOffset,
+            .vertexOffset  = static_cast<int32_t>(mesh.vertexOffset),
+            .firstInstance = 0,
+        });
+    }
+
+    EOS::Holder<EOS::BufferHandle> indirectBuffer = App.Context->CreateBuffer({
+        .Usage     = EOS::BufferUsageFlags::Indirect,
+        .Storage   = EOS::StorageType::Device,
+        .Size      = sizeof(EOS::DrawIndexedIndirectCommand) * indirectCmds.size(),
+        .Data      = indirectCmds.data(),
+        .DebugName = "indirectBuffer",
+    });
+
+
+    //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
+    EOS::RenderPipelineDescription renderPipelineDescription
+    {
+        .VertexInput = vdesc,
+        .VertexShader = shaderHandleVert,
+        .FragmentShader = shaderHandleFrag,
+        .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
+        .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
+        .PipelineCullMode = EOS::CullMode::Back,
+        .DebugName = "Basic Render Pipeline",
+    };
+    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
+
+
     App.Run([&]()
     {
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
 
-        glm::mat4 m = glm::rotate(glm::mat4(1.0f),glm::radians(90.0f) , glm::vec3(1.0f, 0.0f, 0.0f));
-        m = rotate(m, static_cast<float>(glfwGetTime()), glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
         const PerFrameData perFrameData
@@ -122,11 +184,8 @@ int main()
             .model = m,
             .mvp = mvp,
             .cameraPos = App.MainCamera.GetPosition(),
-            .albedoID = handles.albedo.Index(),
-            .normalID = handles.normal.Index(),
-            .metallicRoughnessID = handles.metallicRoughness.Index(),
+            .drawDataPtr = App.Context->GetGPUAddress(drawDataBuffer)
         };
-
 
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         EOS::Framebuffer framebuffer
@@ -147,7 +206,6 @@ int main()
             .CompareOpState = EOS::CompareOp::Less,
             .IsDepthWriteEnabled = true,
         };
-
 
         cmdPipelineBarrier(cmdBuffer, {},
             {
@@ -173,7 +231,8 @@ int main()
 
             cmdPushConstants(cmdBuffer, pc);
             cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexed(cmdBuffer, indices.size());
+            cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
+
             cmdPopMarker(cmdBuffer);
         }
         cmdEndRendering(cmdBuffer);
