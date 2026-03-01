@@ -39,21 +39,20 @@ struct PerFrameData
 {
     float4x4 Model;
     float4x4 MVP;
-    float3   cameraPos;
-    uint     pad;
-    uint64_t drawDataPtr;
+    float4   cameraPos;
 };
 
 struct PushConstants
 {
-    uint64_t PerFramePointer;
+    ConstBufferPointer<PerFrameData> PerFramePointer;
+    uint64_t PerDrawPointer;
 };
 
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
+    PerFrameData frameData = pc.PerFramePointer.get();
 
     VSOutput output;
     output.Pos          = mul(float4(input.Pos, 1.0), frameData.MVP);
@@ -69,10 +68,20 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input)
 {
-    // Sample textures
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    DrawData draw = LoadBufferArray<DrawData>(frameData.drawDataPtr, input.DrawIndex);
+    if(pc.PerFramePointer._ptr == 0)
+    {
+        return float4(1,0,0,1);
+    }
 
+    if(pc.PerDrawPointer == 0)
+    {
+        return float4(0,1,0,1);
+    }
+
+
+    // Sample textures
+    PerFrameData frameData = pc.PerFramePointer.get();
+    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
 
     float3 albedoSample = TextureBindless2D(draw.albedo, 0, input.UV).rgb;
     float2 normalSample = TextureBindless2D(draw.normal, 0, input.UV).rg;
@@ -85,7 +94,7 @@ float4 fragmentMain(VSOutput input)
     material.roughness  = metallicRoughnessSample.g;
 
     float3 N = GetShadingNormal(input.Normal, input.WorldPos, normalSample, input.UV, input.Tangent);
-    float3 V = normalize(frameData.cameraPos - input.WorldPos);
+    float3 V = normalize(frameData.cameraPos.xyz - input.WorldPos);
     float3 R = reflect(-V, N);
 
     // simple PBR lighting

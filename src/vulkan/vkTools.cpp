@@ -523,11 +523,13 @@ namespace VkContext
             .shaderInt64                    = startOfDeviceFeaturespNextChain.features.shaderInt64,
         };
 
+
         VkPhysicalDeviceVulkan11Features deviceFeatures11
         {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
             .pNext = nullptr,           //Additional DeviceExtensionFeatures can be added here
             .storageBuffer16BitAccess   = VK_TRUE,
+            .multiview                  = VK_TRUE,
             .samplerYcbcrConversion     = vkFeatures11.samplerYcbcrConversion,
             .shaderDrawParameters       = VK_TRUE,
         };

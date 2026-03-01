@@ -209,7 +209,7 @@ int main()
     App.Run([&]()
     {
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
-
+        if (std::isnan(aspectRatio)) return;
 
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 

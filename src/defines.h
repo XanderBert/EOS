@@ -1,4 +1,5 @@
 #pragma once
+#include <csignal>
 
 #define DELETE_COPY(ClassName)                   \
 ClassName(const ClassName&) = delete;            \
@@ -20,3 +21,16 @@ DELETE_MOVE(ClassName)
 #define EOS_MAX_COLOR_ATTACHMENTS 8
 
 #define EOS_SHADER_CHECKSUM 0x53505256 // "SPRV"
+
+#ifdef _WIN32
+#include <intrin.h>
+#define DEBUG_BREAK() __debugbreak()
+#elif defined(__APPLE__) || defined(__MACH__)
+#include <TargetConditionals.h>
+#include <unistd.h>
+#include <signal.h>
+#define DEBUG_BREAK() raise(SIGTRAP)
+#else // Linux / Unix
+#include <signal.h>
+#define DEBUG_BREAK() raise(SIGTRAP)
+#endif

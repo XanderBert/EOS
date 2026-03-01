@@ -407,49 +407,76 @@ void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle
     VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
     VulkanBuffer* buf = vkContext->BufferPool.Get(buffer);
 
-    VkPipelineStageFlagBits2 srcStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    VkPipelineStageFlagBits2 dstStage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-
-    VkBufferMemoryBarrier2 barrier
+    // BARRIER 1: Before update - make shader writes visible to transfer
+    VkBufferMemoryBarrier2 preBarrier
     {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
         .pNext = nullptr,
-        .srcStageMask   = srcStage,
-        .srcAccessMask  = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-        .dstStageMask   = dstStage,
-        .dstAccessMask  = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .buffer = buf->VulkanVkBuffer,
         .offset = 0,
         .size = VK_WHOLE_SIZE,
-
     };
-    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT)  barrier.dstAccessMask |= VK_ACCESS_2_INDEX_READ_BIT;
 
-    const VkDependencyInfoKHR dependencyInfo
+    VkDependencyInfo preDepInfo
     {
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR,
         .pNext = nullptr,
         .dependencyFlags = 0,
         .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &barrier,
+        .pBufferMemoryBarriers = &preBarrier,
     };
 
-    vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
+    vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &preDepInfo);
+
+    // Perform the update
     vkCmdUpdateBuffer(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, buf->VulkanVkBuffer, bufferOffset, size, data);
 
-    srcStage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    dstStage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
-    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)  dstStage |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-    if (buf->VkUsageFlags & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)  dstStage |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-    barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
-    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    barrier.srcStageMask = srcStage;
-    barrier.dstStageMask = dstStage;
-    if (dstStage & VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT) barrier.dstAccessMask |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT)  barrier.dstAccessMask |= VK_ACCESS_2_INDEX_READ_BIT;
-    vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
+    // BARRIER 2: After update - make transfer writes visible to shaders
+    VkBufferMemoryBarrier2 postBarrier
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .pNext = nullptr,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buf->VulkanVkBuffer,
+        .offset = 0,
+        .size = VK_WHOLE_SIZE,
+    };
+
+    // Add additional stage flags based on buffer usage
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT) {
+        postBarrier.dstStageMask |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+        postBarrier.dstAccessMask |= VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+    }
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) {
+        postBarrier.dstStageMask |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+        postBarrier.dstAccessMask |= VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+    }
+    if (buf->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) {
+        postBarrier.dstStageMask |= VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT;
+        postBarrier.dstAccessMask |= VK_ACCESS_2_INDEX_READ_BIT;
+    }
+
+    VkDependencyInfo postDepInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR,
+        .pNext = nullptr,
+        .dependencyFlags = 0,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &postBarrier,
+    };
+
+    vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &postDepInfo);
 }
 
 void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
@@ -776,6 +803,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 {
     CHECK(VkContext, "VulkanContext is not valid.");
     CHECK(GraphicsQueue, "GraphicsQueue is not valid.");
+    CHECK(vulkanSwapChainDescription.width != 0 || vulkanSwapChainDescription.height != 0, "Cannot Create a swapchain with size 0");
 
     //Get details of what we support
     const VulkanSwapChainSupportDetails supportDetails{*VkContext};
@@ -1977,11 +2005,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
         .width = static_cast<uint32_t>(contextDescription.Width),
         .height = static_cast<uint32_t>(contextDescription.Height),
     };
-
-    SwapChain = std::make_unique<VulkanSwapChain>(desc);
-
-    //Create our Timeline Semaphore
-    TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
+    InitializeSwapChain(desc);
 
     //Create our CommandPool
     VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
@@ -2356,7 +2380,7 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
         UPDATE_PUSH_CONSTANT_SIZE(meshModule, VK_SHADER_STAGE_MESH_BIT_EXT);
 
         #undef UPDATE_PUSH_CONSTANT_SIZE
-
+        EOS::Logger->warn("Creating Render Pipeline with ShaderStages: {}", string_VkShaderStageFlags(renderPipelineState.ShaderStageFlags));
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(VulkanPhysicalDevice, &props);
         CHECK(pushConstantsSize <= props.limits.maxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, props.limits.maxPushConstantsSize);
@@ -2975,7 +2999,10 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
             break;
         }
     }
+
+#ifdef EOS_DEBUG
     Configuration.EnableValidationLayers = foundLayer;
+#endif
 
     //Setup the validation layers and extensions
     uint32_t instanceExtensionCount;
@@ -3429,7 +3456,7 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
     {
         vmaAllocInfo =
         {
-            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
             .usage = VMA_MEMORY_USAGE_AUTO,
             .requiredFlags = memFlags,
             .preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT
@@ -3471,4 +3498,20 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
   }
 
   return BufferPool.Create(std::move(buffer));
+}
+
+void VulkanContext::InitializeSwapChain(const VulkanSwapChainCreationDescription &description)
+{
+    // Recreate SwapChain if we already have one.
+    if (SwapChain)
+    {
+        VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
+        SwapChain = nullptr;
+        vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
+    }
+
+    SwapChain = std::make_unique<VulkanSwapChain>(description);
+
+    //Create our Timeline Semaphore
+    TimelineSemaphore = VkSynchronization::CreateSemaphoreTimeline(VulkanDevice, SwapChain->GetNumSwapChainImages() - 1, "Semaphore: TimelineSemaphore");
 }

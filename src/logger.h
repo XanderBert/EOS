@@ -5,7 +5,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/callback_sink.h>
 #include <spdlog/fmt/bundled/ranges.h>
-#include <assert.h>
+#include <cassert>
 #include "defines.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 
@@ -75,6 +75,7 @@ do                                                                              
     if (!(assertion))                                                                       \
     {                                                                                       \
         EOS::Logger->error("{} {}:{}", fmt::format(__VA_ARGS__), __FILE__, __LINE__);       \
+        DEBUG_BREAK();                                                                      \
         assert(false);                                                                      \
     }                                                                                       \
 } while (0)

@@ -436,6 +436,7 @@ public:
     [[nodiscard]] VkDevice GetDevice() const;
     [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
+    void InitializeSwapChain(const VulkanSwapChainCreationDescription& description);
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
     VulkanRenderPipelinePool RenderPipelinePool{};

@@ -25,12 +25,12 @@ float G_SchlicksmithGGX(float dotNL, float dotNV, float roughness)
 // Fresnel function ----------------------------------------------------
 public float3 F_Schlick(float cosTheta, float3 F0)
 {
-	return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+	return F0 + (1.0 - F0) * pow(abs(1.0 - cosTheta), 5.0);
 }
 
 public float3 F_SchlickR(float cosTheta, float3 F0, float roughness)
 {
-	return F0 + (max((1.0 - roughness).xxx, F0) - F0) * pow(1.0 - cosTheta, 5.0);
+	return F0 + (max((1.0 - roughness).xxx, F0) - F0) * pow(abs(1.0 - cosTheta), 5.0);
 }
 
 

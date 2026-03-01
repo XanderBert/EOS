@@ -22,24 +22,15 @@ namespace EOS
     {
         CompilerOptionEntry compilerOptions[] =
         {
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "SPV_GOOGLE_user_type"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvDerivativeControl"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvImageQuery"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvImageGatherExtended"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvSparseResidency"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvMinLod"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvFragmentFullyCoveredEXT"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvRayTracingPositionFetchKHR"}},
-            {.name = CompilerOptionName::Capability,
-             .value = {.kind = CompilerOptionValueKind::String, .stringValue0 = "spvRayQueryKHR"}},
+            {.name = CompilerOptionName::Optimization,
+            .value = {.kind = CompilerOptionValueKind::Int, .intValue0 = SLANG_OPTIMIZATION_LEVEL_MAXIMAL}},
+            {.name = CompilerOptionName::EmitSpirvDirectly,
+            .value = {.kind = CompilerOptionValueKind::Int, .intValue0 = 1}},
+
+#ifdef EOS_DEBUG //TODO: make option on context description
+            {.name = CompilerOptionName::DebugInformation,
+                    .value = {.kind = CompilerOptionValueKind::Int, .intValue0 = 2}},
+#endif
         };
 
         const TargetDesc targetDesc
@@ -233,8 +224,8 @@ namespace EOS
         header.debugNameLength = shaderInfo.DebugName.length();
         header.spirvSize = shaderInfo.Spirv.size() * sizeof(uint32_t);
 
-        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-        file.write(shaderInfo.DebugName.c_str(), header.debugNameLength);
+        //file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        //file.write(shaderInfo.DebugName.c_str(), header.debugNameLength);
         file.write(reinterpret_cast<const char*>(shaderInfo.Spirv.data()), header.spirvSize);
     }
 

@@ -37,7 +37,7 @@ namespace EOS
         [[nodiscard] ]bool IsFocused() const;
 
         GLFWwindow* GlfwWindow;
-        int Width;
-        int Height;
+        inline static int Width;
+        inline static int Height;
     };
 }

@@ -37,7 +37,7 @@ int main()
 
     while (!window->ShouldClose())
     {
-        EOS::Window::Poll();
+        window->Poll();
         if (!window->IsFocused()) continue;
 
 

@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include <cstdio>
-
+#include <vulkan/vk_enum_string_helper.h>
 #include <volk.h>
 #include <vk_mem_alloc.h>
 
@@ -25,7 +25,7 @@
 #include "logger.h"
 
 #define VK_ASSERT(func){ const VkResult result = func;      \
-    CHECK(result == VK_SUCCESS, "Vulkan Assert failed: ");   \
+    CHECK(result == VK_SUCCESS, "Vulkan Assert failed: {}", string_VkResult(result));   \
 }
 
 #pragma region ForwardDeclare
@@ -45,8 +45,11 @@ namespace VkDebug
     [[nodiscard]] VkResult SetDebugObjectName(const VkDevice& device, const VkObjectType& type, const uint64_t handle, const char* name);
     VKAPI_ATTR inline VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData)
     {
-        //Move all VOLK messages to the verbose bit
-        if (strcmp(callbackData->pMessageIdName, "Loader Message") == 0  && messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+        // Move all VOLK/Loader messages to verbose
+        if (callbackData &&
+            callbackData->pMessageIdName &&
+            messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT &&
+            strcmp(callbackData->pMessageIdName, "Loader Message") == 0)
         {
             messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
         }

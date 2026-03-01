@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "../../common.h"
 #include "EOS.h"
 #include "logger.h"
@@ -8,18 +10,18 @@ struct PerFrameData final
 {
     glm::mat4 model;
     glm::mat4 mvp;
-
-    glm::vec3 cameraPos;
-    uint32_t  pad01;
-    uint64_t  drawDataPtr;
+    glm::vec4 cameraPos;
 };
+static_assert(sizeof(PerFrameData) == 144, "PerFrameData must be 144 bytes!");
+static_assert(offsetof(PerFrameData, mvp) == 64, "MVP must be at offset 64!");
+static_assert(offsetof(PerFrameData, cameraPos) == 128, "cameraPos must be at offset 128!");
 
 struct DrawData final
 {
-    uint32_t albedoID;
-    uint32_t normalID;
-    uint32_t metallicRoughnessID;
-    uint32_t pad;
+    uint32_t albedoID{};
+    uint32_t normalID{};
+    uint32_t metallicRoughnessID{};
+    uint32_t pad{};
 };
 
 struct Vertex final
@@ -35,7 +37,7 @@ int main()
 {
     EOS::ContextCreationDescription contextDescr
     {
-        .Config                 = { .EnableValidationLayers = true },
+        .Config                 = { .EnableValidationLayers = false },
         .PreferredHardwareType  = EOS::HardwareDeviceType::Discrete,
         .ApplicationName        = "EOS - MultiDrawIndirect",
     };
@@ -175,6 +177,7 @@ int main()
     App.Run([&]()
     {
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
+        if (isnan(aspectRatio)) return;
 
         glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
@@ -183,8 +186,7 @@ int main()
         {
             .model = m,
             .mvp = mvp,
-            .cameraPos = App.MainCamera.GetPosition(),
-            .drawDataPtr = App.Context->GetGPUAddress(drawDataBuffer)
+            .cameraPos = glm::vec4(App.MainCamera.GetPosition(), 0),
         };
 
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
@@ -223,10 +225,12 @@ int main()
 
             struct FramePointers
             {
-                uint64_t draw;
+                uint64_t frameDataPtr;
+                uint64_t drawDataPtr;
             }pc
             {
-                .draw = App.Context->GetGPUAddress(perFrameBuffer)
+                .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
+                .drawDataPtr = App.Context->GetGPUAddress(drawDataBuffer)
             };
 
             cmdPushConstants(cmdBuffer, pc);
