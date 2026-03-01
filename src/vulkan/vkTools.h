@@ -247,7 +247,7 @@ namespace VkSynchronization
 {
     [[nodiscard]] VkSemaphore CreateSemaphore(const VkDevice& device, const char* debugName);
     [[nodiscard]] VkSemaphore CreateSemaphoreTimeline(const VkDevice& device, uint64_t initialValue, const char* debugName);
-    [[nodiscard]] VkFence CreateFence(const VkDevice& device, const char* debugName);
+    [[nodiscard]] VkFence CreateFence(const VkDevice& device, const char* debugName, bool createSignaled = false);
     VkPipelineStageFlags2 ConvertToVkPipelineStage2(const EOS::ResourceState& state);
     VkAccessFlags2 ConvertToVkAccessFlags2(const EOS::ResourceState& state);
     VkImageLayout ConvertToVkImageLayout(const EOS::ResourceState& state);

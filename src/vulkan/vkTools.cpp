@@ -1563,12 +1563,12 @@ namespace VkSynchronization
         return semaphore;
     }
 
-    VkFence CreateFence(const VkDevice &device, const char *debugName)
+    VkFence CreateFence(const VkDevice &device, const char *debugName, bool createSignaled)
     {
-        constexpr VkFenceCreateInfo createInfo =
+        const VkFenceCreateInfo createInfo =
         {
             .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = 0,
+            .flags = createSignaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0u,
         };
 
         VkFence fence = VK_NULL_HANDLE;

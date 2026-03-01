@@ -32,9 +32,9 @@ namespace EOS
         ~Window();
         DELETE_COPY_MOVE(Window)
 
-        static void Poll();
+        void Poll();
         [[nodiscard] ]bool ShouldClose() const;
-        [[nodiscard] ]bool IsFocused();
+        [[nodiscard] ]bool IsFocused() const;
 
         GLFWwindow* GlfwWindow;
         int Width;

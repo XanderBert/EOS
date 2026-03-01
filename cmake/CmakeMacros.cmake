@@ -10,11 +10,8 @@
 endmacro()
 
 macro(COPY_SHADERS_TO_BIN targetName shaderFiles)
-    if(UNIX)
-        set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/bin")
-    else()
-        set(SHADER_OUTPUT_DIR "$<TARGET_FILE_DIR:${targetName}>")
-    endif()
+
+    set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/bin")
 
     # Unique name per target to avoid clashes between lib and examples
     set(COPY_TARGET_NAME "CopyShaders_${targetName}")
@@ -38,7 +35,7 @@ macro(SETUP_TARGET_DEFAULTS targetName)
     set_property(TARGET ${targetName} PROPERTY CXX_STANDARD_REQUIRED ON)
 
     if(MSVC)
-        set_property(TARGET ${targetName} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set_property(TARGET ${targetName} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
     endif()
 endmacro()
 
@@ -104,9 +101,7 @@ macro(CREATE_EXAMPLE name)
     SETUP_GROUPS("${SRC_FILES}")
     SOURCE_GROUP(shaders FILES "${SHADER_FILES}")
 
-    if(UNIX)
-        set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
-    endif()
+    set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
 
     SETUP_TARGET_DEFAULTS(${PROJECT_NAME})
     COPY_SHADERS_TO_BIN(${PROJECT_NAME} "${SHADER_FILES}")

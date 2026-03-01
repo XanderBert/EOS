@@ -8,7 +8,8 @@ namespace EOS
         /// Setup the error callback
         glfwSetErrorCallback([](int error, const char* message)
         {
-            Logger->error("GLFW: {}, {}", error, message);
+            //Logger->error("GLFW: {}, {}", error, message);
+            printf(fmt::format("GLFW: {}, {}", error, message).c_str());
         });
 
         // Initialize GLFW
@@ -20,11 +21,12 @@ namespace EOS
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
 #if defined(EOS_PLATFORM_WAYLAND)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #elif defined(EOS_PLATFORM_X11)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#elif defined(EOS_PLATFORM_WIN32)
+#elif defined(EOS_PLATFORM_WINDOWS)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
 #endif
 
@@ -70,6 +72,10 @@ namespace EOS
         }
 
         // Get the actual window size and store it
+#if defined(EOS_PLATFORM_WINDOWS)
+        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
+#endif
+
         contextDescription.Width  = Width;
         contextDescription.Height = Height;
 
@@ -90,7 +96,7 @@ namespace EOS
 #elif defined(EOS_PLATFORM_X11)
         contextDescription.Window     = reinterpret_cast<void*>(glfwGetX11Window(GlfwWindow));
         contextDescription.Display    = static_cast<void*>(glfwGetX11Display());
-#elif defined(EOS_PLATFORM_WIN32)
+#elif defined(EOS_PLATFORM_WINDOWS)
         contextDescription.Window     = static_cast<void*>(glfwGetWin32Window(GlfwWindow));
         contextDescription.Display    = nullptr;  // Not used on Windows
 #endif
@@ -105,6 +111,7 @@ namespace EOS
     void Window::Poll()
     {
         glfwPollEvents();
+        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
     }
 
     bool Window::ShouldClose() const
@@ -112,10 +119,9 @@ namespace EOS
         return glfwWindowShouldClose(GlfwWindow);
     }
 
-    bool Window::IsFocused()
+    bool Window::IsFocused() const
     {
-        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
-        return Width || Height;
+        return glfwGetWindowAttrib(GlfwWindow, GLFW_FOCUSED);
     }
 }
 

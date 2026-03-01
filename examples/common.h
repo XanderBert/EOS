@@ -48,22 +48,22 @@ struct Camera final
     , Far(cameraDescription.far)
     {}
 
-    glm::mat4 GetViewMatrix() const
+    [[nodiscard]] glm::mat4 GetViewMatrix() const
     {
         return glm::lookAt(Position, Position + GetForward(), Up);
     }
 
-    glm::mat4 GetProjectionMatrix(float aspectRatio) const
+    [[nodiscard]] glm::mat4 GetProjectionMatrix(float aspectRatio) const
     {
         return glm::perspective(glm::radians(Fov), aspectRatio, Near, Far);
     }
 
-    glm::mat4 GetViewProjectionMatrix(float aspectRatio) const
+    [[nodiscard]] glm::mat4 GetViewProjectionMatrix(float aspectRatio) const
     {
         return GetProjectionMatrix(aspectRatio) * GetViewMatrix();
     }
 
-    glm::vec3 GetPosition() const
+    [[nodiscard]] glm::vec3 GetPosition() const
     {
         return Position;
     }
@@ -146,7 +146,7 @@ public:
 
     DELETE_COPY_MOVE(ExampleApp)
 
-    EOS::Holder<EOS::TextureHandle> CreateDepthTexture() const
+    [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateDepthTexture() const
     {
         return Context->CreateTexture(
         {
@@ -174,7 +174,7 @@ public:
         while (!Window.ShouldClose())
         {
             Window.Poll();
-            if (!Window.IsFocused()) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            if (!Window.IsFocused()) continue;
 
             //Update time
             const float currentTime = glfwGetTime();

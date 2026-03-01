@@ -203,6 +203,7 @@ private:
     bool GetNextImage{true};
 
     std::vector<VkSemaphore> AcquireSemaphores{};
+    std::vector<VkFence> AcquireFences{};
     std::vector<EOS::TextureHandle> Textures{};
     std::vector<uint64_t> TimelineWaitValues{};
 

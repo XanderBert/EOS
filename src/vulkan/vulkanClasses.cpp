@@ -850,6 +850,9 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     AcquireSemaphores.clear();
     AcquireSemaphores.reserve(NumberOfSwapChainImages);
 
+    AcquireFences.reserve(NumberOfSwapChainImages);
+    AcquireFences.reserve(NumberOfSwapChainImages);
+
     Textures.clear();
     Textures.reserve(NumberOfSwapChainImages);
 
@@ -868,8 +871,9 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     // create images, image views and framebuffers
     for (uint32_t i{}; i < NumberOfSwapChainImages; ++i)
     {
-        //Create our Acquire Semaphore for this swapChain image
-        AcquireSemaphores.emplace_back(VkSynchronization::CreateSemaphore(vulkanSwapChainDescription.vulkanContext->VulkanDevice, "SwapChain Acquire Semaphore: " + i));
+        //Create our Acquire Semaphore and fences for this swapChain image
+        AcquireSemaphores.emplace_back(VkSynchronization::CreateSemaphore(vulkanSwapChainDescription.vulkanContext->VulkanDevice, fmt::format("SwapChain Acquire Semaphore: {}", i).c_str()));
+        AcquireFences.emplace_back(VkSynchronization::CreateFence(vulkanSwapChainDescription.vulkanContext->VulkanDevice, fmt::format("SwapChain Acquire Fence: {}", i).c_str(), true));
 
         //Create a image
         swapChainImageDescription.Image = swapChainImages[i];
@@ -898,6 +902,11 @@ VulkanSwapChain::~VulkanSwapChain()
     for (const VkSemaphore& semaphore : AcquireSemaphores)
     {
         vkDestroySemaphore(VkContext->VulkanDevice, semaphore, nullptr);
+    }
+
+    for (const VkFence& fence : AcquireFences)
+    {
+        vkDestroyFence(VkContext->VulkanDevice, fence, nullptr);
     }
 }
 
@@ -961,12 +970,16 @@ void VulkanSwapChain::GetAndWaitOnNextImage()
             .pSemaphores = &VkContext->TimelineSemaphore,
             .pValues = &TimelineWaitValues[CurrentImageIndex],
         };
-
-        // when timeout is set to UINT64_MAX, we wait until the next image has been acquired
         VK_ASSERT(vkWaitSemaphores(VkContext->VulkanDevice, &waitInfo, UINT64_MAX));
 
+        VK_ASSERT(vkWaitForFences(VkContext->VulkanDevice, 1, &AcquireFences[CurrentImageIndex], VK_TRUE, UINT64_MAX));
+        VK_ASSERT(vkResetFences(VkContext->VulkanDevice, 1, &AcquireFences[CurrentImageIndex]));
+        VkFence acquireFence = AcquireFences[CurrentImageIndex];
+
         VkSemaphore& acquireSemaphore = AcquireSemaphores[CurrentImageIndex];
-        const VkResult result = vkAcquireNextImageKHR(VkContext->VulkanDevice, SwapChain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &CurrentImageIndex);
+
+        // when timeout is set to UINT64_MAX, we wait until the next image has been acquired
+        const VkResult result = vkAcquireNextImageKHR(VkContext->VulkanDevice, SwapChain, UINT64_MAX, acquireSemaphore, acquireFence, &CurrentImageIndex);
         CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "vkAcquireNextImageKHR Failed");
 
         GetNextImage = false;
@@ -1082,6 +1095,7 @@ CommandPool::~CommandPool()
 void CommandPool::WaitSemaphore(const VkSemaphore& semaphore)
 {
     CHECK(WaitOnSemaphore.semaphore == VK_NULL_HANDLE, "The wait Semaphore is not Empty");
+    CHECK(semaphore != VK_NULL_HANDLE, "The wait Semaphore is Empty");
     WaitOnSemaphore.semaphore = semaphore;
 }
 
