@@ -903,9 +903,11 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
         AcquireSemaphores.emplace_back(VkSynchronization::CreateSemaphore(vulkanSwapChainDescription.vulkanContext->VulkanDevice, fmt::format("SwapChain Acquire Semaphore: {}", i).c_str()));
         AcquireFences.emplace_back(VkSynchronization::CreateFence(vulkanSwapChainDescription.vulkanContext->VulkanDevice, fmt::format("SwapChain Acquire Fence: {}", i).c_str(), true));
 
+        std::string debugName = fmt::format("SwapChain Image: {}", i);
+
         //Create a image
         swapChainImageDescription.Image = swapChainImages[i];
-        swapChainImageDescription.DebugName = fmt::format("SwapChain Image: {}", i).c_str();
+        swapChainImageDescription.DebugName = debugName.c_str();
         VulkanImage swapChainImage{swapChainImageDescription};
 
         Textures.emplace_back(vulkanSwapChainDescription.vulkanContext->TexturePool.Create(std::move(swapChainImage)));
@@ -2012,7 +2014,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     //TODO: Create pipeline cache
 
-    UseStagingDevice = IsHostVisibleMemorySingleHeap();
+    UseStagingDevice = !IsHostVisibleMemorySingleHeap();
 
     CreateAllocator();
 
@@ -2380,7 +2382,6 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
         UPDATE_PUSH_CONSTANT_SIZE(meshModule, VK_SHADER_STAGE_MESH_BIT_EXT);
 
         #undef UPDATE_PUSH_CONSTANT_SIZE
-        EOS::Logger->warn("Creating Render Pipeline with ShaderStages: {}", string_VkShaderStageFlags(renderPipelineState.ShaderStageFlags));
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(VulkanPhysicalDevice, &props);
         CHECK(pushConstantsSize <= props.limits.maxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, props.limits.maxPushConstantsSize);
@@ -2781,7 +2782,7 @@ void VulkanContext::Upload(EOS::BufferHandle handle, const void *data, size_t si
     VulkanStagingBuffer->BufferSubData(handle, offset, size, data);
 }
 
-unsigned long VulkanContext::GetGPUAddress(EOS::BufferHandle handle, size_t offset) const
+uint64_t VulkanContext::GetGPUAddress(EOS::BufferHandle handle, size_t offset) const
 {
     CHECK((offset & 7) == 0, "Buffer offset must be a multiple of 8");
     const VulkanBuffer* buf = BufferPool.Get(handle);
@@ -3306,8 +3307,11 @@ void VulkanContext::UpdateDescriptorSet()
         const VkImageView view = obj.Object.ImageView;
         const VkImageView storageView = obj.Object.ImageViewStorage ? obj.Object.ImageViewStorage : view;
 
+        // Swapchains should not be in the DescriptorSet
+        const bool isSwapChain = VulkanImage::IsSwapChainImage(img);
+
         // multisampled images cannot be directly accessed from shaders
-        const bool isTextureAvailable = (img.Samples & VK_SAMPLE_COUNT_1_BIT) == VK_SAMPLE_COUNT_1_BIT;
+        const bool isTextureAvailable = !isSwapChain && (img.Samples & VK_SAMPLE_COUNT_1_BIT) == VK_SAMPLE_COUNT_1_BIT;
         const bool isYUVImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && VkContext::GetNumberOfImagePlanes(img.ImageFormat) > 1;
         const bool isSampledImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && !isYUVImage;
         const bool isStorageImage = isTextureAvailable && VulkanImage::IsStorageImage(img);
@@ -3456,7 +3460,7 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
     {
         vmaAllocInfo =
         {
-            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
             .usage = VMA_MEMORY_USAGE_AUTO,
             .requiredFlags = memFlags,
             .preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT

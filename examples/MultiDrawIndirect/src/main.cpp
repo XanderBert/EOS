@@ -1,5 +1,3 @@
-#include <iostream>
-
 #include "../../common.h"
 #include "EOS.h"
 #include "logger.h"
@@ -12,9 +10,6 @@ struct PerFrameData final
     glm::mat4 mvp;
     glm::vec4 cameraPos;
 };
-static_assert(sizeof(PerFrameData) == 144, "PerFrameData must be 144 bytes!");
-static_assert(offsetof(PerFrameData, mvp) == 64, "MVP must be at offset 64!");
-static_assert(offsetof(PerFrameData, cameraPos) == 128, "cameraPos must be at offset 128!");
 
 struct DrawData final
 {
@@ -32,17 +27,36 @@ struct Vertex final
     glm::vec4 tangent;
 };
 
+struct FramePointers final
+{
+    uint64_t frameDataPtr;
+    uint64_t drawDataPtr;
+};
+
+EOS::ShaderModuleHolder VertexShader;
+EOS::ShaderModuleHolder PixelShader;
+
+EOS::TextureHolder DepthTexture;
+
+EOS::BufferHolder VertexBuffer;
+EOS::BufferHolder IndexBuffer;
+
+EOS::BufferHolder PerDrawBuffer;
+EOS::BufferHolder PerFrameBuffer;
+
+EOS::BufferHolder IndirectDrawBuffer;
+
 
 int main()
 {
-    EOS::ContextCreationDescription contextDescr
+    constexpr EOS::ContextCreationDescription contextDescr
     {
-        .Config                 = { .EnableValidationLayers = false },
+        .Config                 = { .EnableValidationLayers = true },
         .PreferredHardwareType  = EOS::HardwareDeviceType::Discrete,
         .ApplicationName        = "EOS - MultiDrawIndirect",
     };
 
-    CameraDescription cameraDescription
+    constexpr CameraDescription cameraDescription
     {
         .origin = {0.0f, 10.0f, -3.5f},
         .rotation = {0, 0.0f},
@@ -57,10 +71,11 @@ int main()
 
     ExampleApp App{appDescription};
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
+    VertexShader = EOS::LoadShader(App.Context, App.ShaderCompiler, "indirectModel", EOS::ShaderStage::Vertex);
+    PixelShader  = EOS::LoadShader(App.Context, App.ShaderCompiler, "indirectModel", EOS::ShaderStage::Fragment);
+    DepthTexture = App.CreateDepthTexture();
 
-    //TODO: This could be constevaled with reflection
+    //TODO: This could be constevaled with reflection Or use Shader Resource Table model
     constexpr EOS::VertexInputData vdesc
     {
         .Attributes =
@@ -77,18 +92,12 @@ int main()
         }
     };
 
-    EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
-
-
-
-
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
     std::vector<Vertex> vertices;
     vertices.reserve(scene.vertices.size());
     for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
 
-
-    EOS::Holder<EOS::BufferHandle> vertexBuffer = App.Context->CreateBuffer(
+    VertexBuffer = App.Context->CreateBuffer(
     {
       .Usage     = EOS::BufferUsageFlags::Vertex,
       .Storage   = EOS::StorageType::Device,
@@ -97,7 +106,7 @@ int main()
       .DebugName = "Buffer: vertex"
       });
 
-    EOS::Holder<EOS::BufferHandle> indexBuffer = App.Context->CreateBuffer(
+    IndexBuffer = App.Context->CreateBuffer(
     {
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
@@ -118,21 +127,20 @@ int main()
         });
     }
 
-    EOS::Holder<EOS::BufferHandle> drawDataBuffer = App.Context->CreateBuffer({
+    PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
-        .Storage   = EOS::StorageType::HostVisible,
+        .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(DrawData) * drawData.size(),
         .Data      = drawData.data(),
-        .DebugName = "drawDataBuffer",
+        .DebugName = "PerDrawBuffer",
     });
 
-
-    EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer(
+    PerFrameBuffer = App.Context->CreateBuffer(
 {
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
         .Size      = sizeof(PerFrameData),
-        .DebugName = "perFrameBuffer",
+        .DebugName = "PerFrameBuffer",
     });
 
 
@@ -151,27 +159,34 @@ int main()
         });
     }
 
-    EOS::Holder<EOS::BufferHandle> indirectBuffer = App.Context->CreateBuffer({
+    IndirectDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::Indirect,
         .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(EOS::DrawIndexedIndirectCommand) * indirectCmds.size(),
         .Data      = indirectCmds.data(),
-        .DebugName = "indirectBuffer",
+        .DebugName = "IndirectDrawBuffer",
     });
 
 
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
-    EOS::RenderPipelineDescription renderPipelineDescription
+    const EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = shaderHandleVert,
-        .FragmentShader = shaderHandleFrag,
+        .VertexShader = VertexShader,
+        .FragmentShader = PixelShader,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
         .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
+
+
+    const FramePointers framePointers
+    {
+        .frameDataPtr = App.Context->GetGPUAddress(PerFrameBuffer),
+        .drawDataPtr = App.Context->GetGPUAddress(PerDrawBuffer),
+    };
 
 
     App.Run([&]()
@@ -188,12 +203,13 @@ int main()
             .mvp = mvp,
             .cameraPos = glm::vec4(App.MainCamera.GetPosition(), 0),
         };
+        App.Context->Upload(PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
 
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
+
         EOS::Framebuffer framebuffer
         {
             .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DepthStencil = { .Texture = depthTexture },
+            .DepthStencil = { .Texture = DepthTexture },
             .DebugName = "Basic Color Depth Framebuffer"
         };
 
@@ -209,33 +225,23 @@ int main()
             .IsDepthWriteEnabled = true,
         };
 
+        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         cmdPipelineBarrier(cmdBuffer, {},
             {
                 { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { depthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
+                { DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
             });
 
-        cmdUpdateBuffer(cmdBuffer, perFrameBuffer, perFrameData);
         cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
         {
-            cmdPushMarker(cmdBuffer, "Sponza", 0xff0000ff);
-            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
+            cmdPushMarker(cmdBuffer, "Sponza", 0xff00f0ff);
+            cmdBindVertexBuffer(cmdBuffer, 0, VertexBuffer);
+            cmdBindIndexBuffer(cmdBuffer, IndexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
 
-            struct FramePointers
-            {
-                uint64_t frameDataPtr;
-                uint64_t drawDataPtr;
-            }pc
-            {
-                .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
-                .drawDataPtr = App.Context->GetGPUAddress(drawDataBuffer)
-            };
-
-            cmdPushConstants(cmdBuffer, pc);
+            cmdPushConstants(cmdBuffer, framePointers);
             cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
+            cmdDrawIndexedIndirect(cmdBuffer, IndirectDrawBuffer, 0, scene.meshes.size());
 
             cmdPopMarker(cmdBuffer);
         }
@@ -244,6 +250,15 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
         App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
     });
+
+    VertexShader.Reset();
+    PixelShader.Reset();
+    DepthTexture.Reset();
+    VertexBuffer.Reset();
+    IndexBuffer.Reset();
+    PerDrawBuffer.Reset();
+    PerFrameBuffer.Reset();
+    IndirectDrawBuffer.Reset();
 
     return 0;
 }

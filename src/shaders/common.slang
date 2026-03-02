@@ -16,7 +16,7 @@ public T LoadBuffer<T>(uint64_t address)
     return *((Ptr<T>)address);
 }
 
-public T LoadBufferArray<T>(uint64_t address, uint index)
+public T LoadBufferArray<T>(uint64_t address, uint64_t  index)
 {
     return *((Ptr<T>)address + index);
 }

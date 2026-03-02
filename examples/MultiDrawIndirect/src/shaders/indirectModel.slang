@@ -68,20 +68,9 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input)
 {
-    if(pc.PerFramePointer._ptr == 0)
-    {
-        return float4(1,0,0,1);
-    }
-
-    if(pc.PerDrawPointer == 0)
-    {
-        return float4(0,1,0,1);
-    }
-
-
     // Sample textures
     PerFrameData frameData = pc.PerFramePointer.get();
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
+    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, (uint64_t)input.DrawIndex);
 
     float3 albedoSample = TextureBindless2D(draw.albedo, 0, input.UV).rgb;
     float2 normalSample = TextureBindless2D(draw.normal, 0, input.UV).rg;

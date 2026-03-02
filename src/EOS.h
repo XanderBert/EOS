@@ -48,6 +48,17 @@ namespace EOS
     using QueryPoolHandle           = Handle<struct QueryPool>;
     using AccelStructHandle         = Handle<struct AccelerationStructure>;
 
+    using ComputePipelineHolder     = Holder<ShaderModuleHandle>;
+    using RenderPipelineHolder      = Holder<RenderPipelineHandle>;
+    using RayTracingPipelineHolder  = Holder<RayTracingPipelineHandle>;
+    using ShaderModuleHolder        = Holder<ShaderModuleHandle>;
+    using SamplerHolder             = Holder<SamplerHandle>;
+    using BufferHolder              = Holder<BufferHandle>;
+    using TextureHolder             = Holder<TextureHandle>;
+    using QueryPoolHolder           = Holder<QueryPoolHandle>;
+    using AccelStructHolder         = Holder<AccelStructHandle>;
+
+
     struct HardwareDeviceDescription final
     {
         uintptr_t ID{};
@@ -515,7 +526,7 @@ namespace EOS
          * @param handle The handle of the buffer that has been uploaded.
          * @param offset The offset it needs to have inside the buffer.
          */
-        virtual unsigned long GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
+        [[nodiscard]] virtual uint64_t GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
 
         /**
         * @brief Handles the uploading of textures to the GPU
