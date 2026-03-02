@@ -32,7 +32,7 @@ struct CameraDescription final
     float acceleration      = 45.0f;
     float damping           = 5.0f;
     float near              = 0.1f;
-    float far               = 100.0f;
+    float far               = 5000.0f;
 };
 
 struct Camera final

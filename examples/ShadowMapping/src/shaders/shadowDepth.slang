@@ -12,19 +12,24 @@ struct VSInput
     float4 Tangent  : TANGENT;
 };
 
+struct VSOutput
+{
+    float4 Pos      : SV_Position;
+}
+
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
-float4 vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
+VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
+    VSOutput output;
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
+    output.Pos = mul(float4(input.Pos, 1.0), frameData.depthMVP);
 
-    //return mul(float4(input.Pos, 1.0), frameData.depthMVP);
-    return mul(mul(float4(input.Pos, 1.0), frameData.Model), frameData.depthMVP);
-    //return mul(frameData.depthMVP, mul(frameData.Model, float4(input.Pos, 1.0)));
+    return output;
 }
 
 [shader("fragment")]
 float4 fragmentMain()
 {
-	return float4(1.0, 0.0, 0.0, 1.0);
+	return float4(1.0, 0.1, 0.1, 1.0);
 }

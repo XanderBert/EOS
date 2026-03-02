@@ -8,10 +8,10 @@ public struct PerFrameData
     public float4   lightPos;
     public float3   cameraPos;
     public uint     shadowMapID;
-    public uint64_t drawDataPtr;
 };
 
 public struct PushConstants
 {
     public uint64_t PerFramePointer;
+    public uint64_t PerDrawPointer;
 };

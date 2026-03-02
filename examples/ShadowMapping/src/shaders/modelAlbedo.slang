@@ -41,29 +41,6 @@ struct DrawData
 };
 
 
-static const float4x4 biasMat = float4x4(
-    0.5, 0.0, 0.0, 0.5,
-    0.0, 0.5, 0.0, 0.5,
-    0.0, 0.0, 1.0, 0.0,
-    0.0, 0.0, 0.0, 1.0);
-
-
-float textureProj(float4 shadowCoord, float2 off, uint depthID)
-{
-	float shadow = 1.0;
-	if ( shadowCoord.z > -0.0 && shadowCoord.z < 1.0 )
-    {
-        float dist = TextureBindless2D(depthID, 0, shadowCoord.xy + off).r;
-		if ( shadowCoord.w > 0.0 && dist < shadowCoord.z )
-		{
-			shadow = 0.1;
-		}
-	}
-	return shadow;
-}
-
-
-
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
@@ -78,10 +55,14 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
     output.ViewVec      = -output.Pos.xyz;
-    output.LightVec     = normalize(frameData.lightPos.xyz - input.Pos);
-    output.ShadowCoord  = mul(biasMat, mul(mul(float4(input.Pos, 1.0), frameData.Model), frameData.depthMVP));
-    //output.ShadowCoord = mul(biasMat, mul(frameData.depthMVP, float4(input.Pos, 1.0)));
-    //output.ShadowCoord = mul(biasMat, mul(frameData.depthMVP, mul(frameData.Model, float4(input.Pos, 1.0))));
+    //output.LightVec     = normalize(frameData.lightPos.xyz - input.Pos);
+    //output.LightVec     = normalize(frameData.lightPos.xyz - input.Pos);
+    output.LightVec = normalize(frameData.lightPos.xyz - output.WorldPos);
+
+    //output.ShadowCoord    = mul(float4(output.WorldPos, 1.0), frameData.depthMVP);
+    output.ShadowCoord = mul(float4(input.Pos, 1.0), frameData.depthMVP);
+
+
     return output;
 }
 
@@ -90,7 +71,7 @@ float4 fragmentMain(VSOutput input)
 {
     // Sample textures
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    DrawData draw = LoadBufferArray<DrawData>(frameData.drawDataPtr, input.DrawIndex);
+    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
 
 
     float3 albedoSample = TextureBindless2D(draw.albedo, 0, input.UV).rgb;
@@ -111,6 +92,7 @@ float4 fragmentMain(VSOutput input)
     float3 L = normalize(frameData.lightPos.xyz - input.WorldPos);
 
 
+
     float3 F0 = float3(0.04);
     F0 = lerp(F0, material.albedo, material.metallic);
 
@@ -127,20 +109,36 @@ float4 fragmentMain(VSOutput input)
     // Specular reflectance
     float3 specular = reflection * (F * brdf.x + brdf.y);
     float3 ambient = (kD * diffuse + specular);
-
     float3 color = ambient + Lo;
-    float shadow = textureProj((input.ShadowCoord / input.ShadowCoord.w), float2(0.0, 0.0), frameData.shadowMapID);
+
+
+    float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
+    //projCoords = projCoords * 0.5 + 0.5;
+    // Only remap XY -> Vulkan Depth stays in [0, 1]
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+
+    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0 ||
+        projCoords.z < 0.0 || projCoords.z > 1.0)
+    {
+        return float4(color, 1.0);
+    }
+
+
+    float closestDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy).r;
+    //return float4(closestDepth);
+    //return float4(LinearDepth01(closestDepth, 0.1, 5000));
+
+    float currentDepth = projCoords.z;
+    //return float4(currentDepth);
+    //return float4(LinearDepth01(currentDepth, 0.1, 5000));
+
+    //float bias = 0.009;
+    //float bias = max(0.05 * (1.0 - dot(N, L)), 0.005);
+    float bias = max(0.0005 * (1.0 - dot(N, L)), 0.00005);
+    float shadow = currentDepth - bias < closestDepth  ? 1.0 : 0.3;
+
     //return float4(shadow);
+
     return float4(color * shadow, 1.0);
-
-    float4 sc = input.ShadowCoord / input.ShadowCoord.w;
-    //return float4(sc.xy, 0.0, 1.0);
-
-    float dist = TextureBindless2D(frameData.shadowMapID, 0, sc.xy).r;
-    // Linearize it
-    float zNear = 0.01;
-    float zFar = 100.0;
-    float linearDepth = (2.0 * zNear) / (zFar + zNear - dist * (zFar - zNear));
-    return float4(linearDepth.xxx, 1.0);
-    return linearDepth;
 }

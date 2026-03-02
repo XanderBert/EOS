@@ -1,3 +1,4 @@
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include "../../common.h"
 #include "EOS.h"
 #include "logger.h"
@@ -12,7 +13,6 @@ struct PerFrameData final
     glm::vec4 lightPos;
     glm::vec3 cameraPos;
     uint32_t  shadowMapID;
-    uint64_t  drawDataPtr;
 };
 
 struct DrawData final
@@ -31,6 +31,12 @@ struct Vertex final
     glm::vec4 tangent;
 };
 
+struct FramePointers final
+{
+    uint64_t frameDataPtr;
+    uint64_t drawDataPtr;
+};
+
 int main()
 {
     EOS::ContextCreationDescription contextDescr
@@ -42,9 +48,17 @@ int main()
 
     CameraDescription cameraDescription
     {
-        .origin = {0.0f, 10.0f, -3.5f},
-        .rotation = {0, 0.0f},
-        .acceleration = 200.0f
+        //.origin = {520.0f, 700.0f, 350.5f},
+        //.rotation = {-30, -90.0f},
+        .origin = {220.0f, 700.0f, 300.5f},
+        .rotation = {-60, -90.0f},
+        .acceleration = 800.0f
+    };
+
+    CameraDescription lightDescription
+    {
+        .origin = {220.0f, 700.0f, 300.5f},
+        .rotation = {-60, -90.0f},
     };
 
     ExampleAppDescription appDescription
@@ -84,10 +98,22 @@ int main()
 {
         .Type                   = EOS::ImageType::Image_2D,
         .TextureFormat          = EOS::Format::Z_F32,
-        .TextureDimensions      = {2048, 2048},
+        .TextureDimensions      = {static_cast<uint32_t>(2048), static_cast<uint32_t>(2048)},
         .Usage                  = EOS::TextureUsageFlags::Attachment | EOS::TextureUsageFlags::Sampled,
-        .DebugName              = "Depth Buffer",
+        .DebugName              = "Shadow Depth Buffer",
     });
+
+
+    constexpr EOS::SamplerDescription depthMapSamplerDesc
+    {
+        .wrapU = EOS::SamplerWrap::ClampToBorder,
+        .wrapV = EOS::SamplerWrap::ClampToBorder,
+        .wrapW = EOS::SamplerWrap::ClampToBorder,
+        .maxAnisotropic = 0,
+        .depthCompareEnabled = false,
+        .debugName = "DepthMap Sampler",
+    };
+    EOS::SamplerHolder depthMapSampler = App.Context->CreateSampler(depthMapSamplerDesc);
 
 
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
@@ -125,12 +151,12 @@ int main()
         });
     }
 
-    EOS::Holder<EOS::BufferHandle> drawDataBuffer = App.Context->CreateBuffer({
+    EOS::Holder<EOS::BufferHandle> perDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
-        .Storage   = EOS::StorageType::HostVisible,
+        .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(DrawData) * drawData.size(),
         .Data      = drawData.data(),
-        .DebugName = "drawDataBuffer",
+        .DebugName = "perDrawBuffer",
     });
 
     EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer(
@@ -183,34 +209,42 @@ int main()
         .VertexInput = vdesc,
         .VertexShader = shaderHandleShadowVert,
         .FragmentShader = shaderHandleShadowFrag,
-        .ColorAttachments = {},
         .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
-        .PipelineCullMode = EOS::CullMode::Back,
+        .PipelineCullMode = EOS::CullMode::Front,
         .DebugName = "ShadowMap Render Pipeline",
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
-
-    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
-    constexpr glm::vec3 lightPos = glm::vec3(10.0f, 10.0f, 0.0f);
-
-
-    // Matrix from light's point of view
-    constexpr float lightFOV = 90.0f;
-    constexpr float zNear = 0.01f;
-    constexpr float zFar = 100.0f;
-    const glm::mat4 depthProjectionMatrix = glm::perspective(glm::radians(lightFOV), 1.0f, zNear, zFar);
-    const glm::mat4 depthViewMatrix = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0, 1, 0));
-    const glm::mat4 depthModelMatrix = m;//glm::mat4(1.0f);
-    const glm::mat4 depthMVP = depthProjectionMatrix * depthViewMatrix;
+    //const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
+    const glm::mat4 m = glm::mat4(1);
 
 
+    Camera light{lightDescription};
+
+
+    const FramePointers framePointers
+    {
+        .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
+        .drawDataPtr = App.Context->GetGPUAddress(perDrawBuffer),
+    };
 
     App.Run([&]()
     {
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
         if (std::isnan(aspectRatio)) return;
 
+
+        glm::mat4 lightProj = glm::ortho(
+    -500.0f, 500.0f,
+    -500.0f, 500.0f,
+    0.1f,
+    5000.0f
+);
+
+        glm::mat4 lightView = light.GetViewMatrix();
+        glm::mat4 depthMVP = lightProj * lightView * m;
+
+        //const glm::mat4 depthMVP = light.GetViewProjectionMatrix(1.0f) * m;//glm::mat4(1.0f);
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
         const PerFrameData perFrameData
@@ -218,27 +252,23 @@ int main()
             .model = m,
             .mvp = mvp,
             .depthMVP = depthMVP,
-            .lightPos = glm::vec4(lightPos, 1.0f),
+            .lightPos = glm::vec4(light.GetPosition(), 1.0f),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = shadowDepthTexture.Index(),
-            .drawDataPtr = App.Context->GetGPUAddress(drawDataBuffer)
         };
-
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
-
-
-        EOS::Framebuffer framebufferShadow
-        {
-            .DepthStencil = { .Texture = shadowDepthTexture },
-            .DebugName = "ShadowMap framebuffer"
-        };
-
+        App.Context->Upload(perFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
 
         EOS::Framebuffer framebufferShade
         {
             .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
             .DepthStencil = { .Texture = depthTexture },
             .DebugName = "Basic Color Depth Framebuffer",
+        };
+
+        EOS::Framebuffer framebufferShadow
+        {
+            .DepthStencil = { .Texture = shadowDepthTexture },
+            .DebugName = "ShadowMap framebuffer"
         };
 
         constexpr EOS::RenderPass renderPass
@@ -258,6 +288,9 @@ int main()
             .IsDepthWriteEnabled = true,
         };
 
+
+        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
+
         cmdPipelineBarrier(cmdBuffer, {},
             {
                 { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
@@ -265,39 +298,26 @@ int main()
                 { shadowDepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
             });
 
-        cmdUpdateBuffer(cmdBuffer, perFrameBuffer, perFrameData);
-
-        struct FramePointers
-        {
-            uint64_t draw;
-        }pc
-        {
-            .draw = App.Context->GetGPUAddress(perFrameBuffer)
-        };
-
         cmdPushMarker(cmdBuffer, "Shadow Pass", 0xff0000ff);
         cmdBeginRendering(cmdBuffer, shadowRenderPass, framebufferShadow);
         {
             cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
             cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, renderPipelineShadowHandle);
-            cmdPushConstants(cmdBuffer, pc);
+            cmdPushConstants(cmdBuffer, framePointers);
             cmdSetDepthState(cmdBuffer, depthState);
             cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
         }
         cmdEndRendering(cmdBuffer);
         cmdPopMarker(cmdBuffer);
 
-        //Transition Shadow Depth to Shader Resource
+
         cmdPipelineBarrier(cmdBuffer, {},{{ shadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },});
 
-        cmdPushMarker(cmdBuffer, "Shade Pass", 0xff0000ff);
+        cmdPushMarker(cmdBuffer, "Shade Pass", 0xff00f0ff);
         cmdBeginRendering(cmdBuffer, renderPass, framebufferShade);
         {
-            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
-            cmdPushConstants(cmdBuffer, pc);
             cmdSetDepthState(cmdBuffer, depthState);
             cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
         }

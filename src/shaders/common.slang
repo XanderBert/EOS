@@ -62,3 +62,12 @@ public float3 GetShadingNormal(float3 n, float3 v, float2 normalSample, float2 u
 
     return normalize(mul(TBN, tangentNormal));
 }
+
+
+public float LinearDepth01(float depth, float near, float far)
+{
+    //return (depth - near) / (far - near);
+    float zLinear = (near * far) / (far - depth * (far - near));
+    //return zLinear;
+    return (zLinear - near) / (far - near); // normalized to [0,1]
+}
