@@ -86,8 +86,39 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
     vkCmdPipelineBarrier2(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, &dependencyInfo);
 }
 
-void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description, const EOS::Dependencies &dependancies)
+void cmdBindViewport(const EOS::ICommandBuffer& commandBuffer, const EOS::Viewport& viewport)
 {
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+
+    // Set the viewport
+    const VkViewport vp
+    {
+        .x = viewport.X,
+        .y = viewport.Height - viewport.Y,
+        .width = viewport.Width,
+        .height = -viewport.Height,
+        .minDepth = viewport.MinDepth,
+        .maxDepth = viewport.MaxDepth,
+    };
+    vkCmdSetViewport(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &vp);
+}
+
+void cmdBindScissorRect(const EOS::ICommandBuffer& commandBuffer, const EOS::ScissorRect& scissor)
+{
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+
+    const VkRect2D scissorRect2D
+    {
+        VkOffset2D{static_cast<int32_t>(scissor.X), static_cast<int32_t>(scissor.Y)},
+        VkExtent2D{static_cast<unsigned int>(scissor.Width), static_cast<unsigned int>(scissor.Height)},
+    };
+
+    vkCmdSetScissor(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &scissorRect2D);
+}
+
+void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description, const EOS::Dependencies &dependencies)
+{
+    //TODO: Implement dependencies
     CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
 
     CHECK(!vulkanCommandBuffer->IsRendering, "Make sure you call cmdEndRendering before calling cmdBeginRendering again");
@@ -102,7 +133,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
 
     VulkanTexturePool& texturePool = vulkanCommandBuffer->VkContext->TexturePool;
 
-    //Handle Rendering Attachements
+    //Handle Rendering Attachments
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     uint32_t mipLevel = 0;
     uint32_t frameBufferWidth = 0;
@@ -111,7 +142,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     for (uint32_t i{}; i != numberOfPassColorAttachments; ++i)
     {
         const EOS::Framebuffer::AttachmentDesc& attachment = vulkanCommandBuffer->VulkanFrameBuffer.Color[i];
-        CHECK(!attachment.Texture.Empty(), "The passed color attachement is empty");
+        CHECK(!attachment.Texture.Empty(), "The passed color attachment is empty");
 
         VulkanImage& colorTexture = *texturePool.Get(attachment.Texture);
         const EOS::RenderPass::AttachmentDesc& descColor = renderPass.Color[i];
@@ -129,7 +160,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             CHECK(dimension.width == frameBufferWidth, "All attachments should have the same width");
         }
 
-        //Check attachement height
+        //Check attachment height
         if (frameBufferHeight)
         {
             CHECK(dimension.height == frameBufferHeight, "All attachments should have the same height");
@@ -226,16 +257,16 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     const bool isStencilFormat = renderPass.Stencil.LoadOpState != EOS::LoadOp::Invalid;
     const VkRenderingInfo renderingInfo
     {
-      .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-      .pNext = nullptr,
-      .flags = 0,
-      .renderArea = {VkOffset2D{0u, 0u}, VkExtent2D{width, height}},
-      .layerCount = 1,
-      .viewMask = 0,
-      .colorAttachmentCount = numberOfPassColorAttachments,
-      .pColorAttachments = colorAttachments,
-      .pDepthAttachment = depthTextureHandle ? &depthAttachment : nullptr,
-      .pStencilAttachment = isStencilFormat ? &stencilAttachment : nullptr,
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .renderArea = {VkOffset2D{0u, 0u}, VkExtent2D{width, height}},
+        .layerCount = 1,
+        .viewMask = 0,
+        .colorAttachmentCount = numberOfPassColorAttachments,
+        .pColorAttachments = colorAttachments,
+        .pDepthAttachment = depthTextureHandle ? &depthAttachment : nullptr,
+        .pStencilAttachment = isStencilFormat ? &stencilAttachment : nullptr,
     };
 
     // Set the viewport
@@ -276,8 +307,8 @@ void cmdEndRendering(EOS::ICommandBuffer &commandBuffer)
 
     vkCmdEndRendering(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
 
-    EOS::Framebuffer& frambuffer = vulkanCommandBuffer->VulkanFrameBuffer;
-    frambuffer = {};
+    EOS::Framebuffer& framebuffer = vulkanCommandBuffer->VulkanFrameBuffer;
+    framebuffer = {};
 }
 
 void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipelineHandle renderPipelineHandle)
@@ -308,7 +339,7 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipeli
     }
 }
 
-void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t index, EOS::BufferHandle buffer, const uint64_t bufferOffset)
+void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t index, const EOS::BufferHandle& buffer, const uint64_t bufferOffset)
 {
     CHECK(!buffer.Empty(), "The handle to the buffer is empty");
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
@@ -320,7 +351,7 @@ void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t inde
     vkCmdBindVertexBuffers(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, index, 1, &vkbuffer->VulkanVkBuffer, &bufferOffset);
 }
 
-void cmdBindIndexBuffer(const EOS::ICommandBuffer &commandBuffer, EOS::BufferHandle indexBuffer, EOS::IndexFormat indexFormat, uint64_t indexBufferOffset)
+void cmdBindIndexBuffer(const EOS::ICommandBuffer &commandBuffer, const EOS::BufferHandle& indexBuffer, EOS::IndexFormat indexFormat, uint64_t indexBufferOffset)
 {
     CHECK(!indexBuffer.Empty(), "The handle to the buffer is empty");
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
@@ -357,11 +388,11 @@ void cmdDrawIndexed(const EOS::ICommandBuffer &commandBuffer, uint32_t indexCoun
     vkCmdDrawIndexed(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, baseInstance);
 }
 
-void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride)
+void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, const EOS::BufferHandle& indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride)
 {
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     VulkanBuffer* bufferIndirect = vulkanCommandBuffer->VkContext->BufferPool.Get(indirectBuffer);
-    CHECK(bufferIndirect, "Could not get the indirectDrawwingbuffer");
+    CHECK(bufferIndirect, "Could not get the indirectDrawingBuffer");
 
     vkCmdDrawIndexedIndirect(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, bufferIndirect->VulkanVkBuffer, indirectBufferOffset, drawCount, stride ? stride : sizeof(VkDrawIndexedIndirectCommand));
 }
@@ -381,10 +412,47 @@ void cmdPushConstants(const EOS::ICommandBuffer &commandBuffer, const void *data
     //const VulkanComputePipelineState* stateCompute = vkContext->ComputePipelinesPool.Get(vulkanCommandBuffer->CurrentComputePipeline);
     //const VulkanRayTracingPipelineState* stateRayTracing = vkContext->RayTracingPipelinesPool.Get(vulkanCommandBuffer->CurrentRayTracingPipeline);
 
-   CHECK(stateGraphics, "Graphics State is not valid");
+    CHECK(stateGraphics, "Graphics State is not valid");
 
 
     vkCmdPushConstants(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, stateGraphics->PipelineLayout, stateGraphics->ShaderStageFlags, static_cast<uint32_t>(offset), static_cast<uint32_t>(size), data);
+}
+
+void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
+{
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+
+    const VkCompareOp op = VkContext::CompareOpToVkCompareOp(depthState.CompareOpState);
+    vkCmdSetDepthWriteEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, depthState.IsDepthWriteEnabled ? VK_TRUE : VK_FALSE);
+    vkCmdSetDepthTestEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op != VK_COMPARE_OP_ALWAYS || depthState.IsDepthWriteEnabled);
+    vkCmdSetDepthCompareOp(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op);
+}
+
+void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, uint32_t colorRGBA)
+{
+    CHECK(label, "You need to have a name set for the marker");
+
+    if (!label)
+    {
+        return;
+    }
+
+    const VkDebugUtilsLabelEXT utilsLabel
+    {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pNext = nullptr,
+        .pLabelName = label,
+        .color
+        {
+            static_cast<float>((colorRGBA >> 0) & 0xff) / 255.0f,
+            static_cast<float>((colorRGBA >> 8) & 0xff) / 255.0f,
+            static_cast<float>((colorRGBA >> 16) & 0xff) / 255.0f,
+            static_cast<float>((colorRGBA >> 24) & 0xff) / 255.0f
+        },
+    };
+
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    vkCmdBeginDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &utilsLabel);
 }
 
 void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
@@ -393,7 +461,7 @@ void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
     vkCmdEndDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
 }
 
-void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle buffer, size_t size, const void* data, size_t bufferOffset)
+void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, const EOS::BufferHandle& buffer, size_t size, const void* data, size_t bufferOffset)
 {
     CHECK(buffer.Valid(), "The buffer is not valid");
     CHECK(data, "No data was provided for the buffer");
@@ -478,47 +546,10 @@ void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle
 
     vkCmdPipelineBarrier2(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &postDepInfo);
 }
-
-void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
-{
-    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
-
-    const VkCompareOp op = VkContext::CompareOpToVkCompareOp(depthState.CompareOpState);
-    vkCmdSetDepthWriteEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, depthState.IsDepthWriteEnabled ? VK_TRUE : VK_FALSE);
-    vkCmdSetDepthTestEnable(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op != VK_COMPARE_OP_ALWAYS || depthState.IsDepthWriteEnabled);
-    vkCmdSetDepthCompareOp(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, op);
-}
-
-void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, uint32_t colorRGBA)
-{
-    CHECK(label, "You need to have a name set for the marker");
-
-    if (!label)
-    {
-        return;
-    }
-
-    const VkDebugUtilsLabelEXT utilsLabel
-    {
-        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
-        .pNext = nullptr,
-        .pLabelName = label,
-        .color
-        {
-            static_cast<float>((colorRGBA >> 0) & 0xff) / 255.0f,
-            static_cast<float>((colorRGBA >> 8) & 0xff) / 255.0f,
-            static_cast<float>((colorRGBA >> 16) & 0xff) / 255.0f,
-            static_cast<float>((colorRGBA >> 24) & 0xff) / 255.0f
-        },
-    };
-
-    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
-    vkCmdBeginDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &utilsLabel);
-}
 #pragma endregion
 
 
-void VulkanBuffer::BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data)
+void VulkanBuffer::BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data) const
 {
     CHECK(MappedPtr, "buffer is not host-visible");
     CHECK(offset + size <= BufferSize, "Buffer is not big enough to add the data to it");
@@ -681,7 +712,7 @@ void VulkanImage::GenerateMipmaps(VkCommandBuffer commandBuffer) const
     const bool hardwareDownscalingSupported = (FormatProperties.optimalTilingFeatures & formatFeatureMask) == formatFeatureMask;
     if (!hardwareDownscalingSupported)
     {
-        EOS::Logger->warn("Does not support hardware downscaling while generinting mips for this image:{}", DebugName);
+        EOS::Logger->warn("Does not support hardware downscaling while generating mips for this image:{}", DebugName);
     }
 
 
@@ -758,7 +789,7 @@ void VulkanImage::GenerateMipmaps(VkCommandBuffer commandBuffer) const
 
 VkImageAspectFlags VulkanImage::GetImageAspectFlags() const
 {
-    //TODO Move this functionaliyt towards  VkSynchronization::ConvertToVkImageAspectFlags or remove that one and use this one. which may be even better.
+    //TODO Move this functionality towards  VkSynchronization::ConvertToVkImageAspectFlags or remove that one and use this one. which may be even better.
     const bool isDepthFormat =  IsDepthFormat(ImageFormat);
     const bool isStencilFormat =  IsStencilFormat(ImageFormat);
 
@@ -839,7 +870,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     // Get the imageUsageFlags
     VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     const bool isStorageSupported = (supportDetails.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) > 0;
-    const bool isTilingOptimalSupported = (properties.optimalTilingFeatures & VK_IMAGE_USAGE_STORAGE_BIT > 0);
+    const bool isTilingOptimalSupported = ((properties.optimalTilingFeatures & VK_IMAGE_USAGE_STORAGE_BIT) > 0);
 
     if (isStorageSupported && isTilingOptimalSupported) { usageFlags |= VK_IMAGE_USAGE_STORAGE_BIT; }
 
@@ -905,7 +936,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
         std::string debugName = fmt::format("SwapChain Image: {}", i);
 
-        //Create a image
+        //Create an image
         swapChainImageDescription.Image = swapChainImages[i];
         swapChainImageDescription.DebugName = debugName.c_str();
         VulkanImage swapChainImage{swapChainImageDescription};
@@ -1022,7 +1053,7 @@ VkSurfaceFormatKHR VulkanSwapChain::GetSwapChainFormat(const std::vector<VkSurfa
     //TODO: Look into VkSurfaceFormat2KHR -> this enables Compression of the swapChain image
     //https://docs.vulkan.org/samples/latest/samples/performance/image_compression_control/README.html
 
-    //Non Linear is the default
+    //Non-Linear is the default
     VkSurfaceFormatKHR preferred{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
     if (desiredColorSpace == EOS::ColorSpace::SRGB_Linear)
     {
@@ -1185,7 +1216,7 @@ void CommandPool::Signal(const VkSemaphore& semaphore, const uint64_t& signalVal
 
 bool CommandPool::IsReady(EOS::SubmitHandle handle, bool fastCheck) const
 {
-    //If its a empty handle then its "ready"
+    //If it's an empty handle then its "ready"
     if (handle.Empty())
     {
         return true;
@@ -1201,7 +1232,7 @@ bool CommandPool::IsReady(EOS::SubmitHandle handle, bool fastCheck) const
         return true;
     }
 
-    //If the handle to the buffer is no longer in use by the command buffer is was created for
+    //If the handle to the buffer is no longer in use by the command buffer it was created for
     if (buffer.Handle.ID != handle.ID)
     {
         return true;
@@ -1808,7 +1839,7 @@ void VulkanStagingDevice::BufferSubData(const EOS::Handle<EOS::Buffer> &buffer, 
     }
 }
 
-void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void *data)
+void VulkanStagingDevice::ImageData2D(const VulkanImage &image, const VkRect2D &imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void *data)
 {
     CHECK(numMipLevels <= EOS_MAX_MIP_LEVELS, "mip levels exceed max mip levels");
 
@@ -1850,7 +1881,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
     CHECK(desc.Size >= storageSize, "the needed size is bigger then the storageSize");
 
     CommandBufferData* wrapper = VkContext->VulkanCommandPool->AcquireCommandBuffer();
-    CHECK(wrapper, "The Aquired CommandBuffer is not valid.");
+    CHECK(wrapper, "The Acquired CommandBuffer is not valid.");
 
     VulkanBuffer* stagingBuffer = VkContext->BufferPool.Get(StagingBuffer);
     CHECK(stagingBuffer, "The staging buffer handle does not hold a valid staging buffer");
@@ -1860,7 +1891,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
     const uint32_t numPlanes = VkContext::GetNumberOfImagePlanes(image.ImageFormat);
     if (numPlanes > 1)
     {
-        assert(false); //Multiple planes arre not supported yet.
+        assert(false); //Multiple planes are not supported yet.
         CHECK(layer == 0 && baseMipLevel == 0, "Your image layers and levels should be the same with multiple image planes.");
         CHECK(numLayers == 1 && numMipLevels == 1, "Your image layers and levels should be the same with multiple image planes.");
         CHECK(imageRegion.offset.x == 0 && imageRegion.offset.y == 0, "You can't have a image offset with multiple image planes.");
@@ -1914,7 +1945,7 @@ void VulkanStagingDevice::ImageData2D(VulkanImage &image, const VkRect2D &imageR
                 };
 
                 vkCmdCopyBufferToImage(wrapper->VulkanCommandBuffer, stagingBuffer->VulkanVkBuffer, image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-                planeOffset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, plane); //TODO Should also take into acount of YUV images which are not supported yet.
+                planeOffset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, plane); //TODO Should also take into account of YUV images which are not supported yet.
             }
 
             // 3. Transition TRANSFER_DST_OPTIMAL into SHADER_READ_ONLY_OPTIMAL
@@ -1940,7 +1971,7 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
         // Check if region is available
         if (VkContext->VulkanCommandPool->IsReady(it->Handle))
         {
-            //Check if region is big enoug
+            //Check if region is big enough
             if (it->Size >= requestedAlignedSize)
             {
                 // Store the old offset and size before erasing the iterator
@@ -2157,13 +2188,31 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
 
 EOS::Format VulkanContext::GetSwapchainFormat() const
 {
-    if (!HasSwapChain())
-    {
-        EOS::Logger->error("Context: {} does not have a valid swapchain", reinterpret_cast<uint64_t>(this));
-        return EOS::Format::Invalid;
-    }
-
+    CHECK(HasSwapChain(), "Context: {} does not have a valid swapchain", reinterpret_cast<uint64_t>(this));
     return VkContext::vkFormatToFormat(SwapChain->GetFormat().format);
+}
+
+EOS::ColorSpace VulkanContext::GetSwapchainColorSpace() const
+{
+    CHECK(HasSwapChain(), "Context: {} does not have a valid swapchain", reinterpret_cast<uint64_t>(this));
+    //TODO: Check if the desired and actual color space match up.
+    return Configuration.DesiredSwapChainColorSpace;
+}
+
+EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const
+{
+    const VulkanImage* image = TexturePool.Get(handle);
+    CHECK(image, "The texture is not valid");
+
+    const VkExtent3D extent =  image->Extent;
+    const EOS::Dimensions dimensions
+    {
+        .Width = extent.width,
+        .Height = extent.height,
+        .Depth = extent.depth,
+    };
+
+    return dimensions;
 }
 
 EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS::ShaderInfo &shaderInfo)
@@ -2556,7 +2605,6 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
         }
     }
 
-    VkImageViewType vkImageViewType = VulkanImage::ToImageViewType(desc.Type);
     VkImageType vkImageType = VulkanImage::ToImageType(desc.Type);
     const VkExtent3D vkExtent{desc.TextureDimensions.Width, desc.TextureDimensions.Height, desc.TextureDimensions.Depth};
     // TODO: Validate the VkExtent3D with the limits
@@ -2791,6 +2839,26 @@ uint64_t VulkanContext::GetGPUAddress(EOS::BufferHandle handle, size_t offset) c
     return buf ? static_cast<uint64_t>(buf->VulkanDeviceAddress) + offset : 0u;
 }
 
+uint8_t* VulkanContext::GetMappedPtr(EOS::BufferHandle handle) const
+{
+    const VulkanBuffer* buf = BufferPool.Get(handle);
+
+    CHECK(buf, "The buffer is not valid.");
+    CHECK(buf->IsMapped(), "The buffer is not mapped.");
+
+    return buf->GetMappedPtr();
+}
+
+void VulkanContext::FlushMappedMemory(EOS::BufferHandle handle, size_t size, size_t offset)
+{
+    const VulkanBuffer* buf = BufferPool.Get(handle);
+
+    CHECK(buf, "The buffer is not valid.");
+    CHECK(buf->IsMapped(), "The buffer is not mapped.");
+
+    buf->FlushMappedMemory(this, offset, size);
+}
+
 void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data)
 {
     CHECK(data, "The texture data you want to upload is not valid");
@@ -2799,7 +2867,6 @@ void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDes
     CHECK(texture, "The texture of this handle is not valid");
 
     //Validate the image range
-    const uint32_t numberOfLayers = std::max(range.NumberOfLayers, 1u);
     const uint32_t texWidth = std::max(texture->Extent.width >> range.MipLevel, 1u);
     const uint32_t texHeight = std::max(texture->Extent.height >> range.MipLevel, 1u);
     const uint32_t texDepth = std::max(texture->Extent.depth >> range.MipLevel, 1u);
@@ -2810,8 +2877,8 @@ void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDes
 
     if (VulkanImage::ToImageType(texture->ImageType) == VK_IMAGE_TYPE_3D)
     {
-        const VkOffset3D offset {range.Offset.X, range.Offset.Y, range.Offset.Z};
-        const VkExtent3D extent {range.Dimension.Width, range.Dimension.Height, range.Dimension.Depth};
+        //const VkOffset3D offset {range.Offset.X, range.Offset.Y, range.Offset.Z};
+        //const VkExtent3D extent {range.Dimension.Width, range.Dimension.Height, range.Dimension.Depth};
         assert(false);
 
         //TODO: Add 3D Image Support
@@ -2827,6 +2894,14 @@ void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDes
 
         VulkanStagingBuffer->ImageData2D(*texture, imageRegion, range.MipLevel, range.NumberOfMipLevels, range.Layer, range.NumberOfLayers, texture->ImageFormat, data);
     }
+}
+
+EOS::Format VulkanContext::GetFormat(EOS::TextureHandle handle) const
+{
+    const VulkanImage* texture = TexturePool.Get(handle);
+    CHECK(texture, "The texture of this handle is not valid");
+
+    return VkContext::vkFormatToFormat(texture->ImageFormat);
 }
 
 void VulkanContext::ProcessDeferredTasks() const
@@ -3005,7 +3080,7 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
     Configuration.EnableValidationLayers = foundLayer;
 #endif
 
-    //Setup the validation layers and extensions
+    //Set up the validation layers and extensions
     uint32_t instanceExtensionCount;
     VK_ASSERT(vkEnumerateInstanceExtensionProperties(nullptr, &instanceExtensionCount, nullptr));
     std::vector<VkExtensionProperties> allInstanceExtensions(instanceExtensionCount);
@@ -3218,7 +3293,7 @@ void VulkanContext::CreateAllocator()
     VK_ASSERT(vmaCreateAllocator(&createInfo, &vmaAllocator));
 }
 
-void VulkanContext::GenerateMipmaps(EOS::TextureHandle handle)
+void VulkanContext::GenerateMipmaps(const EOS::TextureHandle& handle)
 {
     if (handle.Empty()) { return; }
 
@@ -3228,8 +3303,8 @@ void VulkanContext::GenerateMipmaps(EOS::TextureHandle handle)
     CommandBufferData* commandbuffer = VulkanCommandPool->AcquireCommandBuffer();
     texture->GenerateMipmaps(commandbuffer->VulkanCommandBuffer);
 
-    // ReSharper disable once CppNoDiscardExpression
-    auto result = VulkanCommandPool->Submit(*commandbuffer);
+    EOS::SubmitHandle result = VulkanCommandPool->Submit(*commandbuffer);
+    CHECK(!result.Empty(), "Submitted command to generate mips did not get submitted properly");
 }
 
 void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const
@@ -3247,7 +3322,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
 
         if (desiredDeviceType != EOS::HardwareDeviceType::Software && desiredDeviceType != deviceType) { continue; }
 
-        //Convert the device to a unsigned (long) int (size dependant on building for 32 or 64 bit) and use that as the GUID of the physical device.
+        //Convert the device to an unsigned (long) int (size dependent on building for 32 or 64 bit) and use that as the GUID of the physical device.
         compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
     }
 
@@ -3260,7 +3335,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
             const auto deviceType = static_cast<EOS::HardwareDeviceType>(deviceProperties.deviceType);
 
 
-            //Convert the device to a unsigned (long) int (size dependant on building for 32 or 64 bit) and use that as the GUID of the physical device.
+            //Convert the device to an unsigned (long) int (size dependent on building for 32 or 64 bit) and use that as the GUID of the physical device.
             compatibleDevices.emplace_back(reinterpret_cast<uintptr_t>(hardwareDevice), deviceType, deviceProperties.deviceName);
         }
     }
@@ -3272,7 +3347,7 @@ void VulkanContext::UpdateDescriptorSet()
 {
     if (!ShouldDescriptorSetBeUpdated) return;
 
-    //TODO: Descriptor Sets that are waiting to be submitted in a draw call (when a texture is created in frame) or is still being proccesed
+    //TODO: Descriptor Sets that are waiting to be submitted in a draw call (when a texture is created in frame) or is still being processed
     // cannot be reused, That's why a new empty descriptor set should be created.
 
     CHECK(TexturePool.NumObjects() >= 1, "There should be at least 1 texture");

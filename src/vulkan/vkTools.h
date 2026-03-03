@@ -24,8 +24,8 @@
 #include "enums.h"
 #include "logger.h"
 
-#define VK_ASSERT(func){ const VkResult result = func;      \
-    CHECK(result == VK_SUCCESS, "Vulkan Assert failed: {}", string_VkResult(result));   \
+#define VK_ASSERT(func){ const VkResult resultOut = func;      \
+    CHECK(resultOut == VK_SUCCESS, "Vulkan Assert failed: {}", string_VkResult(resultOut));   \
 }
 
 #pragma region ForwardDeclare

@@ -11,7 +11,8 @@ DEFINE_PLATFORM()
 set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
 
-set(EOS_VULKAN TRUE)         #For now we only use the Vulkan API
+set(EOS_VULKAN TRUE)
+set(EOS_USE_IMGUI TRUE)
 set(EOS_USE_TRACY FALSE)
 set(EOS_BUILD_EXAMPLES TRUE)
 
@@ -78,6 +79,11 @@ endif()
 if(EOS_USE_TRACY)
     target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
     FETCH_TRACY(${EOS_DEPENDENCIES_DIR})
+endif()
+
+if(EOS_USE_IMGUI)
+    target_compile_definitions(EOS PRIVATE EOS_USE_IMGUI)
+    FETCH_IMGUI(${EOS_DEPENDENCIES_DIR})
 endif()
 
 if(EOS_BUILD_EXAMPLES)

@@ -30,7 +30,7 @@ struct VulkanBuffer final
     [[nodiscard]] inline uint8_t* GetMappedPtr() const { return static_cast<uint8_t*>(MappedPtr); }
     [[nodiscard]] inline bool IsMapped() const { return MappedPtr != nullptr;  }
 
-    void BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data);
+    void BufferSubData(const VulkanContext* vulkanContext, size_t offset, size_t size, const void* data) const;
     void FlushMappedMemory(const VulkanContext* vulkanContext, VkDeviceSize offset, VkDeviceSize size) const;
 
     VkBuffer VulkanVkBuffer             = VK_NULL_HANDLE;
@@ -188,7 +188,6 @@ public:
     [[nodiscard]] uint32_t GetNumSwapChainImages() const;
     [[nodiscard]] const VkSurfaceFormatKHR& GetFormat() const;
     [[nodiscard]] EOS::TextureHandle GetCurrentTexture();
-
 private:
     static constexpr uint32_t MAX_IMAGES{16};
 
@@ -375,7 +374,7 @@ public:
     DELETE_COPY_MOVE(VulkanStagingDevice);
 
     void BufferSubData(const EOS::Handle<EOS::Buffer>& buffer, size_t dstOffset, size_t size, const void* data);
-    void ImageData2D(VulkanImage& image, const VkRect2D& imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void* data);
+    void ImageData2D(const VulkanImage& image, const VkRect2D& imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void* data);
     //void ImageData3D(VulkanImage& image, const VkOffset3D& offset, const VkExtent3D& extent, VkFormat format, const void* data);
 
 private:
@@ -409,6 +408,8 @@ public:
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
     [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
+    [[nodiscard]] EOS::ColorSpace GetSwapchainColorSpace() const override;
+    [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
     [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
@@ -423,7 +424,11 @@ public:
 
     void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
     [[nodiscard]] uint64_t GetGPUAddress(EOS::BufferHandle handle, size_t offset = 0) const override;
+    [[nodiscard]] uint8_t* GetMappedPtr(EOS::BufferHandle handle) const override;
+    void FlushMappedMemory(EOS::BufferHandle handle, size_t size, size_t offset = 0) override;
+
     void Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data) override;
+    EOS::Format GetFormat(EOS::TextureHandle handle) const override;
 
     //Deferred Tasks
     void ProcessDeferredTasks() const;
@@ -452,7 +457,7 @@ private:
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
     void CreateAllocator();
-    void GenerateMipmaps(EOS::TextureHandle handle);
+    void GenerateMipmaps(const EOS::TextureHandle& handle);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "EOS.h"
+#include "ImGuiRenderer.h"
 #include "utils.h"
 #include "assimp/cimport.h"
 #include "assimp/mesh.h"
@@ -142,6 +143,9 @@ public:
         };
         DefaultSampler = Context->CreateSampler(samplerDescription);
         SetupInputCallbacks();
+
+
+        ImGuiRenderer = std::make_unique<EOS::ImGuiRenderer>(Context.get(), ShaderCompiler.get(), Window);
     }
 
     DELETE_COPY_MOVE(ExampleApp)
@@ -162,6 +166,7 @@ public:
     EOS::Window Window;
     std::unique_ptr<EOS::IContext> Context;
     std::unique_ptr<EOS::ShaderCompiler> ShaderCompiler;
+    std::unique_ptr<EOS::ImGuiRenderer> ImGuiRenderer;
     EOS::Holder<EOS::SamplerHandle> DefaultSampler;
     InputState Input;
     float DeltaTime{};

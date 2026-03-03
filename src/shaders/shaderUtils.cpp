@@ -210,7 +210,7 @@ namespace EOS
         return "None";
     }
 
-    EOS::Holder<EOS::ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const std::unique_ptr<EOS::ShaderCompiler>& shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
+    EOS::Holder<EOS::ShaderModuleHandle> LoadShader(IContext* context, ShaderCompiler* shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
     {
         const ShaderInfo info = shaderCompiler->LoadShader(fileName, shaderStage);
         return context->CreateShaderModule(info);

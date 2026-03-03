@@ -1,6 +1,7 @@
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+
 #include "../../common.h"
 #include "EOS.h"
+#include "imgui.h"
 #include "logger.h"
 #include "shaders/shaderUtils.h"
 #include "utils.h"
@@ -69,11 +70,11 @@ int main()
 
     ExampleApp App{appDescription};
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "modelAlbedo", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "modelAlbedo", EOS::ShaderStage::Fragment);
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowVert = EOS::LoadShader(App.Context, App.ShaderCompiler, "shadowDepth", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowFrag = EOS::LoadShader(App.Context, App.ShaderCompiler, "shadowDepth", EOS::ShaderStage::Fragment);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shadowDepth", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shadowDepth", EOS::ShaderStage::Fragment);
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vdesc
@@ -323,6 +324,37 @@ int main()
         }
         cmdEndRendering(cmdBuffer);
         cmdPopMarker(cmdBuffer);
+
+
+        //Render UI
+        constexpr EOS::RenderPass ImGuiRenderPass
+        {
+            .Color { { .LoadOpState = EOS::LoadOp::Load, } },
+        };
+
+        EOS::Framebuffer imguiFramebuffer
+        {
+            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
+            .DebugName = "ImGui framebuffer"
+        };
+
+        App.ImGuiRenderer->BeginFrame(imguiFramebuffer);
+        cmdBeginRendering(cmdBuffer, ImGuiRenderPass, imguiFramebuffer);
+        {
+            ImGui::SetNextWindowSize(ImVec2(300, 100), ImGuiCond_FirstUseEver);
+            ImGui::Begin("Settings");
+
+            static float value1 = 0.5f;
+            static float value2 = 0.5f;
+
+            ImGui::SliderFloat("Value 1", &value1, 0.0f, 1.0f);
+            ImGui::SliderFloat("Value 2", &value2, 0.0f, 1.0f);
+
+            ImGui::End();
+        }
+        App.ImGuiRenderer->EndFrame(cmdBuffer);
+        cmdEndRendering(cmdBuffer);
+
 
         cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
         App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());

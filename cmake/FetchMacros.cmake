@@ -150,6 +150,11 @@ macro(FETCH_GLM depsDir targetName)
 
     target_link_libraries(${targetName} PRIVATE glm::glm)
     target_compile_definitions(${targetName} PRIVATE GLM_ENABLE_EXPERIMENTAL)
+
+    if (EOS_VULKAN)
+        target_compile_definitions(${targetName} PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+    endif ()
+
 endmacro()
 
 macro(FETCH_TRACY depsDir)
@@ -187,4 +192,37 @@ macro(FETCH_KTX depsDir)
     )
     add_subdirectory(${KTX_ROOT_DIR})
     target_link_libraries(EOS PUBLIC ktx)
+endmacro()
+
+
+macro(FETCH_IMGUI depsDir)
+    set(DEPS_DIR ${depsDir})
+
+    set(IMGUI_ROOT_DIR ${DEPS_DIR}/src/imgui)
+    FetchContent_Populate(
+            imgui
+            GIT_REPOSITORY https://github.com/ocornut/imgui.git
+            GIT_TAG        v1.92.6
+            GIT_SHALLOW TRUE
+            SOURCE_DIR     ${IMGUI_ROOT_DIR}
+    )
+
+
+    add_library(imgui STATIC
+            ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    )
+    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR})
+
+
+    if(EOS_VULKAN)
+    target_sources(imgui PRIVATE
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    )
+    endif()
+
+    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR}/backends)
+    target_link_libraries(EOS PUBLIC imgui)
 endmacro()

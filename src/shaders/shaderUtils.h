@@ -59,6 +59,6 @@ namespace EOS
     * @param 
     * @return a Holder Handle to the compiled shader
     */
-    Holder<ShaderModuleHandle> LoadShader(const std::unique_ptr<EOS::IContext>& context, const std::unique_ptr<EOS::ShaderCompiler>& shaderCompiler, const char* fileName, const ShaderStage& shaderStage);
+    Holder<ShaderModuleHandle> LoadShader(IContext* context, ShaderCompiler* shaderCompiler, const char* fileName, const ShaderStage& shaderStage);
 
 }

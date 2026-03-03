@@ -87,7 +87,6 @@ namespace EOS
             }
         });
 
-        glfwSetInputMode(GlfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         glfwFocusWindow(GlfwWindow);
 
 #if defined(EOS_PLATFORM_WAYLAND)

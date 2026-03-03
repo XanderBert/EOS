@@ -272,6 +272,14 @@ namespace EOS
         BufferHandle Buffers[MaxSubmitDependencies]{};
     };
 
+    struct ScissorRect final
+    {
+        uint32_t X = 0;
+        uint32_t Y = 0;
+        uint32_t Width = 0;
+        uint32_t Height = 0;
+    };
+
     struct Viewport final
     {
         float X = 0.0f;
@@ -445,6 +453,19 @@ namespace EOS
         virtual Format GetSwapchainFormat() const = 0;
 
         /**
+         *
+         * @return The color space of the currently in use SwapChain.
+         */
+        virtual ColorSpace GetSwapchainColorSpace() const = 0;
+
+        /**
+         *
+         * @param handle The handle of the texture from which you want the dimensions from
+         * @return the dimensions of the texture
+         */
+        virtual Dimensions GetDimensions(TextureHandle handle) const = 0;
+
+        /**
         * @brief Creates shader module from a compiled shader.
         * @param shaderInfo information about the shader such as its code and stage.
         * @return A Holder Handle to a shader module.
@@ -526,7 +547,22 @@ namespace EOS
          * @param handle The handle of the buffer that has been uploaded.
          * @param offset The offset it needs to have inside the buffer.
          */
-        [[nodiscard]] virtual uint64_t GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
+        virtual uint64_t GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
+
+        /**
+         *
+         * @param handle The handle of the buffer that has been uploaded and mapped.
+         * @return a pointer to the buffer.
+         */
+        virtual uint8_t* GetMappedPtr(BufferHandle handle) const = 0;
+
+        /**
+         *
+         * @param handle The handle of the buffer that has been uploaded and mapped.
+         * @param size The size of the bytes you want to be flushed.
+         * @param offset The offset inside the buffer you want to start flushing from
+         */
+        virtual void  FlushMappedMemory(BufferHandle handle, size_t size, size_t offset = 0) = 0;
 
         /**
         * @brief Handles the uploading of textures to the GPU
@@ -535,6 +571,12 @@ namespace EOS
         * @param data The actual data of the texture we want to upload.
         */
         virtual void Upload(EOS::TextureHandle handle, const TextureRangeDescription& range, const void* data) = 0;
+
+        /**
+         *
+         * @param handle The handle of the texture you want to get the format from.
+         */
+        virtual Format GetFormat(TextureHandle handle) const = 0;
 
     protected:
         IContext() = default;
@@ -661,13 +703,23 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
 
 
 /**
+ *
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param viewport The viewport size we want to set.
+ */
+void cmdBindViewport(const EOS::ICommandBuffer& commandBuffer, const EOS::Viewport& viewport);
+
+
+void cmdBindScissorRect(const EOS::ICommandBuffer& commandBuffer, const EOS::ScissorRect& scissor);
+
+/**
  * @brief Add a command to the commandbuffer that we will now start rendering, defining what should be rendered and what dependencies we have.
  * @param commandBuffer The commandbuffer where we add the command to.
  * @param renderPass Describes what how our framebuffer attachements should be loaded / stored ...
  * @param description Describes our actual textures we want to use for rendering.
- * @param dependancies Describes the depandancies of this "Pass".
+ * @param dependencies Describes the depandancies of this "Pass".
  */
-void cmdBeginRendering(EOS::ICommandBuffer& commandBuffer, const EOS::RenderPass& renderPass, EOS::Framebuffer& description, const EOS::Dependencies& dependancies = {});
+void cmdBeginRendering(EOS::ICommandBuffer& commandBuffer, const EOS::RenderPass& renderPass, EOS::Framebuffer& description, const EOS::Dependencies& dependencies = {});
 
 /**
  * @brief Add a command to the commandbuffer that we will now end rendering
@@ -689,7 +741,7 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer& commandBuffer, EOS::RenderPipeli
  * @param buffer The Handle to the buffer.
  * @param bufferOffset The offset the buffer has.
  */
-void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t index, EOS::BufferHandle buffer, uint64_t bufferOffset = 0);
+void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t index, const EOS::BufferHandle& buffer, uint64_t bufferOffset = 0);
 
 
 /**
@@ -699,7 +751,7 @@ void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t inde
  * @param indexFormat The int format of the index buffer (speifies how many bytes 1 index is).
  * @param indexBufferOffset The offset of the indexBuffer
  */
-void cmdBindIndexBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle indexBuffer, EOS::IndexFormat indexFormat, uint64_t indexBufferOffset = 0);
+void cmdBindIndexBuffer(const EOS::ICommandBuffer& commandBuffer, const EOS::BufferHandle& indexBuffer, EOS::IndexFormat indexFormat, uint64_t indexBufferOffset = 0);
 
 /**
  * @brief Records a simple draw command into the specified commandbuffer.
@@ -733,7 +785,7 @@ void cmdDrawIndexed(const EOS::ICommandBuffer& commandBuffer, uint32_t indexCoun
               entries in the indirect buffer. Pass 0 to use the default
               packed stride (sizeof(DrawIndexedIndirectCommand)).
  */
-void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, EOS:: BufferHandle indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride = 0);
+void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, const EOS:: BufferHandle& indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride = 0);
 
 /**
  * @brief Binds push constants.
@@ -787,7 +839,7 @@ void cmdPopMarker(const EOS::ICommandBuffer& commandBuffer);
  * @param data The new data
  * @param bufferOffset The offset inside the buffer from where you want to start the update
  */
-void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle buffer, size_t size, const void* data, size_t bufferOffset);
+void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, const EOS::BufferHandle& buffer, size_t size, const void* data, size_t bufferOffset);
 
 /**
  *

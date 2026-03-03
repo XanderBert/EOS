@@ -1,5 +1,6 @@
 #include "../../common.h"
 #include "EOS.h"
+#include "imgui.h"
 #include "logger.h"
 #include "shaders/shaderUtils.h"
 #include "utils.h"
@@ -71,8 +72,8 @@ int main()
 
     ExampleApp App{appDescription};
 
-    VertexShader = EOS::LoadShader(App.Context, App.ShaderCompiler, "indirectModel", EOS::ShaderStage::Vertex);
-    PixelShader  = EOS::LoadShader(App.Context, App.ShaderCompiler, "indirectModel", EOS::ShaderStage::Fragment);
+    VertexShader = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "indirectModel", EOS::ShaderStage::Vertex);
+    PixelShader  = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "indirectModel", EOS::ShaderStage::Fragment);
     DepthTexture = App.CreateDepthTexture();
 
     //TODO: This could be constevaled with reflection Or use Shader Resource Table model
