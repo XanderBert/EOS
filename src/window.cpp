@@ -8,7 +8,6 @@ namespace EOS
         /// Setup the error callback
         glfwSetErrorCallback([](int error, const char* message)
         {
-            //Logger->error("GLFW: {}, {}", error, message);
             printf(fmt::format("GLFW: {}, {}", error, message).c_str());
         });
 
@@ -71,8 +70,8 @@ namespace EOS
             glfwSetWindowPos(GlfwWindow, x, y);
         }
 
-        // Get the actual window size and store it
 #if defined(EOS_PLATFORM_WINDOWS)
+        // Get the actual window size and store it
         glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
 #endif
 
@@ -89,6 +88,7 @@ namespace EOS
         });
 
         glfwSetInputMode(GlfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwFocusWindow(GlfwWindow);
 
 #if defined(EOS_PLATFORM_WAYLAND)
         contextDescription.Window     = static_cast<void*>(glfwGetWaylandWindow(GlfwWindow));
@@ -111,7 +111,6 @@ namespace EOS
     void Window::Poll()
     {
         glfwPollEvents();
-        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
     }
 
     bool Window::ShouldClose() const
@@ -121,7 +120,8 @@ namespace EOS
 
     bool Window::IsFocused() const
     {
-        return glfwGetWindowAttrib(GlfwWindow, GLFW_FOCUSED);
+        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
+        return Width || Height;
     }
 }
 
