@@ -46,9 +46,15 @@ if(EOS_VULKAN)
         # Extract full version including possible patch version
         string(REGEX MATCH "([0-9]+)\.([0-9]+)\.([0-9]+)(\.([0-9]+))?" _ "${Vulkan_VERSION}")
         set(VULKAN_SDK_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+        # If it has a patch version, append it
         if(CMAKE_MATCH_5)
             set(VULKAN_SDK_VERSION "${VULKAN_SDK_VERSION}.${CMAKE_MATCH_5}")
+        # If it doesn't have a patch version append .0
+        else ()
+            set(VULKAN_SDK_VERSION "${VULKAN_SDK_VERSION}.0")
         endif()
+
+
         set(SDK_VERSION "vulkan-sdk-${VULKAN_SDK_VERSION}")
 
     else()
