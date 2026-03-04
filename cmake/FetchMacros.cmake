@@ -8,6 +8,7 @@ macro(FETCH_GLFW depsDir)
     set(GLFW_DOCUMENT_INTERNALS      OFF CACHE BOOL "")
     set(GLFW_VULKAN_STATIC           ON CACHE BOOL "")
     set(GLFW_USE_EGL                 OFF CACHE BOOL "")
+    set(BUILD_SHARED_LIBS            OFF CACHE BOOL "")
     set(GLFW_BUILD_WIN32 OFF)
     set(GLFW_BUILD_WAYLAND OFF)
     set(GLFW_BUILD_X11 OFF)
@@ -57,6 +58,10 @@ endmacro()
 macro(FETCH_VMA depsDir)
     set(DEPS_DIR ${depsDir})
 
+    set(VMA_BUILD_SAMPLES        OFF CACHE BOOL "")
+    set(VMA_ENABLE_INSTALL       OFF CACHE BOOL "")
+    set(VMA_BUILD_DOCUMENTATION  OFF CACHE BOOL "")
+
     set(VMA_ROOT_DIR ${DEPS_DIR}/src/vma)
     FetchContent_Populate(
             vma
@@ -71,6 +76,12 @@ endmacro()
 
 macro(FETCH_SPDLOG depsDir)
     set(DEPS_DIR ${depsDir})
+
+    set(SPDLOG_BUILD_EXAMPLES   OFF CACHE BOOL "")
+    set(SPDLOG_BUILD_BENCH      OFF CACHE BOOL "")
+    set(SPDLOG_BUILD_TESTS      OFF CACHE BOOL "")
+    set(SPDLOG_INSTALL          OFF CACHE BOOL "")
+    set(SPDLOG_BUILD_SHARED     OFF CACHE BOOL "")
 
     set(SPDLOG_ROOT_DIR ${DEPS_DIR}/src/spdlog)
     FetchContent_Populate(
@@ -137,6 +148,10 @@ macro(FETCH_ASSIMP depsDir targetName)
 endmacro()
 
 macro(FETCH_GLM depsDir targetName)
+
+    set(GLM_BUILD_TESTS     OFF CACHE BOOL "")
+    set(GLM_BUILD_INSTALL   OFF CACHE BOOL "")
+
     if(NOT TARGET glm::glm)
         set(GLM_ROOT_DIR ${depsDir}/src/glm)
         FetchContent_Populate(
@@ -183,6 +198,15 @@ endmacro()
 
 macro(FETCH_KTX depsDir)
     set(KTX_ROOT_DIR ${depsDir}/src/ktx)
+
+    set(KTX_FEATURE_TESTS           OFF CACHE BOOL "")
+    set(KTX_FEATURE_TOOLS           OFF CACHE BOOL "")
+    set(KTX_FEATURE_DOC             OFF CACHE BOOL "")
+    set(KTX_FEATURE_STATIC_LIBRARY  ON  CACHE BOOL "")
+    set(KTX_FEATURE_VULKAN          ON  CACHE BOOL "")
+    set(KTX_FEATURE_GL_UPLOAD       OFF CACHE BOOL "")
+    set(KTX_FEATURE_VK_UPLOAD       ON  CACHE BOOL "")
+
     FetchContent_Populate (
             fetch_ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software

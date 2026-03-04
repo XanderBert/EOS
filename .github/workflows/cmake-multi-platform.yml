@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 env:
   VULKAN_VERSION: 1.4.304.1
-  VULKAN_COMPONENTS: Vulkan-Headers, Vulkan-Loader, Vulkan-ValidationLayers
+  VULKAN_COMPONENTS: Vulkan-Headers, Vulkan-Loader
   BUILD_TYPE: Release
 
 concurrency:
