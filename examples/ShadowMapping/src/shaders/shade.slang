@@ -2,7 +2,6 @@ import pbr;
 import common;
 import shadowCommon;
 
-
 struct MaterialHandles
 {
     uint albedo;
@@ -55,13 +54,8 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
     output.ViewVec      = -output.Pos.xyz;
-    //output.LightVec     = normalize(frameData.lightPos.xyz - input.Pos);
-    //output.LightVec     = normalize(frameData.lightPos.xyz - input.Pos);
     output.LightVec = normalize(frameData.lightPos.xyz - output.WorldPos);
-
-    //output.ShadowCoord    = mul(float4(output.WorldPos, 1.0), frameData.depthMVP);
     output.ShadowCoord = mul(float4(input.Pos, 1.0), frameData.depthMVP);
-
 
     return output;
 }
@@ -72,7 +66,6 @@ float4 fragmentMain(VSOutput input)
     // Sample textures
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
     DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
-
 
     float3 albedoSample = TextureBindless2D(draw.albedo, 0, input.UV).rgb;
     float2 normalSample = TextureBindless2D(draw.normal, 0, input.UV).rg;
@@ -90,7 +83,6 @@ float4 fragmentMain(VSOutput input)
 
     // simple PBR lighting
     float3 L = normalize(frameData.lightPos.xyz - input.WorldPos);
-
 
 
     float3 F0 = float3(0.04);
@@ -111,34 +103,31 @@ float4 fragmentMain(VSOutput input)
     float3 ambient = (kD * diffuse + specular);
     float3 color = ambient + Lo;
 
-
     float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
-    //projCoords = projCoords * 0.5 + 0.5;
-    // Only remap XY -> Vulkan Depth stays in [0, 1]
+
+    //If the coord is outside the light frustum don't shadow it.
+    if(projCoords.z > 1.0) return float4(color, 1.0);
+    
+    // Only remap XY -> Vulkan depth already stays in [0, 1].
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
 
-    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
-        projCoords.y < 0.0 || projCoords.y > 1.0 ||
-        projCoords.z < 0.0 || projCoords.z > 1.0)
-    {
-        return float4(color, 1.0);
-    }
+    // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
+    projCoords.y = 1.0 - projCoords.y;
 
-
-    float closestDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy).r;
-    //return float4(closestDepth);
-    //return float4(LinearDepth01(closestDepth, 0.1, 5000));
-
-    float currentDepth = projCoords.z;
-    //return float4(currentDepth);
-    //return float4(LinearDepth01(currentDepth, 0.1, 5000));
-
-    //float bias = 0.009;
-    //float bias = max(0.05 * (1.0 - dot(N, L)), 0.005);
     float bias = max(0.0005 * (1.0 - dot(N, L)), 0.00005);
-    float shadow = currentDepth - bias < closestDepth  ? 1.0 : 0.3;
+    float currentDepth = projCoords.z;
+    float shadow = 0.0;
+    float2 texelSize = 1.0 / float2(2000.0, 2000.0);
 
-    //return float4(shadow);
+    for(int x = -1; x <= 1; ++x)
+    {
+        for(int y = -1; y <= 1; ++y)
+        {
+            float pcfDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy).r;
+            shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
+        }
+    }
+    shadow /= 9.0;
 
     return float4(color * shadow, 1.0);
 }

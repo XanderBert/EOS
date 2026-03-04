@@ -33,6 +33,12 @@ struct Vertex final
     glm::vec4 tangent;
 };
 
+
+struct VertexShadow final
+{
+    glm::vec3 position;
+};
+
 struct FramePointers final
 {
     uint64_t frameDataPtr;
@@ -50,11 +56,9 @@ int main()
 
     CameraDescription cameraDescription
     {
-        //.origin = {520.0f, 700.0f, 350.5f},
-        //.rotation = {-30, -90.0f},
-        .origin = {220.0f, 700.0f, 300.5f},
-        .rotation = {-60, -90.0f},
-        .acceleration = 800.0f
+        .origin = {0.0f, 10.0f, -3.0f},
+        .rotation = {0, 0.0f},
+        .acceleration = 100.0f
     };
 
     ExampleAppDescription appDescription
@@ -65,14 +69,13 @@ int main()
 
     ExampleApp App{appDescription};
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "modelAlbedo", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "modelAlbedo", EOS::ShaderStage::Fragment);
-
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shade", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shade", EOS::ShaderStage::Fragment);
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shadowDepth", EOS::ShaderStage::Vertex);
     EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shadowDepth", EOS::ShaderStage::Fragment);
 
     //TODO: This could be constevaled with reflection
-    constexpr EOS::VertexInputData vdesc
+    constexpr EOS::VertexInputData vertexDesc
     {
         .Attributes =
     {
@@ -86,6 +89,13 @@ int main()
         {
             { .Stride = sizeof(Vertex) }
         }
+    };
+
+
+    constexpr EOS::VertexInputData vertexDescriptionShadow
+    {
+        .Attributes ={{ .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) }},
+        .InputBindings ={{ .Stride = sizeof(Vertex) }}
     };
 
     EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
@@ -190,7 +200,7 @@ int main()
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineShade
     {
-        .VertexInput = vdesc,
+        .VertexInput = vertexDesc,
         .VertexShader = shaderHandleVert,
         .FragmentShader = shaderHandleFrag,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
@@ -202,7 +212,7 @@ int main()
 
     EOS::RenderPipelineDescription renderPipelineShadow
     {
-        .VertexInput = vdesc,
+        .VertexInput = vertexDescriptionShadow,
         .VertexShader = shaderHandleShadowVert,
         .FragmentShader = shaderHandleShadowFrag,
         .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
@@ -211,15 +221,15 @@ int main()
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
-    //const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
-    const glm::mat4 m = glm::mat4(1);
+
 
 
     //TODO: Make a abstracted movement class or something, that can either behave like projection or camera projection things.
     //Light and Camera Can implement those
-    glm::vec3 lightPos          = {220.0f, 700.0f, 300.5f};
-    glm::vec2 lightRotation     = {-60, -90};
-    glm::mat4 lightProjection   = glm::ortho(-500.0f, 500.0f,-500.0f, 500.0f,0.1f,5000.0f);
+    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
+    glm::vec3 lightPos          = {0.0f, 500.0f, 100.0f};
+    glm::vec2 lightRotation     = {-73, -90};
+    const glm::mat4 lightProjection   = glm::ortho(-500.0f, 500.0f,-500.0f, 500.0f,0.1f,1000.0f);
     glm::vec3 lightUp           = {0.0f, 1.0f, 0.0f};
     const FramePointers framePointers
     {
@@ -238,10 +248,8 @@ int main()
         lightForward.z = sin(glm::radians(lightRotation.y)) * cos(glm::radians(lightRotation.x));
         lightForward = glm::normalize(lightForward);
 
-        glm::mat4 lightView = glm::lookAt(lightPos, lightPos + lightForward, lightUp);
-        glm::mat4 depthMVP = lightProjection * lightView * m;
-
-        //const glm::mat4 depthMVP = light.GetViewProjectionMatrix(1.0f) * m;//glm::mat4(1.0f);
+        const glm::mat4 lightView = glm::lookAt(lightPos, lightPos + lightForward, lightUp);
+        const glm::mat4 depthMVP = lightProjection * lightView * m;
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
         const PerFrameData perFrameData

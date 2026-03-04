@@ -7,9 +7,6 @@ struct VSInput
 {
     uint vertexID   : SV_VertexID;
     float3 Pos      : POSITION;
-    float3 Normal   : NORMAL;
-    float2 UV       : TEXCOORD0;
-    float4 Tangent  : TANGENT;
 };
 
 struct VSOutput

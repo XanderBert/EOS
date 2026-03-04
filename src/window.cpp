@@ -8,7 +8,7 @@ namespace EOS
         /// Setup the error callback
         glfwSetErrorCallback([](int error, const char* message)
         {
-            printf(fmt::format("GLFW: {}, {}", error, message).c_str());
+            printf("%s", fmt::format("GLFW: {}, {}", error, message).c_str());
         });
 
         // Initialize GLFW

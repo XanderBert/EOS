@@ -34,7 +34,7 @@ struct CameraDescription final
     float acceleration      = 45.0f;
     float damping           = 5.0f;
     float near              = 0.1f;
-    float far               = 5000.0f;
+    float far               = 100.0f;
 };
 
 struct Camera final
@@ -180,7 +180,14 @@ public:
         while (!Window.ShouldClose())
         {
             Window.Poll();
-            if (!Window.IsFocused()) continue;
+            if (!Window.IsFocused())
+            {
+                if (Input.rightMouse)
+                {
+                    SetMouseLookMode(false);
+                }
+                continue;
+            }
 
             //Update time
             const float currentTime = glfwGetTime();
@@ -198,6 +205,28 @@ public:
     }
 
 private:
+
+    void SetMouseLookMode(bool enabled)
+    {
+        Input.rightMouse = enabled;
+        FirstMouseSample = true;
+
+        ImGuiIO& io = ImGui::GetIO();
+        if (enabled)
+        {
+            io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+        }
+        else
+        {
+            io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+        }
+
+        glfwSetInputMode(Window.GlfwWindow, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+        if (glfwRawMouseMotionSupported())
+        {
+            glfwSetInputMode(Window.GlfwWindow, GLFW_RAW_MOUSE_MOTION, enabled ? GLFW_TRUE : GLFW_FALSE);
+        }
+    }
 
     void SetupInputCallbacks()
     {
@@ -217,33 +246,37 @@ private:
         {
             ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
             if (!app) return;
-            if (ImGui::GetIO().WantCaptureMouse) return;
+            if (button != GLFW_MOUSE_BUTTON_LEFT) return;
 
-            const bool pressed = action != GLFW_RELEASE;
-            app->Input.rightMouse = button == GLFW_MOUSE_BUTTON_1 && pressed;
+            if (action == GLFW_PRESS)
+            {
+                if (ImGui::GetIO().WantCaptureMouse) return;
+                app->SetMouseLookMode(true);
+            }
+            else if (action == GLFW_RELEASE && app->Input.rightMouse)
+            {
+                app->SetMouseLookMode(false);
+            }
         });
         glfwSetCursorPosCallback(Window.GlfwWindow, [](GLFWwindow* window, double xpos, double ypos)
         {
             ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
             if (!app) return;
-            if (ImGui::GetIO().WantCaptureMouse) return;
 
             if (!app->Input.rightMouse) return;
-            static bool firstMouse = true;
-            static double lastX = xpos;
-            static double lastY = ypos;
 
-            if (firstMouse)
+            if (app->FirstMouseSample)
             {
-                lastX = xpos;
-                lastY = ypos;
-                firstMouse = false;
+                app->LastMouseX = xpos;
+                app->LastMouseY = ypos;
+                app->FirstMouseSample = false;
+                return;
             }
 
-            float xoffset = static_cast<float>(xpos - lastX);
-            float yoffset = static_cast<float>(lastY - ypos); // reversed since y-coords go down
-            lastX = xpos;
-            lastY = ypos;
+            float xoffset = static_cast<float>(xpos - app->LastMouseX);
+            float yoffset = static_cast<float>(app->LastMouseY - ypos); // reversed since y-coords go down
+            app->LastMouseX = xpos;
+            app->LastMouseY = ypos;
 
             constexpr float mouseSensitivity = 0.1f;
             xoffset *= mouseSensitivity;
@@ -257,7 +290,11 @@ private:
             if (app->MainCamera.Pitch < -89.0f) app->MainCamera.Pitch = -89.0f;
         });
     }
+
     float lastTime{};
+    bool FirstMouseSample = true;
+    double LastMouseX = 0.0;
+    double LastMouseY = 0.0;
 };
 
 
