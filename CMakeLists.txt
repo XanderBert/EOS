@@ -11,10 +11,10 @@ DEFINE_PLATFORM()
 set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
 
-set(EOS_VULKAN TRUE)
-set(EOS_USE_IMGUI TRUE)
-set(EOS_USE_TRACY FALSE)
-set(EOS_BUILD_EXAMPLES TRUE)
+option(EOS_VULKAN         "Enable Vulkan backend"        ON)
+option(EOS_USE_IMGUI      "Enable ImGui integration"     ON)
+option(EOS_USE_TRACY      "Enable Tracy profiler"        OFF)
+option(EOS_BUILD_EXAMPLES "Build example applications"  ON)
 
 # Set Debug or Release Define
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
