@@ -49,6 +49,7 @@ macro(FETCH_VOLK tag depsDir)
             GIT_REPOSITORY https://github.com/zeux/volk
             GIT_TAG        ${TAG}
             GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${VOLK_ROOT_DIR}
     )
 
@@ -66,6 +67,7 @@ macro(FETCH_VULKAN_UTILS tag depsDir)
             GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Utility-Libraries
             GIT_TAG        ${TAG}
             GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${VULKAN_TOOLS_ROOT_DIR}
     )
     include_directories(${DEPS_DIR}/src/vulkan-utility-libraries/include)
@@ -83,6 +85,8 @@ macro(FETCH_VMA depsDir)
             vma
             GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
             GIT_TAG        v3.2.1
+            GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${VMA_ROOT_DIR}
     )
 
@@ -104,6 +108,8 @@ macro(FETCH_SPDLOG depsDir)
             spdlog
             GIT_REPOSITORY https://github.com/gabime/spdlog.git
             GIT_TAG        v1.15.2
+            GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${SPDLOG_ROOT_DIR}
     )
     add_subdirectory(${SPDLOG_ROOT_DIR})
@@ -153,7 +159,8 @@ macro(FETCH_ASSIMP depsDir targetName)
                  assimp
                  GIT_REPOSITORY https://github.com/assimp/assimp
                  GIT_TAG v6.0.4
-                 GIT_SHALLOW TRUE
+                 GIT_SHALLOW    TRUE
+                 UPDATE_DISCONNECTED TRUE
                  SOURCE_DIR ${ASSIMP_ROOT_DIR}
          )
          add_subdirectory(${ASSIMP_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/assimp)
@@ -174,6 +181,8 @@ macro(FETCH_GLM depsDir targetName)
                 glm
                 GIT_REPOSITORY https://github.com/g-truc/glm
                 GIT_TAG        1.0.1
+                GIT_SHALLOW    TRUE
+                UPDATE_DISCONNECTED TRUE
                 SOURCE_DIR     ${GLM_ROOT_DIR}
         )
         add_subdirectory(${GLM_ROOT_DIR} ${CMAKE_BINARY_DIR}/dependencies/src/glm)
@@ -194,7 +203,8 @@ macro(FETCH_TRACY depsDir)
             tracy
             GIT_REPOSITORY https://github.com/wolfpld/tracy
             GIT_TAG master
-            GIT_SHALLOW TRUE
+            GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${TRACY_ROOT_DIR}
     )
     add_subdirectory(${TRACY_ROOT_DIR})
@@ -206,7 +216,8 @@ macro(FETCH_STB depsDir)
     FetchContent_Populate (
             fetch_stb
             GIT_REPOSITORY https://github.com/nothings/stb
-            GIT_SHALLOW TRUE
+            GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${STBI_ROOT_DIR}
     )
     include_directories(${STBI_ROOT_DIR})
@@ -227,7 +238,8 @@ macro(FETCH_KTX depsDir)
             fetch_ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software
             GIT_TAG v4.4.2
-            GIT_SHALLOW TRUE
+            GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${KTX_ROOT_DIR}
     )
     add_subdirectory(${KTX_ROOT_DIR})
@@ -243,7 +255,8 @@ macro(FETCH_IMGUI depsDir)
             imgui
             GIT_REPOSITORY https://github.com/ocornut/imgui.git
             GIT_TAG        v1.92.6
-            GIT_SHALLOW TRUE
+            GIT_SHALLOW    TRUE
+            UPDATE_DISCONNECTED TRUE
             SOURCE_DIR     ${IMGUI_ROOT_DIR}
     )
 
