@@ -12,6 +12,7 @@ struct InputState final
     bool left{};
     bool right{};
     bool rightMouse{};
+    bool space{};
 };
 
 struct ExampleAppDescription final
@@ -27,6 +28,8 @@ public:
     :   MainCamera(appDescription.cameraDescription)
     ,   Window(appDescription.contextDescription)
     ,   Context(EOS::CreateContextWithSwapChain(appDescription.contextDescription))
+    ,   StartingCameraPosition(appDescription.cameraDescription.origin)
+    ,   StartingCameraRotation(appDescription.cameraDescription.rotation)
     {
         //Create Default Sampler
         constexpr EOS::SamplerDescription samplerDescription
@@ -74,10 +77,7 @@ public:
             Window.Poll();
             if (!Window.IsFocused())
             {
-                if (Input.rightMouse)
-                {
-                    SetMouseLookMode(false);
-                }
+                if (Input.rightMouse) SetMouseLookMode(false);
                 continue;
             }
 
@@ -87,6 +87,11 @@ public:
             lastTime = currentTime;
 
             //Update Camera
+            if (Input.space)
+            {
+                MainCamera.SetPosition(StartingCameraPosition);
+                MainCamera.SetRotation(StartingCameraRotation);
+            }
             glm::vec3 direction{Input.right - Input.left, 0.0f, Input.forward - Input.backward};
             MainCamera.Update(direction, DeltaTime);
 
@@ -122,64 +127,58 @@ private:
 
     void SetupInputCallbacks()
     {
-        glfwSetWindowUserPointer(Window.GlfwWindow, this);
-        glfwSetKeyCallback(Window.GlfwWindow, [](GLFWwindow* window, int key, int scancode, int action, int mods)
+        Window.OnKey([this](int key, int, int action, int)
         {
-            ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
-            if (!app)return;
-
             const bool pressed = action != GLFW_RELEASE;
-            app->Input.forward = key == GLFW_KEY_W && pressed;
-            app->Input.backward = key == GLFW_KEY_S && pressed;
-            app->Input.left = key == GLFW_KEY_A && pressed;
-            app->Input.right = key == GLFW_KEY_D && pressed;
+            Input.forward = key == GLFW_KEY_W && pressed;
+            Input.backward = key == GLFW_KEY_S && pressed;
+            Input.left = key == GLFW_KEY_A && pressed;
+            Input.right = key == GLFW_KEY_D && pressed;
+            Input.space = key == GLFW_KEY_SPACE && pressed;
         });
-        glfwSetMouseButtonCallback(Window.GlfwWindow, [](GLFWwindow* window, int button, int action, int mods)
+
+        Window.OnMouseButton([this](int button, int action, int)
         {
-            ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
-            if (!app) return;
             if (button != GLFW_MOUSE_BUTTON_LEFT) return;
 
             if (action == GLFW_PRESS)
             {
                 if (ImGui::GetIO().WantCaptureMouse) return;
-                app->SetMouseLookMode(true);
+                SetMouseLookMode(true);
             }
-            else if (action == GLFW_RELEASE && app->Input.rightMouse)
+            else if (action == GLFW_RELEASE && Input.rightMouse)
             {
-                app->SetMouseLookMode(false);
+                SetMouseLookMode(false);
             }
         });
-        glfwSetCursorPosCallback(Window.GlfwWindow, [](GLFWwindow* window, double xpos, double ypos)
+
+        Window.OnCursorMoved([this](double xpos, double ypos)
         {
-            ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
-            if (!app) return;
+            if (!Input.rightMouse) return;
 
-            if (!app->Input.rightMouse) return;
-
-            if (app->FirstMouseSample)
+            if (FirstMouseSample)
             {
-                app->LastMouseX = xpos;
-                app->LastMouseY = ypos;
-                app->FirstMouseSample = false;
+                LastMouseX = xpos;
+                LastMouseY = ypos;
+                FirstMouseSample = false;
                 return;
             }
 
-            float xoffset = static_cast<float>(xpos - app->LastMouseX);
-            float yoffset = static_cast<float>(app->LastMouseY - ypos); // reversed since y-coords go down
-            app->LastMouseX = xpos;
-            app->LastMouseY = ypos;
+            float xoffset = static_cast<float>(xpos - LastMouseX);
+            float yoffset = static_cast<float>(LastMouseY - ypos); // reversed since y-coords go down
+            LastMouseX = xpos;
+            LastMouseY = ypos;
 
             constexpr float mouseSensitivity = 0.1f;
             xoffset *= mouseSensitivity;
             yoffset *= mouseSensitivity;
 
-            app->MainCamera.Yaw   += xoffset;
-            app->MainCamera.Pitch += yoffset;
+            MainCamera.Yaw   += xoffset;
+            MainCamera.Pitch += yoffset;
 
             // clamp pitch so we don't flip upside down
-            if (app->MainCamera.Pitch > 89.0f)  app->MainCamera.Pitch = 89.0f;
-            if (app->MainCamera.Pitch < -89.0f) app->MainCamera.Pitch = -89.0f;
+            if (MainCamera.Pitch > 89.0f)  MainCamera.Pitch = 89.0f;
+            if (MainCamera.Pitch < -89.0f) MainCamera.Pitch = -89.0f;
         });
     }
 
@@ -187,4 +186,7 @@ private:
     bool FirstMouseSample = true;
     double LastMouseX = 0.0;
     double LastMouseY = 0.0;
+
+    glm::vec3 StartingCameraPosition;
+    glm::vec2 StartingCameraRotation;
 };

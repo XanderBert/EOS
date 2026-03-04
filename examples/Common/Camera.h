@@ -47,6 +47,21 @@ struct Camera final
         return Position;
     }
 
+    void SetPosition(const glm::vec3& newPosition, bool resetVelocity = true)
+    {
+        Position = newPosition;
+
+        if (resetVelocity) Velocity = glm::vec3(0.0f);
+    }
+
+    void SetRotation(const glm::vec2& newRotation, bool resetVelocity = true)
+    {
+        Pitch = newRotation.x;
+        Yaw = newRotation.y;
+
+        if (resetVelocity) Velocity = glm::vec3(0.0f);
+    }
+
     void Update(const glm::vec3& direction, float deltaTime)
     {
         //Update Position

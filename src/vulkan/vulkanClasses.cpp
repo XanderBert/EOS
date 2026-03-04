@@ -1670,7 +1670,7 @@ VkResult VulkanPipelineBuilder::Build(VkDevice device, VkPipelineCache pipelineC
 
     const VkPipelineRenderingCreateInfo renderingInfo
     {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .pNext = nullptr,
         .colorAttachmentCount = NumberOfColorAttachments,
         .pColorAttachmentFormats = ColorAttachmentFormats,

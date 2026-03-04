@@ -205,7 +205,7 @@ int main()
         .VertexShader = shaderHandleVert,
         .FragmentShader = shaderHandleFrag,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
+        .DepthFormat = App.Context->GetFormat(depthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
@@ -216,7 +216,7 @@ int main()
         .VertexInput = vertexDescriptionShadow,
         .VertexShader = shaderHandleShadowVert,
         .FragmentShader = shaderHandleShadowFrag,
-        .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
+        .DepthFormat = App.Context->GetFormat(shadowDepthTexture),
         .PipelineCullMode = EOS::CullMode::Front,
         .DebugName = "ShadowMap Render Pipeline",
     };

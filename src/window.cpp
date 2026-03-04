@@ -1,6 +1,8 @@
 #include "window.h"
 #include "EOS.h"
 
+#include <algorithm>
+
 namespace EOS
 {
     Window::Window(ContextCreationDescription& contextDescription)
@@ -78,14 +80,10 @@ namespace EOS
         contextDescription.Width  = Width;
         contextDescription.Height = Height;
 
-        // Setup the key callback
-        glfwSetKeyCallback(GlfwWindow, [](GLFWwindow* window, int key, int, int action, int)
-        {
-            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-            {
-                glfwSetWindowShouldClose(window, GLFW_TRUE);
-            }
-        });
+        glfwSetWindowUserPointer(GlfwWindow, this);
+        glfwSetKeyCallback(GlfwWindow, DispatchKeyCallback);
+        glfwSetMouseButtonCallback(GlfwWindow, DispatchMouseButtonCallback);
+        glfwSetCursorPosCallback(GlfwWindow, DispatchCursorPosCallback);
 
         glfwFocusWindow(GlfwWindow);
 
@@ -103,7 +101,12 @@ namespace EOS
 
     Window::~Window()
     {
-        glfwDestroyWindow(GlfwWindow);
+        if (GlfwWindow)
+        {
+            glfwSetWindowUserPointer(GlfwWindow, nullptr);
+            glfwDestroyWindow(GlfwWindow);
+            GlfwWindow = nullptr;
+        }
         glfwTerminate();
     }
 
@@ -119,8 +122,145 @@ namespace EOS
 
     bool Window::IsFocused() const
     {
-        glfwGetFramebufferSize(GlfwWindow, &Width, &Height);
+        int newWidth;
+        int newHeight;
+        glfwGetFramebufferSize(GlfwWindow, &newWidth, &newHeight);
+
+        if (Width != newWidth || Height != newHeight)
+        {
+
+        }
+
+        Width = newWidth;
+        Height = newHeight;
         return Width || Height;
+    }
+
+    CallbackSubscription Window::OnKey(KeyCallback callback)
+    {
+        if (!callback) return {};
+
+        const CallbackSubscription callbackSubscription = MakeSubscriptionID();
+        KeySubscriptions.push_back({callbackSubscription, std::move(callback)});
+        return callbackSubscription;
+    }
+
+    CallbackSubscription Window::OnMouseButton(MouseButtonCallback callback)
+    {
+        if (!callback) return {};
+
+        const CallbackSubscription callbackSubscription = MakeSubscriptionID();
+        MouseButtonSubscriptions.push_back({callbackSubscription, std::move(callback)});
+        return callbackSubscription;
+    }
+
+    CallbackSubscription Window::OnCursorMoved(CursorPosCallback callback)
+    {
+        if (!callback) return {};
+
+        const CallbackSubscription callbackSubscription = MakeSubscriptionID();
+        CursorPosSubscriptions.push_back({callbackSubscription, std::move(callback)});
+        return callbackSubscription;
+    }
+
+    CallbackSubscription Window::OnResized(ResizeCallback callback)
+    {
+        if (!callback) return {};
+
+        const CallbackSubscription callbackSubscription = MakeSubscriptionID();
+        ResizeSubscriptions.push_back({callbackSubscription, std::move(callback)});
+        return callbackSubscription;
+    }
+
+    void Window::UnsubscribeKey(const CallbackSubscription callbackSubscription)
+    {
+        std::erase_if(KeySubscriptions,[callbackSubscription](const KeySubscription& subscription)
+        {
+            return subscription.ID.Value == callbackSubscription.Value;
+        });
+    }
+
+    void Window::UnsubscribeMouseButton(const CallbackSubscription callbackSubscription)
+    {
+        std::erase_if(MouseButtonSubscriptions, [callbackSubscription](const MouseButtonSubscription& subscription)
+        {
+            return subscription.ID.Value == callbackSubscription.Value;
+        });
+    }
+
+    void Window::UnsubscribeCursorMoved(const CallbackSubscription callbackSubscription)
+    {
+        std::erase_if(CursorPosSubscriptions,[callbackSubscription](const CursorPosSubscription& subscription)
+        {
+            return subscription.ID.Value == callbackSubscription.Value;
+        });
+    }
+
+    void Window::UnsubscribeResize(CallbackSubscription callbackSubscription)
+    {
+        std::erase_if(ResizeSubscriptions,[callbackSubscription](const ResizeSubscription& subscription)
+        {
+            return subscription.ID.Value == callbackSubscription.Value;
+        });
+    }
+
+    CallbackSubscription Window::MakeSubscriptionID()
+    {
+        const CallbackSubscription callbackSubscription{.Value = NextSubscriptionID};
+        ++NextSubscriptionID;
+        return callbackSubscription;
+    }
+
+    Window* Window::FromGlfwWindow(GLFWwindow* window)
+    {
+        return static_cast<Window*>(glfwGetWindowUserPointer(window));
+    }
+
+    void Window::DispatchKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+    {
+        Window* self = FromGlfwWindow(window);
+        if (!self) return;
+
+        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+
+        for (const KeySubscription& subscription : self->KeySubscriptions)
+        {
+            if (subscription.Callback)
+            {
+                subscription.Callback(key, scancode, action, mods);
+            }
+        }
+    }
+
+    void Window::DispatchMouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+    {
+        const Window* self = FromGlfwWindow(window);
+        if (!self) return;
+
+        for (const MouseButtonSubscription& subscription : self->MouseButtonSubscriptions)
+        {
+            if (subscription.Callback)
+            {
+                subscription.Callback(button, action, mods);
+            }
+        }
+    }
+
+    void Window::DispatchCursorPosCallback(GLFWwindow* window, double xpos, double ypos)
+    {
+        const Window* self = FromGlfwWindow(window);
+        if (!self) return;
+
+        for (const CursorPosSubscription& subscription : self->CursorPosSubscriptions)
+        {
+            if (subscription.Callback)
+            {
+                subscription.Callback(xpos, ypos);
+            }
+        }
     }
 }
 

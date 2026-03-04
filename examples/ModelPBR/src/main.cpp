@@ -79,7 +79,7 @@ int main()
         .VertexShader = shaderHandleVert,
         .FragmentShader = shaderHandleFrag,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = EOS::Format::Z_F32, //TODO depthTexture->Format
+        .DepthFormat = App.Context->GetFormat(depthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
