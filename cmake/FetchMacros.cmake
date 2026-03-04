@@ -207,7 +207,6 @@ macro(FETCH_IMGUI depsDir)
             SOURCE_DIR     ${IMGUI_ROOT_DIR}
     )
 
-
     add_library(imgui STATIC
             ${imgui_SOURCE_DIR}/imgui.cpp
             ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -215,14 +214,8 @@ macro(FETCH_IMGUI depsDir)
             ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     )
     target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR})
-
-
-    if(EOS_VULKAN)
-    target_sources(imgui PRIVATE
-            ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-    )
-    endif()
-
+    target_link_libraries(imgui PUBLIC glfw)
+    target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp)
     target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR}/backends)
     target_link_libraries(EOS PUBLIC imgui)
 endmacro()
