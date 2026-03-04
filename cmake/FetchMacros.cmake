@@ -39,7 +39,7 @@ macro(FETCH_GLFW depsDir)
     target_link_libraries(EOS PUBLIC glfw)
 endmacro()
 
-macro(FETCH_VOLK tag, depsDir)
+macro(FETCH_VOLK tag depsDir)
     set(DEPS_DIR ${depsDir})
     set(TAG ${tag})
 
@@ -48,11 +48,27 @@ macro(FETCH_VOLK tag, depsDir)
             volk
             GIT_REPOSITORY https://github.com/zeux/volk
             GIT_TAG        ${TAG}
+            GIT_SHALLOW    TRUE
             SOURCE_DIR     ${VOLK_ROOT_DIR}
     )
 
     add_subdirectory(${VOLK_ROOT_DIR})
     target_link_libraries(EOS PRIVATE volk_headers)
+endmacro()
+
+macro(FETCH_VULKAN_UTILS tag depsDir)
+    set(DEPS_DIR ${depsDir})
+    set(TAG ${tag})
+    set(VULKAN_TOOLS_ROOT_DIR ${DEPS_DIR}/src/vulkan-utility-libraries)
+
+    FetchContent_Populate(
+            vulkan_utility_libraries
+            GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Utility-Libraries
+            GIT_TAG        ${TAG}
+            GIT_SHALLOW    TRUE
+            SOURCE_DIR     ${VULKAN_TOOLS_ROOT_DIR}
+    )
+    include_directories(${DEPS_DIR}/src/vulkan-utility-libraries/include)
 endmacro()
 
 macro(FETCH_VMA depsDir)

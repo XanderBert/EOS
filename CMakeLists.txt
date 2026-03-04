@@ -49,15 +49,20 @@ if(EOS_VULKAN)
         if(CMAKE_MATCH_5)
             set(VULKAN_SDK_VERSION "${VULKAN_SDK_VERSION}.${CMAKE_MATCH_5}")
         endif()
+        set(SDK_VERSION "vulkan-sdk-${VULKAN_SDK_VERSION}")
 
-        message(STATUS "Detected Vulkan SDK version: ${VULKAN_SDK_VERSION}")
-        set(VOLK_VERSION "vulkan-sdk-${VULKAN_SDK_VERSION}")
-        message(STATUS "Fetching VOLK version: ${VOLK_VERSION}")
     else()
         message(FATAL_ERROR "Vulkan SDK not found. Please install the Vulkan SDK.")
     endif()
 
-    FETCH_VOLK(${VOLK_VERSION} ${EOS_DEPENDENCIES_DIR})
+    message(STATUS "Detected Vulkan SDK version: ${VULKAN_SDK_VERSION}")
+
+    message(STATUS "Fetching VOLK version: ${SDK_VERSION}")
+    FETCH_VOLK(${SDK_VERSION} ${EOS_DEPENDENCIES_DIR})
+
+    message(STATUS "Fetching Vulkan Utilities version: ${SDK_VERSION}")
+    FETCH_VULKAN_UTILS(${SDK_VERSION} ${EOS_DEPENDENCIES_DIR})
+
     FETCH_VMA(${EOS_DEPENDENCIES_DIR})
 else ()
     message(FATAL_ERROR "No Usable Graphics API Found")
