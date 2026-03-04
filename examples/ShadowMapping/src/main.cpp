@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "shaders/shaderUtils.h"
 #include "utils.h"
+#include "glm/gtc/type_ptr.hpp"
 
 struct PerFrameData final
 {
@@ -54,12 +55,6 @@ int main()
         .origin = {220.0f, 700.0f, 300.5f},
         .rotation = {-60, -90.0f},
         .acceleration = 800.0f
-    };
-
-    CameraDescription lightDescription
-    {
-        .origin = {220.0f, 700.0f, 300.5f},
-        .rotation = {-60, -90.0f},
     };
 
     ExampleAppDescription appDescription
@@ -220,9 +215,12 @@ int main()
     const glm::mat4 m = glm::mat4(1);
 
 
-    Camera light{lightDescription};
-
-
+    //TODO: Make a abstracted movement class or something, that can either behave like projection or camera projection things.
+    //Light and Camera Can implement those
+    glm::vec3 lightPos          = {220.0f, 700.0f, 300.5f};
+    glm::vec2 lightRotation     = {-60, -90};
+    glm::mat4 lightProjection   = glm::ortho(-500.0f, 500.0f,-500.0f, 500.0f,0.1f,5000.0f);
+    glm::vec3 lightUp           = {0.0f, 1.0f, 0.0f};
     const FramePointers framePointers
     {
         .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
@@ -234,16 +232,14 @@ int main()
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
         if (std::isnan(aspectRatio)) return;
 
+        glm::vec3 lightForward;
+        lightForward.x = cos(glm::radians(lightRotation.y)) * cos(glm::radians(lightRotation.x));
+        lightForward.y = sin(glm::radians(lightRotation.x));
+        lightForward.z = sin(glm::radians(lightRotation.y)) * cos(glm::radians(lightRotation.x));
+        lightForward = glm::normalize(lightForward);
 
-        glm::mat4 lightProj = glm::ortho(
-    -500.0f, 500.0f,
-    -500.0f, 500.0f,
-    0.1f,
-    5000.0f
-);
-
-        glm::mat4 lightView = light.GetViewMatrix();
-        glm::mat4 depthMVP = lightProj * lightView * m;
+        glm::mat4 lightView = glm::lookAt(lightPos, lightPos + lightForward, lightUp);
+        glm::mat4 depthMVP = lightProjection * lightView * m;
 
         //const glm::mat4 depthMVP = light.GetViewProjectionMatrix(1.0f) * m;//glm::mat4(1.0f);
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
@@ -253,7 +249,7 @@ int main()
             .model = m,
             .mvp = mvp,
             .depthMVP = depthMVP,
-            .lightPos = glm::vec4(light.GetPosition(), 1.0f),
+            .lightPos = glm::vec4(lightPos, 1.0f),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = shadowDepthTexture.Index(),
         };
@@ -327,33 +323,17 @@ int main()
 
 
         //Render UI
-        constexpr EOS::RenderPass ImGuiRenderPass
+        App.ImGuiRenderer->BeginFrame(cmdBuffer);
         {
-            .Color { { .LoadOpState = EOS::LoadOp::Load, } },
-        };
+            ImGui::SetNextWindowSize(ImVec2(500, 200), ImGuiCond_FirstUseEver);
+            ImGui::Begin("Light Settings");
 
-        EOS::Framebuffer imguiFramebuffer
-        {
-            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DebugName = "ImGui framebuffer"
-        };
-
-        App.ImGuiRenderer->BeginFrame(imguiFramebuffer);
-        cmdBeginRendering(cmdBuffer, ImGuiRenderPass, imguiFramebuffer);
-        {
-            ImGui::SetNextWindowSize(ImVec2(300, 100), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Settings");
-
-            static float value1 = 0.5f;
-            static float value2 = 0.5f;
-
-            ImGui::SliderFloat("Value 1", &value1, 0.0f, 1.0f);
-            ImGui::SliderFloat("Value 2", &value2, 0.0f, 1.0f);
+            ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));
+            ImGui::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
 
             ImGui::End();
         }
         App.ImGuiRenderer->EndFrame(cmdBuffer);
-        cmdEndRendering(cmdBuffer);
 
 
         cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});

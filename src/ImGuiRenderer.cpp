@@ -36,7 +36,7 @@ namespace EOS
 
     ImGuiRenderer::~ImGuiRenderer()
     {
-        ImGuiIO& io = ImGui::GetIO();
+        const ImGuiIO& io = ImGui::GetIO();
         io.Fonts->TexRef = ImTextureRef();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
@@ -88,12 +88,22 @@ namespace EOS
     void ImGuiRenderer::SetScale(float scale)
     {
         Scale = scale;
-        RenderPipeline.Reset();
     }
 
-    void ImGuiRenderer::BeginFrame(const Framebuffer& framebuffer)
+    void ImGuiRenderer::BeginFrame(ICommandBuffer& cmd)
     {
-        CHECK(framebuffer.Color[0].Texture, "We need at least 1 color texture in the framebuffer");
+        constexpr RenderPass renderPass
+        {
+            .Color { { .LoadOpState = EOS::LoadOp::Load, } },
+        };
+
+        Framebuffer framebuffer
+        {
+            .Color = {{.Texture = Context->GetSwapChainTexture()}},
+            .DebugName = "ImGui framebuffer"
+        };
+
+        CHECK(framebuffer.Color[0].Texture, "We need a valid swapchain texture");
         const Dimensions dim = Context->GetDimensions(framebuffer.Color[0].Texture);
 
         ImGuiIO& io = ImGui::GetIO();
@@ -105,6 +115,9 @@ namespace EOS
 
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        cmdPushMarker(cmd, "GUI", 0xff11ff01);
+        cmdBeginRendering(cmd, renderPass, framebuffer);
     }
 
     void ImGuiRenderer::EndFrame(ICommandBuffer& cmd)
@@ -114,123 +127,113 @@ namespace EOS
         ImGui::EndFrame();
         ImGui::Render();
 
-        ImDrawData* dd = ImGui::GetDrawData();
+        ImDrawData* drawData = ImGui::GetDrawData();
+        const float framebufferWidth = drawData->DisplaySize.x * drawData->FramebufferScale.x;
+        const float framebufferHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;
+        if (framebufferWidth <= 0 || framebufferHeight <= 0 || drawData->CmdListsCount == 0)  return;
 
-        const float fb_width = dd->DisplaySize.x * dd->FramebufferScale.x;
-        const float fb_height = dd->DisplaySize.y * dd->FramebufferScale.y;
-        if (fb_width <= 0 || fb_height <= 0 || dd->CmdListsCount == 0)  return;
-
-
-        cmdPushMarker(cmd, "GUI", 0xff11ff01);
         cmdSetDepthState(cmd, {});
-        cmdBindViewport(cmd, {.X = 0.0f, .Y = 0.0f, .Width = fb_width, .Height = fb_height});
+        cmdBindViewport(cmd, {.X = 0.0f, .Y = 0.0f, .Width = framebufferWidth, .Height = framebufferHeight});
 
-        DrawableData& drawableData = Drawables[FrameIndex];
+        auto& [VertexBuffer, IndexBuffer, allocatedIndices, allocatedVertices] = Drawables[FrameIndex];
         FrameIndex = (FrameIndex + 1) % ARRAY_COUNT(Drawables);
 
         //Create index buffer
-        if (drawableData.NumAllocatedIndices < dd->TotalIdxCount)
+        if (allocatedIndices < drawData->TotalIdxCount)
         {
             const BufferDescription indexBufferDesc
             {
                 .Usage = BufferUsageFlags::Index,
                 .Storage = StorageType::HostVisible,
-                .Size = dd->TotalIdxCount * sizeof(ImDrawIdx),
+                .Size = drawData->TotalIdxCount * sizeof(ImDrawIdx),
                 .DebugName = "Imgui Index Buffer"
             };
 
-            drawableData.IndexBuffer = Context->CreateBuffer(indexBufferDesc);
-            drawableData.NumAllocatedIndices = dd->TotalIdxCount;
+            IndexBuffer = Context->CreateBuffer(indexBufferDesc);
+            allocatedIndices = drawData->TotalIdxCount;
         }
 
         //Create Vertex Buffer
-        if (drawableData.NumAllocatedVertices < dd->TotalVtxCount)
+        if (allocatedVertices < drawData->TotalVtxCount)
         {
             const BufferDescription vertexBufferDesc
             {
                 .Usage = BufferUsageFlags::StorageFlag,
                 .Storage = StorageType::HostVisible,
-                .Size = dd->TotalVtxCount * sizeof(ImDrawVert),
+                .Size = drawData->TotalVtxCount * sizeof(ImDrawVert),
                 .DebugName = "Imgui Vertex Buffer"
             };
 
-            drawableData.VertexBuffer = Context->CreateBuffer(vertexBufferDesc);
-            drawableData.NumAllocatedVertices = dd->TotalVtxCount;
+            VertexBuffer = Context->CreateBuffer(vertexBufferDesc);
+            allocatedVertices = drawData->TotalVtxCount;
         }
 
         //Upload vertex/index buffers
         {
-            ImDrawVert* vtx = reinterpret_cast<ImDrawVert*>(Context->GetMappedPtr(drawableData.VertexBuffer));
-            uint16_t* idx = reinterpret_cast<uint16_t*>(Context->GetMappedPtr(drawableData.IndexBuffer));
+            ImDrawVert* vertexBufferPtr = reinterpret_cast<ImDrawVert*>(Context->GetMappedPtr(VertexBuffer));
+            uint16_t* indexBufferPtr = reinterpret_cast<uint16_t*>(Context->GetMappedPtr(IndexBuffer));
 
-            for (const ImDrawList* cmdList : dd->CmdLists)
+            for (const ImDrawList* cmdList : drawData->CmdLists)
             {
-                memcpy(vtx, cmdList->VtxBuffer.Data, cmdList->VtxBuffer.Size * sizeof(ImDrawVert));
-                memcpy(idx, cmdList->IdxBuffer.Data, cmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
-                vtx += cmdList->VtxBuffer.Size;
-                idx += cmdList->IdxBuffer.Size;
+                memcpy(vertexBufferPtr, cmdList->VtxBuffer.Data, cmdList->VtxBuffer.Size * sizeof(ImDrawVert));
+                memcpy(indexBufferPtr, cmdList->IdxBuffer.Data, cmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
+
+                vertexBufferPtr += cmdList->VtxBuffer.Size;
+                indexBufferPtr += cmdList->IdxBuffer.Size;
             }
 
-            Context->FlushMappedMemory(drawableData.VertexBuffer, dd->TotalVtxCount * sizeof(ImDrawVert));
-            Context->FlushMappedMemory(drawableData.IndexBuffer, dd->TotalIdxCount * sizeof(ImDrawIdx));
+            Context->FlushMappedMemory(VertexBuffer, drawData->TotalVtxCount * sizeof(ImDrawVert));
+            Context->FlushMappedMemory(IndexBuffer, drawData->TotalIdxCount * sizeof(ImDrawIdx));
         }
 
-        uint32_t idxOffset = 0;
-        uint32_t vtxOffset = 0;
+        uint32_t indexOffset = 0;
+        uint32_t vertexOffset = 0;
 
-        cmdBindIndexBuffer(cmd, drawableData.IndexBuffer, EOS::IndexFormat::UI16);
+        cmdBindIndexBuffer(cmd, IndexBuffer, IndexFormat::UI16);
         cmdBindRenderPipeline(cmd, RenderPipeline);
 
+        const float left = drawData->DisplayPos.x;
+        const float right = drawData->DisplayPos.x + drawData->DisplaySize.x;
+        const float top = drawData->DisplayPos.y;
+        const float bottom = drawData->DisplayPos.y + drawData->DisplaySize.y;
 
-        const float L = dd->DisplayPos.x;
-        const float R = dd->DisplayPos.x + dd->DisplaySize.x;
-        const float T = dd->DisplayPos.y;
-        const float B = dd->DisplayPos.y + dd->DisplaySize.y;
+        const ImVec2 clipPosition = drawData->DisplayPos;
+        const ImVec2 clipScale = drawData->FramebufferScale;
 
-        const ImVec2 clip_off = dd->DisplayPos;
-        const ImVec2 clip_scale = dd->FramebufferScale;
-
-        for (const ImDrawList* cmdList : dd->CmdLists)
+        for (const ImDrawList* cmdList : drawData->CmdLists)
         {
             for (int cmd_i{}; cmd_i < cmdList->CmdBuffer.Size; ++cmd_i)
             {
                 const ImDrawCmd ImCmd = cmdList->CmdBuffer[cmd_i];
-                //CHECK(ImCmd.UserCallback, "The user callback of the imgui draw command is not valid.");
+                CHECK(ImCmd.UserCallback == nullptr, "The user callback of the imgui draw is set.");
 
-                ImVec2 clipMin((ImCmd.ClipRect.x - clip_off.x) * clip_scale.x, (ImCmd.ClipRect.y - clip_off.y) * clip_scale.y);
-                ImVec2 clipMax((ImCmd.ClipRect.z - clip_off.x) * clip_scale.x, (ImCmd.ClipRect.w - clip_off.y) * clip_scale.y);
+                ImVec2 clipMin((ImCmd.ClipRect.x - clipPosition.x) * clipScale.x, (ImCmd.ClipRect.y - clipPosition.y) * clipScale.y);
+                ImVec2 clipMax((ImCmd.ClipRect.z - clipPosition.x) * clipScale.x, (ImCmd.ClipRect.w - clipPosition.y) * clipScale.y);
 
                 //Check the clip regions -> scissor out
                 if (clipMin.x < 0.0f) clipMin.x = 0.0f;
                 if (clipMin.y < 0.0f) clipMin.y = 0.0f;
-                if (clipMax.x > fb_width ) clipMax.x = fb_width;
-                if (clipMax.y > fb_height) clipMax.y = fb_height;
+                if (clipMax.x > framebufferWidth ) clipMax.x = framebufferWidth;
+                if (clipMax.y > framebufferHeight) clipMax.y = framebufferHeight;
                 if (clipMax.x <= clipMin.x || clipMax.y <= clipMin.y) continue;
 
-
-                struct ImguiBindData
+                BindData bindData
                 {
-                    float LRTB[4]; // ortho projection: left, right, top, bottom
-                    uint64_t vb = 0;
-                    uint32_t textureId = 0;
-                    uint32_t samplerId = 0;
-                }
-                bindData =
-                {
-                    .LRTB = {L, R, T, B},
-                    .vb = Context->GetGPUAddress(drawableData.VertexBuffer),
-                    .textureId = static_cast<uint32_t>(ImCmd.GetTexID()),
-                    .samplerId = Sampler.Index(),
+                    .LRTB               = {left, right, top, bottom},
+                    .vertexBufferPtr    = Context->GetGPUAddress(VertexBuffer),
+                    .textureId          = static_cast<uint32_t>(ImCmd.GetTexID()),
+                    .samplerId          = Sampler.Index(),
                 };
 
                 cmdPushConstants(cmd, bindData);
                 cmdBindScissorRect(cmd, {static_cast<uint32_t>(clipMin.x), static_cast<uint32_t>(clipMin.y), static_cast<uint32_t>(clipMax.x - clipMin.x), static_cast<uint32_t>(clipMax.y - clipMin.y)});
-                cmdDrawIndexed(cmd, ImCmd.ElemCount, 1u, idxOffset + ImCmd.IdxOffset, static_cast<int32_t>(vtxOffset + ImCmd.VtxOffset));
+                cmdDrawIndexed(cmd, ImCmd.ElemCount, 1u, indexOffset + ImCmd.IdxOffset, static_cast<int32_t>(vertexOffset + ImCmd.VtxOffset));
             }
-            idxOffset += cmdList->IdxBuffer.Size;
-            vtxOffset += cmdList->VtxBuffer.Size;
+            indexOffset += cmdList->IdxBuffer.Size;
+            vertexOffset += cmdList->VtxBuffer.Size;
         }
 
+        cmdEndRendering(cmd);
         cmdPopMarker(cmd);
     }
 
@@ -256,22 +259,21 @@ namespace EOS
             {{
                 .ColorFormat = Context->GetFormat(framebuffer.Color[0].Texture),
                 .BlendEnabled = true,
-                .SrcRGBBlendFactor = EOS::BlendFactor::SrcAlpha,
-                .DstRGBBlendFactor = EOS::BlendFactor::OneMinusSrcAlpha,
+                .SrcRGBBlendFactor = BlendFactor::SrcAlpha,
+                .DstRGBBlendFactor = BlendFactor::OneMinusSrcAlpha,
             },
-                {.ColorFormat = framebuffer.Color[1].Texture ? Context->GetFormat(framebuffer.Color[1].Texture) : EOS::Format::Invalid},
-                {.ColorFormat = framebuffer.Color[2].Texture ? Context->GetFormat(framebuffer.Color[2].Texture) : EOS::Format::Invalid},
-                {.ColorFormat = framebuffer.Color[3].Texture ? Context->GetFormat(framebuffer.Color[3].Texture) : EOS::Format::Invalid},
-                {.ColorFormat = framebuffer.Color[4].Texture ? Context->GetFormat(framebuffer.Color[4].Texture) : EOS::Format::Invalid},
-                {.ColorFormat = framebuffer.Color[5].Texture ? Context->GetFormat(framebuffer.Color[5].Texture) : EOS::Format::Invalid},
-                {.ColorFormat = framebuffer.Color[6].Texture ? Context->GetFormat(framebuffer.Color[6].Texture) : EOS::Format::Invalid},
-                {.ColorFormat = framebuffer.Color[7].Texture ? Context->GetFormat(framebuffer.Color[7].Texture) : EOS::Format::Invalid},
+                {.ColorFormat = framebuffer.Color[1].Texture ? Context->GetFormat(framebuffer.Color[1].Texture) : Invalid},
+                {.ColorFormat = framebuffer.Color[2].Texture ? Context->GetFormat(framebuffer.Color[2].Texture) : Invalid},
+                {.ColorFormat = framebuffer.Color[3].Texture ? Context->GetFormat(framebuffer.Color[3].Texture) : Invalid},
+                {.ColorFormat = framebuffer.Color[4].Texture ? Context->GetFormat(framebuffer.Color[4].Texture) : Invalid},
+                {.ColorFormat = framebuffer.Color[5].Texture ? Context->GetFormat(framebuffer.Color[5].Texture) : Invalid},
+                {.ColorFormat = framebuffer.Color[6].Texture ? Context->GetFormat(framebuffer.Color[6].Texture) : Invalid},
+                {.ColorFormat = framebuffer.Color[7].Texture ? Context->GetFormat(framebuffer.Color[7].Texture) : Invalid},
             },
-            .DepthFormat = framebuffer.DepthStencil.Texture ? Context->GetFormat(framebuffer.DepthStencil.Texture) : EOS::Format::Invalid,
+            .DepthFormat = framebuffer.DepthStencil.Texture ? Context->GetFormat(framebuffer.DepthStencil.Texture) : Invalid,
             .PipelineCullMode = CullMode::None,
             .DebugName = "ImGui Render Pipeline"
         };
-
 
         RenderPipeline = Context->CreateRenderPipeline(renderPipelineDesc);
     }

@@ -13,7 +13,7 @@ namespace EOS
 
         void SetFont(const char* defaultFont, float fontSize);
         void SetScale(float scale);
-        void BeginFrame(const Framebuffer& framebuffer);
+        void BeginFrame(ICommandBuffer& cmd);
         void EndFrame(ICommandBuffer& cmd);
 
     private:
@@ -27,10 +27,10 @@ namespace EOS
         TextureHolder FontTexture;
         RenderPipelineHolder RenderPipeline;
 
-        float Scale = 1.0f;
+        float Scale = 3.0f;
         uint32_t FrameIndex = 0;
 
-        struct DrawableData
+        struct DrawableData final
         {
             BufferHolder VertexBuffer;
             BufferHolder IndexBuffer;
@@ -39,9 +39,13 @@ namespace EOS
         };
         DrawableData Drawables[3] = {};
 
+        struct BindData final
+        {
+            float LRTB[4];
+            uint64_t vertexBufferPtr = 0;
+            uint32_t textureId = 0;
+            uint32_t samplerId = 0;
+        };
+
     };
 }
-
-
-#if defined(EOS_USE_IMGUI)
-#endif

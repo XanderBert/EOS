@@ -1,5 +1,6 @@
 #pragma once
 #include "EOS.h"
+#include "imgui.h"
 #include "ImGuiRenderer.h"
 #include "utils.h"
 #include "assimp/cimport.h"
@@ -216,6 +217,7 @@ private:
         {
             ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
             if (!app) return;
+            if (ImGui::GetIO().WantCaptureMouse) return;
 
             const bool pressed = action != GLFW_RELEASE;
             app->Input.rightMouse = button == GLFW_MOUSE_BUTTON_1 && pressed;
@@ -224,8 +226,9 @@ private:
         {
             ExampleApp* app = static_cast<ExampleApp*>(glfwGetWindowUserPointer(window));
             if (!app) return;
-            if (!app->Input.rightMouse) return;
+            if (ImGui::GetIO().WantCaptureMouse) return;
 
+            if (!app->Input.rightMouse) return;
             static bool firstMouse = true;
             static double lastX = xpos;
             static double lastY = ypos;
