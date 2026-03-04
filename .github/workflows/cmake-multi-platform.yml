@@ -51,12 +51,7 @@ jobs:
             linux-${{ matrix.display_server }}-${{ env.BUILD_TYPE }}-
 
       - name: Configure
-        run: |
-          cmake -B build \
-            -DEOS_BUILD_EXAMPLES=OFF \
-            -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }} \
-            -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        run: cmake -B build -DEOS_BUILD_EXAMPLES=OFF -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }} -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
@@ -95,10 +90,7 @@ jobs:
             windows-${{ env.BUILD_TYPE }}-
 
       - name: Configure
-        run: |
-          cmake -B build \
-            -DEOS_BUILD_EXAMPLES=OFF \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        run: cmake -B build -DEOS_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
