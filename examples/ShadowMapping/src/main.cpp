@@ -1,11 +1,12 @@
 
-#include "../../common.h"
+#include "../../Common/App.h"
 #include "EOS.h"
 #include "imgui.h"
 #include "logger.h"
 #include "shaders/shaderUtils.h"
 #include "utils.h"
 #include "glm/gtc/type_ptr.hpp"
+
 
 struct PerFrameData final
 {
@@ -69,10 +70,10 @@ int main()
 
     ExampleApp App{appDescription};
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shade", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shade", EOS::ShaderStage::Fragment);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowVert = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shadowDepth", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleShadowFrag = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "shadowDepth", EOS::ShaderStage::Fragment);
+    EOS::ShaderModuleHolder shaderHandleVert = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Vertex);
+    EOS::ShaderModuleHolder shaderHandleFrag = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Fragment);
+    EOS::ShaderModuleHolder shaderHandleShadowVert = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Vertex);
+    EOS::ShaderModuleHolder shaderHandleShadowFrag = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Fragment);
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vertexDesc

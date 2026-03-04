@@ -1,4 +1,4 @@
-#include "../../common.h"
+#include "../../Common/App.h"
 #include "EOS.h"
 #include "logger.h"
 #include "shaders/shaderUtils.h"
@@ -49,8 +49,9 @@ int main()
 
     ExampleApp App{appDescription};
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(App.Context, App.ShaderCompiler, "modelAlbedo", EOS::ShaderStage::Fragment);
+
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Fragment);
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vdesc

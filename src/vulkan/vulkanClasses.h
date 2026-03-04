@@ -410,7 +410,7 @@ public:
     [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
     [[nodiscard]] EOS::ColorSpace GetSwapchainColorSpace() const override;
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
-    [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) override;
+    [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
     [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
@@ -491,6 +491,8 @@ private:
     CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.
     DeviceQueues VulkanDeviceQueues{};
     EOS::ContextConfiguration Configuration{};              //TODO: Should the lifetime of this obj be the whole application?
+
+    std::unique_ptr<EOS::ShaderCompiler> ShaderCompiler{};
 
     friend struct VulkanSwapChain;
     friend struct VulkanSwapChainSupportDetails;

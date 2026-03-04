@@ -1,4 +1,4 @@
-#include "../../common.h"
+#include "../../Common/App.h"
 #include "EOS.h"
 #include "imgui.h"
 #include "logger.h"
@@ -50,7 +50,7 @@ EOS::BufferHolder IndirectDrawBuffer;
 
 int main()
 {
-    constexpr EOS::ContextCreationDescription contextDescr
+    const EOS::ContextCreationDescription contextDescr
     {
         .Config                 = { .EnableValidationLayers = true },
         .PreferredHardwareType  = EOS::HardwareDeviceType::Discrete,
@@ -72,8 +72,8 @@ int main()
 
     ExampleApp App{appDescription};
 
-    VertexShader = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "indirectModel", EOS::ShaderStage::Vertex);
-    PixelShader  = EOS::LoadShader(App.Context.get(), App.ShaderCompiler.get(), "indirectModel", EOS::ShaderStage::Fragment);
+    VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
+    PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
     DepthTexture = App.CreateDepthTexture();
 
     //TODO: This could be constevaled with reflection Or use Shader Resource Table model

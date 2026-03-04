@@ -210,10 +210,9 @@ namespace EOS
         return "None";
     }
 
-    EOS::Holder<EOS::ShaderModuleHandle> LoadShader(IContext* context, ShaderCompiler* shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
+    ShaderInfo LoadShader(ShaderCompiler* shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
     {
-        const ShaderInfo info = shaderCompiler->LoadShader(fileName, shaderStage);
-        return context->CreateShaderModule(info);
+        return shaderCompiler->LoadShader(fileName, shaderStage);
     }
 
     void ShaderCompiler::CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const

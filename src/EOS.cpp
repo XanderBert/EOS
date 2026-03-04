@@ -88,9 +88,4 @@ namespace EOS
 
         return std::move( std::make_unique<VulkanContext>(contextCreationDescription) );
     }
-
-    std::unique_ptr<ShaderCompiler> CreateShaderCompiler(const std::filesystem::path& shaderFolder)
-    {
-        return std::move(std::make_unique<EOS::ShaderCompiler>(shaderFolder));
-    }
 }

@@ -50,15 +50,4 @@ namespace EOS
 
         std::filesystem::path ShaderFolder;
     };
-
-
-    /**
-    * @brief Compiles the shader if needed and returns a Holder handle to the compiled shader
-    * @param
-    * @param
-    * @param 
-    * @return a Holder Handle to the compiled shader
-    */
-    Holder<ShaderModuleHandle> LoadShader(IContext* context, ShaderCompiler* shaderCompiler, const char* fileName, const ShaderStage& shaderStage);
-
 }

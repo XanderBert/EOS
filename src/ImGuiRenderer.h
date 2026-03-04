@@ -7,7 +7,7 @@ namespace EOS
     class ImGuiRenderer final
     {
     public:
-        ImGuiRenderer(IContext* context, ShaderCompiler* shaderCompiler ,const Window& window, const char* defaultFont = "", float fontSize = 8);
+        ImGuiRenderer(IContext* context ,const Window& window, const char* defaultFont = "", float fontSize = 8);
         ~ImGuiRenderer();
         DELETE_COPY_MOVE(ImGuiRenderer)
 

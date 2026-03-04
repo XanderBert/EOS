@@ -5,9 +5,7 @@
 
 namespace EOS
 {
-    //TODO: I don't like that i need to pass a shaderCompiler, That should be handled automatically,
-    //Also i should be able to call context->LoadShader or sth instead of EOS::LoadShader to be consistent with the api
-    ImGuiRenderer::ImGuiRenderer(IContext* context, ShaderCompiler* shaderCompiler , const Window& window, const char* defaultFont, float fontSize)
+    ImGuiRenderer::ImGuiRenderer(IContext* context, const Window& window, const char* defaultFont, float fontSize)
     :Context(context)
     {
         ImGui::CreateContext();
@@ -30,8 +28,9 @@ namespace EOS
             .debugName = "Imgui Sampler",
         };
         Sampler = context->CreateSampler(samplerDesc);
-        VertexShader    = LoadShader(context, shaderCompiler, "imgui", ShaderStage::Vertex);
-        FragmentShader  = LoadShader(context, shaderCompiler, "imgui", ShaderStage::Fragment);
+
+        VertexShader    = context->CreateShaderModule("imgui", ShaderStage::Vertex);
+        FragmentShader  = context->CreateShaderModule("imgui", ShaderStage::Fragment);
     }
 
     ImGuiRenderer::~ImGuiRenderer()

@@ -14,9 +14,8 @@ int main()
 
     std::unique_ptr<EOS::Window> window = std::make_unique<EOS::Window>(contextDescr);
     std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
-    std::unique_ptr<EOS::ShaderCompiler> shaderCompiler = EOS::CreateShaderCompiler("./");
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = EOS::LoadShader(context.get(), shaderCompiler.get(), "triangle", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = EOS::LoadShader(context.get(), shaderCompiler.get(), "triangle", EOS::ShaderStage::Fragment);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = context->CreateShaderModule("triangle", EOS::ShaderStage::Vertex);
+    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = context->CreateShaderModule("triangle", EOS::ShaderStage::Fragment);
 
     EOS::SamplerDescription samplerDescription
     {

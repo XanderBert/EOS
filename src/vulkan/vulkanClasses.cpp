@@ -5,6 +5,7 @@
 #include <ranges>
 
 #include "utils.h"
+#include "shaders/shaderUtils.h"
 #include "vulkan/vkTools.h"
 
 #pragma region GLOBAL_FUNCTIONS
@@ -2016,6 +2017,7 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
 
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.Config)
+, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderPath))
 {
     CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
 
@@ -2215,8 +2217,10 @@ EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const
     return dimensions;
 }
 
-EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const EOS::ShaderInfo &shaderInfo)
+EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage)
 {
+    const EOS::ShaderInfo shaderInfo = ShaderCompiler->LoadShader(fileName, shaderStage);
+
     VkShaderModule vkShaderModule = VK_NULL_HANDLE;
 
     const VkShaderModuleCreateInfo createInfo =

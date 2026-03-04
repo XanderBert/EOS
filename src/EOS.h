@@ -76,6 +76,7 @@ namespace EOS
     {
         ContextConfiguration    Config;
         HardwareDeviceType      PreferredHardwareType{HardwareDeviceType::Discrete};
+        std::filesystem::path   ShaderPath{"./"};
         const char*             ApplicationName{};
         void*                   Window{};
         void*                   Display{};
@@ -470,7 +471,7 @@ namespace EOS
         * @param shaderInfo information about the shader such as its code and stage.
         * @return A Holder Handle to a shader module.
         */
-        virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const EOS::ShaderInfo& shaderInfo) = 0;
+        virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, ShaderStage shaderStage) = 0;
 
         /**
         * @brief Creates a RenderPipeline and returns a handle to it.
@@ -682,13 +683,6 @@ namespace EOS
     * @returns A unique pointer to the created Context interface.
     */
     std::unique_ptr<IContext> CreateContextWithSwapChain(const ContextCreationDescription& contextCreationDescription);
-
-    /**
-    * @brief Creates a ShaderCompiler.
-    * @param shaderFolder The folder where our non-compiled shaders are stored.
-    * @returns A unique pointer to the created shader compiler.
-    */
-    std::unique_ptr<ShaderCompiler> CreateShaderCompiler(const std::filesystem::path& shaderFolder);
 }
 
 #pragma region GLOBAL_FUNCTIONS
