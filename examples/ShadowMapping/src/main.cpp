@@ -228,9 +228,9 @@ int main()
     //TODO: Make a abstracted movement class or something, that can either behave like projection or camera projection things.
     //Light and Camera Can implement those
     const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
-    glm::vec3 lightPos          = {0.0f, 500.0f, 100.0f};
+    glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
     glm::vec2 lightRotation     = {-73, -90};
-    const glm::mat4 lightProjection   = glm::ortho(-500.0f, 500.0f,-500.0f, 500.0f,0.1f,1000.0f);
+    const glm::mat4 lightProjection   = glm::ortho(-150.0f, 150.0f,-150.0f, 150.0f,0.1f,250.0f);
     glm::vec3 lightUp           = {0.0f, 1.0f, 0.0f};
     const FramePointers framePointers
     {
@@ -339,6 +339,7 @@ int main()
 
             ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));
             ImGui::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
+            ImGui::Image(shadowDepthTexture.Index(), {200,200});
 
             ImGui::End();
         }
