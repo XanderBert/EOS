@@ -18,22 +18,22 @@ Eos aims to be:
 > Versions are centralized in `cmake/deps-lock.cmake`.
 
 ### Core EOS dependencies
-- [GLFW](https://github.com/glfw/glfw) (`3.4`)
-- [Volk](https://github.com/zeux/volk) (`master`, or Vulkan SDK-matched tag when available)
-- [Vulkan Utility Libraries](https://github.com/KhronosGroup/Vulkan-Utility-Libraries) (`main`, or Vulkan SDK-matched tag when available)
-- [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) (`v3.2.1`)
-- [spdlog](https://github.com/gabime/spdlog) (`v1.15.2`)
-- [stb](https://github.com/nothings/stb) (`master`)
-- [KTX-Software](https://github.com/KhronosGroup/KTX-Software) (`v4.4.2`)
-- [Slang](https://github.com/shader-slang/slang) binaries (`2026.4`, downloaded from GitHub releases)
+- [GLFW](https://github.com/glfw/glfw)
+- [Volk](https://github.com/zeux/volk)
+- [Vulkan Utility Libraries](https://github.com/KhronosGroup/Vulkan-Utility-Libraries)
+- [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+- [spdlog](https://github.com/gabime/spdlog)
+- [stb](https://github.com/nothings/stb)
+- [KTX-Software](https://github.com/KhronosGroup/KTX-Software)
+- [Slang](https://github.com/shader-slang/slang)
 
 ### Optional EOS dependencies
-- [Dear ImGui](https://github.com/ocornut/imgui) (`v1.92.6`) when `EOS_USE_IMGUI=ON` (default)
-- [Tracy](https://github.com/wolfpld/tracy) (`v0.10`) when `EOS_USE_TRACY=ON`
+- [Dear ImGui](https://github.com/ocornut/imgui) when `EOS_USE_IMGUI=ON`
+- [Tracy](https://github.com/wolfpld/tracy) when `EOS_USE_TRACY=ON`
 
 ### Example-only dependencies
-- [Assimp](https://github.com/assimp/assimp) (`v6.0.4`)
-- [GLM](https://github.com/g-truc/glm) (`1.0.1`)
+- [Assimp](https://github.com/assimp/assimp)
+- [GLM](https://github.com/g-truc/glm)
 
 ### System dependencies
 - Vulkan SDK (required)
