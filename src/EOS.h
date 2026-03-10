@@ -14,19 +14,16 @@
 namespace EOS
 {
     class ShaderCompiler;
-    //TODO: Almost everything here will need Doxygen documentation, as the end user will work with these functions
-    //I would also like to return my own type of VkResult on functions for the end user.
 
     /**
     * @brief Concept for the required HandleType operations.
-    */
+    */    
     template<typename T>
     concept ValidHolder = requires(T t)
     {
         { t.Valid() } -> std::convertible_to<bool>;
         { t.Empty() } -> std::convertible_to<bool>;
-        { t.Gen() } -> std::convertible_to<uint32_t>;
-        { t.Index() } -> std::convertible_to<uint32_t>;
+        { t.Gen() } -> std::convertible_to<uint32_t>;        { t.Index() } -> std::convertible_to<uint32_t>;
         { t.IndexAsVoid() } -> std::convertible_to<void*>;
     };
 
@@ -59,6 +56,9 @@ namespace EOS
     using AccelStructHolder         = Holder<AccelStructHandle>;
 
 
+    /**
+     * @brief Describes a physical GPU that can be selected for context creation.
+     */
     struct HardwareDeviceDescription final
     {
         uintptr_t ID{};
@@ -66,12 +66,18 @@ namespace EOS
         std::string Name{};
     };
 
+    /**
+     * @brief Global context configuration options.
+     */
     struct ContextConfiguration final
     {
         bool EnableValidationLayers{ true };
         ColorSpace DesiredSwapChainColorSpace { ColorSpace::SRGB_Linear };
     };
 
+    /**
+     * @brief Input settings used when creating the graphics context and swapchain.
+     */
     struct ContextCreationDescription final
     {
         ContextConfiguration    Config;
@@ -94,6 +100,9 @@ namespace EOS
         const ResourceState     NextState;
     };
 
+    /**
+     * @brief Used for texture state transitioning without changing queue ownership.
+     */
     struct ImageBarrier final
     {
         const TextureHandle    Texture;
@@ -101,6 +110,9 @@ namespace EOS
         const ResourceState     NextState;
     };
 
+    /**
+     * @brief Compiled shader payload and metadata returned by the shader compiler.
+     */
     struct ShaderInfo final
     {
         std::vector<uint32_t> Spirv;
@@ -109,11 +121,17 @@ namespace EOS
         std::string DebugName;
     };
 
+    /**
+     * @brief Vertex layout description used for graphics pipeline creation.
+     */
     struct VertexInputData final
     {
         static constexpr uint32_t MAX_ATTRIBUTES = 16;
         static constexpr uint32_t MAX_BUFFERS = 16;
 
+        /**
+         * @brief Single vertex attribute mapping.
+         */
         struct VertexAttribute final
         {
             uint32_t Location = 0; // a buffer which contains this attribute stream
@@ -122,6 +140,9 @@ namespace EOS
             uintptr_t Offset = 0; // an offset where the first element of this attribute stream starts
         } Attributes[MAX_ATTRIBUTES];
 
+        /**
+         * @brief Vertex buffer binding description.
+         */
         struct VertexInputBinding final
         {
             uint32_t Stride = 0;
@@ -139,6 +160,9 @@ namespace EOS
         }
     };
 
+    /**
+     * @brief One specialization constant mapping entry.
+     */
     struct SpecializationConstantEntry final
     {
         uint32_t ID = 0;
@@ -146,6 +170,9 @@ namespace EOS
         size_t Size = 0;
     };
 
+    /**
+     * @brief Specialization constant block for pipeline creation.
+     */
     struct SpecializationConstantDescription final
     {
         static constexpr uint8_t MaxSecializationConstants = 16;
@@ -157,6 +184,9 @@ namespace EOS
         uint32_t GetNumberOfSpecializationConstants() const;
     };
 
+    /**
+     * @brief Blend and format configuration for a single color attachment.
+     */
     struct ColorAttachment final
     {
         Format ColorFormat = Format::Invalid;
@@ -171,6 +201,9 @@ namespace EOS
         BlendFactor DstAlphaBlendFactor = BlendFactor::Zero;
     };
 
+    /**
+     * @brief Stencil operations for one stencil face.
+     */
     struct StencilState final
     {
         StencilOp StencilFailureOp = StencilOp::Keep;
@@ -182,12 +215,18 @@ namespace EOS
         uint32_t WriteMask = 0;
     };
 
+    /**
+     * @brief Depth test and depth-write configuration.
+     */
     struct DepthState final
     {
         CompareOp CompareOpState = CompareOp::AlwaysPass;
         bool IsDepthWriteEnabled = false;
     };
 
+    /**
+     * @brief Full graphics pipeline creation description.
+     */
     struct RenderPipelineDescription final
     {
         Topology PipelineTopology = Topology::Triangle;
@@ -231,8 +270,14 @@ namespace EOS
         uint32_t GetNumColorAttachments() const;
     };
 
+    /**
+     * @brief Attachment load/store behavior for a render pass.
+     */
     struct RenderPass final
     {
+        /**
+         * @brief Per-attachment load/store state and clear values.
+         */
         struct AttachmentDesc final
         {
             LoadOp LoadOpState = LoadOp::Invalid;
@@ -251,8 +296,14 @@ namespace EOS
         uint32_t GetNumColorAttachments() const;
     };
 
+    /**
+     * @brief Texture attachments bound for rendering.
+     */
     struct Framebuffer final
     {
+        /**
+         * @brief Color or depth attachment pair (with optional resolve target).
+         */
         struct AttachmentDesc final
         {
             TextureHandle Texture;
@@ -266,6 +317,9 @@ namespace EOS
         uint32_t GetNumColorAttachments() const;
     };
 
+    /**
+     * @brief Resource dependency list used when starting a render pass.
+     */
     struct Dependencies final
     {
         constexpr static  uint8_t MaxSubmitDependencies = 4;
@@ -273,6 +327,9 @@ namespace EOS
         BufferHandle Buffers[MaxSubmitDependencies]{};
     };
 
+    /**
+     * @brief Rectangle region used for scissor testing.
+     */
     struct ScissorRect final
     {
         uint32_t X = 0;
@@ -281,6 +338,9 @@ namespace EOS
         uint32_t Height = 0;
     };
 
+    /**
+     * @brief Viewport transform description.
+     */
     struct Viewport final
     {
         float X = 0.0f;
@@ -291,6 +351,9 @@ namespace EOS
         float MaxDepth = 1.0f;
     };
 
+    /**
+     * @brief Buffer creation and optional initialization data.
+     */
     struct BufferDescription final
     {
         BufferUsageFlags Usage = BufferUsageFlags::None;
@@ -300,6 +363,9 @@ namespace EOS
         const char* DebugName = "";
     };
 
+    /**
+     * @brief Component swizzle mapping used by texture views/samplers.
+     */
     struct ComponentMapping final
     {
         Swizzle R = Swizzle::Identity;
@@ -313,6 +379,9 @@ namespace EOS
         }
     };
 
+    /**
+     * @brief 3D extent helper for textures and regions.
+     */
     struct Dimensions final
     {
         uint32_t Width = 1;
@@ -340,6 +409,9 @@ namespace EOS
         }
     };
 
+    /**
+     * @brief Texture creation and upload settings.
+     */
     struct TextureDescription final
     {
         EOS::ImageType Type = EOS::ImageType::Image_2D;
@@ -357,6 +429,9 @@ namespace EOS
         const char* DebugName = "";
     };
 
+    /**
+     * @brief Integer 3D offset used in texture copy/update ranges.
+     */
     struct Offset3D final
     {
         int32_t X = 0;
@@ -364,6 +439,9 @@ namespace EOS
         int32_t Z = 0;
     };
 
+    /**
+     * @brief Subresource range used for texture uploads.
+     */
     struct TextureRangeDescription final
     {
         Offset3D Offset = {};
@@ -374,6 +452,9 @@ namespace EOS
         uint32_t NumberOfMipLevels = 1;
     };
 
+    /**
+     * @brief Helper description for loading textures from disk.
+     */
     struct TextureLoadingDescription final
     {
         std::filesystem::path filePath;
@@ -381,6 +462,9 @@ namespace EOS
         EOS::IContext* context;
     };
 
+    /**
+     * @brief Sampler creation settings.
+     */
     struct SamplerDescription final
     {
         SamplerFilter minFilter = LinearFilter;
@@ -397,6 +481,9 @@ namespace EOS
         const char* debugName = "";
     };
 
+    /**
+     * @brief Indirect indexed draw command layout.
+     */
     struct DrawIndexedIndirectCommand final
     {
         uint32_t indexCount{};
@@ -411,6 +498,9 @@ namespace EOS
     //CMake should handle that only 1 type of API is being used at the time.
     //This way we can completely get rid of inheritance
 
+    /**
+     * @brief Opaque command buffer interface used by command recording helpers.
+     */
     class ICommandBuffer
     {
     public:
@@ -421,6 +511,9 @@ namespace EOS
         ICommandBuffer() = default;
     };
 
+    /**
+     * @brief Main graphics context interface for resource creation and submission.
+     */
     class IContext
     {
     public:
@@ -454,15 +547,15 @@ namespace EOS
         virtual Format GetSwapchainFormat() const = 0;
 
         /**
-         *
+         * @brief Gets the color space of the currently active swapchain image.
          * @return The color space of the currently in use SwapChain.
          */
         virtual ColorSpace GetSwapchainColorSpace() const = 0;
 
         /**
-         *
-         * @param handle The handle of the texture from which you want the dimensions from
-         * @return the dimensions of the texture
+         * @brief Gets dimensions for a texture handle.
+         * @param handle The handle of the texture to query.
+         * @return The dimensions of the texture.
          */
         virtual Dimensions GetDimensions(TextureHandle handle) const = 0;
 
@@ -544,24 +637,25 @@ namespace EOS
         virtual void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) = 0;
 
         /**
-         *
-         * @param handle The handle of the buffer that has been uploaded.
-         * @param offset The offset it needs to have inside the buffer.
+         * @brief Gets the GPU virtual address of a buffer region.
+         * @param handle The handle of the buffer.
+         * @param offset Byte offset inside the buffer.
+         * @return GPU virtual address for the requested buffer location.
          */
         virtual uint64_t GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
 
         /**
-         *
-         * @param handle The handle of the buffer that has been uploaded and mapped.
-         * @return a pointer to the buffer.
+         * @brief Gets the mapped CPU pointer for a host-visible buffer.
+         * @param handle The handle of the mapped buffer.
+         * @return CPU pointer to the mapped memory.
          */
         virtual uint8_t* GetMappedPtr(BufferHandle handle) const = 0;
 
         /**
-         *
-         * @param handle The handle of the buffer that has been uploaded and mapped.
-         * @param size The size of the bytes you want to be flushed.
-         * @param offset The offset inside the buffer you want to start flushing from
+         * @brief Flushes mapped host writes to make them visible to the GPU.
+         * @param handle The handle of the mapped buffer.
+         * @param size Number of bytes to flush.
+         * @param offset Byte offset inside the buffer to start flushing from.
          */
         virtual void  FlushMappedMemory(BufferHandle handle, size_t size, size_t offset = 0) = 0;
 
@@ -574,8 +668,9 @@ namespace EOS
         virtual void Upload(EOS::TextureHandle handle, const TextureRangeDescription& range, const void* data) = 0;
 
         /**
-         *
+         * @brief Gets the texture format for a texture handle.
          * @param handle The handle of the texture you want to get the format from.
+         * @return Texture format of the referenced texture.
          */
         virtual Format GetFormat(TextureHandle handle) const = 0;
 
@@ -586,10 +681,25 @@ namespace EOS
 
     template<typename HandleType>
     requires ValidHolder<HandleType>
+    /**
+     * @brief RAII wrapper for EOS resource handles.
+     *
+     * Automatically destroys the owned resource through its originating context
+     * when the holder goes out of scope, unless ownership was released.
+     */
     class Holder final
     {
     public:
+        /**
+         * @brief Creates an empty holder.
+         */
         Holder() = default;
+
+        /**
+         * @brief Creates a holder that owns an existing handle.
+         * @param context Context that will be used for destruction.
+         * @param handle Resource handle to own.
+         */
         Holder(EOS::IContext* context, HandleType handle) : HolderContext(context), Handle(handle) {}
 
         ~Holder()
@@ -622,21 +732,36 @@ namespace EOS
             return *this;
         }
 
+        /**
+         * @brief Implicit conversion to the underlying handle type.
+         * @return Owned handle value.
+         */
         operator HandleType() const
         {
             return Handle;
         }
 
+        /**
+         * @brief Checks if the held handle is valid.
+         * @return True if the held handle references a live resource.
+         */
         bool Valid() const
         {
             return Handle.Valid();
         }
 
+        /**
+         * @brief Checks if the holder is empty.
+         * @return True if no resource is currently owned.
+         */
         bool Empty() const
         {
             return Handle.Empty();
         }
 
+        /**
+         * @brief Destroys the owned resource and resets this holder.
+         */
         void Reset()
         {
             CHECK(HolderContext, "the context of the holder is no longer valid while resetting the holder");
@@ -649,6 +774,10 @@ namespace EOS
             Handle = HandleType{};
         }
 
+        /**
+         * @brief Releases ownership without destroying the resource.
+         * @return The previously owned handle.
+         */
         HandleType Release()
         {
             HolderContext = nullptr;
@@ -697,13 +826,17 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
 
 
 /**
- *
+ * @brief Records a viewport state bind command.
  * @param commandBuffer The commandbuffer we want to record into.
  * @param viewport The viewport size we want to set.
  */
 void cmdBindViewport(const EOS::ICommandBuffer& commandBuffer, const EOS::Viewport& viewport);
 
-
+/**
+ * @brief Records a scissor rectangle state bind command.
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param scissor The scissor rectangle to bind.
+ */
 void cmdBindScissorRect(const EOS::ICommandBuffer& commandBuffer, const EOS::ScissorRect& scissor);
 
 /**
@@ -770,7 +903,7 @@ void cmdDrawIndexed(const EOS::ICommandBuffer& commandBuffer, uint32_t indexCoun
 
 
 /**
- *
+ * @brief Records an indexed indirect draw command.
  * @param commandBuffer The commandbuffer we want to record into.
  * @param indirectBuffer The handle to the uploaded Indirect buffer containing the scene information.
  * @param indirectBufferOffset The offset inside the Indirect buffer.
@@ -804,9 +937,9 @@ void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const Struct& da
 }
 
 /**
- * @brief
- * @param commandBuffer
- * @param depthState
+ * @brief Records a depth state override command.
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param depthState Depth test/write configuration to bind.
  */
 void cmdSetDepthState(const EOS::ICommandBuffer& commandBuffer, const EOS::DepthState& depthState);
 
@@ -826,21 +959,22 @@ void cmdPopMarker(const EOS::ICommandBuffer& commandBuffer);
 
 
 /**
- *
+ * @brief Records a buffer update command.
  * @param commandBuffer The commandbuffer we want to record into.
- * @param buffer The handle to the buffer we want to update
- * @param size The size of data we want to update
- * @param data The new data
- * @param bufferOffset The offset inside the buffer from where you want to start the update
+ * @param buffer The handle to the buffer we want to update.
+ * @param size The size of data we want to update.
+ * @param data The new data.
+ * @param bufferOffset The offset inside the buffer from where you want to start the update.
  */
 void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, const EOS::BufferHandle& buffer, size_t size, const void* data, size_t bufferOffset);
 
 /**
- *
+ * @brief Templated helper to record a typed buffer update command.
+ * @tparam Struct Data type to copy into the destination buffer.
  * @param commandBuffer The commandbuffer we want to record into.
- * @param buffer The handle to the buffer we want to update
- * @param data The new data
- * @param bufferOffset The offset inside the buffer from where you want to start the update
+ * @param buffer The handle to the buffer we want to update.
+ * @param data The new data.
+ * @param bufferOffset The offset inside the buffer from where you want to start the update.
  */
 template<typename Struct>
 void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, EOS::BufferHandle buffer, const Struct& data, size_t bufferOffset = 0)
