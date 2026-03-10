@@ -41,7 +41,7 @@ cmake-build-relwithdebinfo/
 cmake-build-wsldebug/
 
 #Depandancies source folder -> They are fetched by CMake
-dependencies/src
+dependencies/
 examples/dependencies/src
 
 
@@ -50,3 +50,4 @@ examples/dependencies/src
 .vscode/
 
 build/
+

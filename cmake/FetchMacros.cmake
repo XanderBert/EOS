@@ -116,30 +116,6 @@ macro(FETCH_SPDLOG depsDir)
     target_link_libraries(EOS PUBLIC spdlog)
 endmacro()
 
-macro(FETCH_SLANG)
-    set(SLANG_BASE_PATH "${CMAKE_SOURCE_DIR}/dependencies/binaries/slang")
-
-    find_library(SLANG_LIBRARY
-            NAMES slang libslang slang.lib
-            PATHS "${SLANG_BASE_PATH}/lib"
-            NO_DEFAULT_PATH
-    )
-
-    if(NOT SLANG_LIBRARY)
-        message(WARNING "Slang library not found at ${SLANG_BASE_PATH}/lib")
-    else()
-        message(STATUS "Found Slang library: ${SLANG_LIBRARY}")
-        target_link_libraries(EOS PRIVATE ${SLANG_LIBRARY})
-
-        if(EXISTS "${SLANG_BASE_PATH}/include")
-            include_directories("${SLANG_BASE_PATH}/include")
-            message(STATUS "Added Slang include directory: ${SLANG_BASE_PATH}/include")
-        else()
-            message(WARNING "Slang include directory not found at ${SLANG_BASE_PATH}/include")
-        endif()
-    endif()
-endmacro()
-
 macro(FETCH_ASSIMP depsDir targetName)
     if(NOT TARGET assimp::assimp)
         set(ASSIMP_ROOT_DIR ${depsDir}/src/assimp)
@@ -271,4 +247,42 @@ macro(FETCH_IMGUI depsDir)
     target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp)
     target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR}/backends)
     target_link_libraries(EOS PUBLIC imgui)
+endmacro()
+
+
+macro(FETCH_SLANG)
+
+    set(SLANG_VERSION 2026.4)
+    set(SLANG_ROOT ${CMAKE_SOURCE_DIR}/dependencies/binaries/slang)
+    set(SLANG_ARCHIVE ${CMAKE_BINARY_DIR}/slang_download)
+
+    if(WIN32)
+        set(SLANG_URL https://github.com/shader-slang/slang/releases/download/v${SLANG_VERSION}/slang-${SLANG_VERSION}-windows-x86_64.zip)
+    elseif(UNIX)
+        set(SLANG_URL https://github.com/shader-slang/slang/releases/download/v${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64.tar.gz)
+    endif()
+
+    if(NOT EXISTS ${SLANG_ROOT})
+        message(STATUS "Downloading Slang ${SLANG_VERSION}")
+
+        file(DOWNLOAD
+                ${SLANG_URL}
+                ${SLANG_ARCHIVE}
+                SHOW_PROGRESS
+        )
+
+        file(MAKE_DIRECTORY ${SLANG_ROOT})
+
+        file(ARCHIVE_EXTRACT
+                INPUT ${SLANG_ARCHIVE}
+                DESTINATION ${SLANG_ROOT}
+        )
+    endif()
+
+    set(SLANG_INCLUDE ${SLANG_ROOT}/include)
+    set(SLANG_LIB ${SLANG_ROOT}/lib)
+
+    target_include_directories(EOS PUBLIC ${SLANG_INCLUDE})
+    target_link_directories(EOS PUBLIC ${SLANG_LIB})
+
 endmacro()
