@@ -1,3 +1,3 @@
 CREATE_EXAMPLE(ShadowMapping)
-FETCH_ASSIMP(${EOS_EXAMPLES_DEPENDENCIES_DIR} ShadowMapping)
-FETCH_GLM(${EOS_EXAMPLES_DEPENDENCIES_DIR} ShadowMapping)
+eos_require_assimp(ShadowMapping)
+eos_require_glm(ShadowMapping)

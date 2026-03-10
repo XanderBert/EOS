@@ -1,5 +1,5 @@
-set(EOS_EXAMPLES_DEPENDENCIES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies)
 add_subdirectory(ModelPBR)
 add_subdirectory(Triangle)
 add_subdirectory(MultiDrawIndirect)
 add_subdirectory(ShadowMapping)
+add_subdirectory(CascadedShadowMapping)

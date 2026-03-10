@@ -1,3 +1,3 @@
 CREATE_EXAMPLE(MultiDrawIndirect)
-FETCH_ASSIMP(${EOS_EXAMPLES_DEPENDENCIES_DIR} MultiDrawIndirect)
-FETCH_GLM(${EOS_EXAMPLES_DEPENDENCIES_DIR} MultiDrawIndirect)
+eos_require_assimp(MultiDrawIndirect)
+eos_require_glm(MultiDrawIndirect)

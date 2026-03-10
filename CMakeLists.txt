@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.28)
 project(EOS)
 
-include(FetchContent)
-include(cmake/FetchMacros.cmake)
+set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
+
 include(cmake/CmakeMacros.cmake)
+include(cmake/deps-lock.cmake)
+include(cmake/deps.cmake)
 
 CREATE_LIB(EOS)
 DEFINE_PLATFORM()
-
-set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
 
 option(EOS_VULKAN         "Enable Vulkan backend"        ON)
 option(EOS_USE_IMGUI      "Enable ImGui integration"     ON)
@@ -64,21 +64,21 @@ if(EOS_VULKAN)
     message(STATUS "Detected Vulkan SDK version: ${VULKAN_SDK_VERSION}")
 
     message(STATUS "Fetching VOLK version: ${SDK_VERSION}")
-    FETCH_VOLK(${SDK_VERSION} ${EOS_DEPENDENCIES_DIR})
+    eos_require_volk(EOS TAG ${SDK_VERSION})
 
     message(STATUS "Fetching Vulkan Utilities version: ${SDK_VERSION}")
-    FETCH_VULKAN_UTILS(${SDK_VERSION} ${EOS_DEPENDENCIES_DIR})
+    eos_require_vulkan_utils(EOS TAG ${SDK_VERSION})
 
-    FETCH_VMA(${EOS_DEPENDENCIES_DIR})
+    eos_require_vma(EOS)
 else ()
     message(FATAL_ERROR "No Usable Graphics API Found")
 endif ()
 
-FETCH_GLFW(${EOS_DEPENDENCIES_DIR})
-FETCH_SPDLOG(${EOS_DEPENDENCIES_DIR})
-FETCH_SLANG()
-FETCH_STB(${EOS_DEPENDENCIES_DIR})
-FETCH_KTX(${EOS_DEPENDENCIES_DIR})
+eos_require_glfw(EOS)
+eos_require_spdlog(EOS)
+eos_require_slang(EOS)
+eos_require_stb(EOS)
+eos_require_ktx(EOS)
 
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -89,12 +89,12 @@ endif()
 
 if(EOS_USE_TRACY)
     target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
-    FETCH_TRACY(${EOS_DEPENDENCIES_DIR})
+    eos_require_tracy(EOS)
 endif()
 
 if(EOS_USE_IMGUI)
     target_compile_definitions(EOS PRIVATE EOS_USE_IMGUI)
-    FETCH_IMGUI(${EOS_DEPENDENCIES_DIR})
+    eos_require_imgui(EOS)
 endif()
 
 if(EOS_BUILD_EXAMPLES)
