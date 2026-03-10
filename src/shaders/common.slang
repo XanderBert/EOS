@@ -3,12 +3,18 @@ module common;
 #define PI      3.14159265358979323846
 #define HALF_PI			(0.5f * PI)
 
-[[vk::binding(1, 0)]] SamplerState kSamplers[];
 [[vk::binding(0, 0)]] Texture2D kTextures2D[];
+[[vk::binding(1, 0)]] SamplerState kSamplers[];
+[[vk::binding(3, 0)]] Texture2DArray kTextures2DArray[];
 
 public float4 TextureBindless2D(uint textureId, uint samplerId, float2 uv)
 {
     return kTextures2D[NonUniformResourceIndex(textureId)].Sample(kSamplers[NonUniformResourceIndex(samplerId)], uv);
+}
+
+public float4 TextureBindless2DArray(uint textureId, uint samplerId, float3 uvw)
+{
+    return kTextures2DArray[NonUniformResourceIndex(textureId)].Sample(kSamplers[NonUniformResourceIndex(samplerId)], uvw);
 }
 
 public T LoadBuffer<T>(uint64_t address)

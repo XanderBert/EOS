@@ -27,6 +27,16 @@ struct Camera final
     , Far(cameraDescription.far)
     {}
 
+    [[nodiscard]] float GetNearPlane() const
+    {
+        return Near;
+    }
+
+    [[nodiscard]] float GetFarPlane() const
+    {
+        return Far;
+    }
+
     [[nodiscard]] glm::mat4 GetViewMatrix() const
     {
         return glm::lookAt(Position, Position + GetForward(), Up);

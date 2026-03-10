@@ -2975,6 +2975,7 @@ void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSampler
         VkContext::GetDSLBinding(EOS::Bindings::Textures, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures, stageFlags),
         VkContext::GetDSLBinding(EOS::Bindings::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER, maxSamplers, stageFlags),
         VkContext::GetDSLBinding(EOS::Bindings::StorageImages, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, maxTextures, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::Textures2DArray, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures, stageFlags),
         VkContext::GetDSLBinding(EOS::Bindings::AccelerationStructures, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxAccelStructs, stageFlags),
     };
 
@@ -3013,6 +3014,7 @@ void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSampler
             VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures},
             VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, maxSamplers},
             VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, maxTextures},
+            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures},
             VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxAccelStructs},
         };
 
@@ -3368,15 +3370,32 @@ void VulkanContext::UpdateDescriptorSet()
     GrowDescriptorPool(newMaxTextures, newMaxSamplers, newMaxAccelStructs);
 
     std::vector<VkDescriptorImageInfo> infoSampledImages;
+    std::vector<VkDescriptorImageInfo> infoSampledImages2DArray;
     std::vector<VkDescriptorImageInfo> infoStorageImages;
     std::vector<VkDescriptorImageInfo> infoYUVImages;
 
     infoSampledImages.reserve(TexturePool.NumObjects());
+    infoSampledImages2DArray.reserve(TexturePool.NumObjects());
     infoStorageImages.reserve(TexturePool.NumObjects());
 
     // use dummies to avoid sparse arrays
     VkImageView dummyImageView = TexturePool.Objects[DummyTexture.Index()].Object.ImageView;
     VkSampler dummySampler = SamplerPool.Objects[0].Object;
+
+    VkImageView dummyImageView2DArray = VK_NULL_HANDLE;
+    for (const auto& obj : TexturePool.Objects)
+    {
+        const VulkanImage& img = obj.Object;
+        const bool isSwapChain = VulkanImage::IsSwapChainImage(img);
+        const bool isTextureAvailable = !isSwapChain && (img.Samples & VK_SAMPLE_COUNT_1_BIT) == VK_SAMPLE_COUNT_1_BIT;
+        const bool isYUVImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && VkContext::GetNumberOfImagePlanes(img.ImageFormat) > 1;
+        const bool isSampledImage2DArray = isTextureAvailable && VulkanImage::IsSampledImage(img) && !isYUVImage && img.ImageType == EOS::ImageType::Image_2D_Array;
+        if (isSampledImage2DArray)
+        {
+            dummyImageView2DArray = obj.Object.ImageView;
+            break;
+        }
+    }
 
 
     // 1. Sampled and Storage images
@@ -3393,16 +3412,28 @@ void VulkanContext::UpdateDescriptorSet()
         const bool isTextureAvailable = !isSwapChain && (img.Samples & VK_SAMPLE_COUNT_1_BIT) == VK_SAMPLE_COUNT_1_BIT;
         const bool isYUVImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && VkContext::GetNumberOfImagePlanes(img.ImageFormat) > 1;
         const bool isSampledImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && !isYUVImage;
+        const bool isSampledImage2DArray = isSampledImage && img.ImageType == EOS::ImageType::Image_2D_Array;
+        const bool isSampledImage2D = isSampledImage && !isSampledImage2DArray;
         const bool isStorageImage = isTextureAvailable && VulkanImage::IsStorageImage(img);
 
         infoSampledImages.emplace_back(VkDescriptorImageInfo
         {
             .sampler = VK_NULL_HANDLE,
-            .imageView = isSampledImage ? view : dummyImageView,
+            .imageView = isSampledImage2D ? view : dummyImageView,
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         });
 
         CHECK(infoSampledImages.back().imageView != VK_NULL_HANDLE, "sampled Image is not valid");
+
+        if (dummyImageView2DArray != VK_NULL_HANDLE)
+        {
+            infoSampledImages2DArray.emplace_back(VkDescriptorImageInfo
+            {
+                .sampler = VK_NULL_HANDLE,
+                .imageView = isSampledImage2DArray ? view : dummyImageView2DArray,
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            });
+        }
 
         infoStorageImages.push_back(VkDescriptorImageInfo
         {
@@ -3472,6 +3503,20 @@ void VulkanContext::UpdateDescriptorSet()
             .descriptorCount = static_cast<uint32_t>(infoStorageImages.size()),
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             .pImageInfo = infoStorageImages.data(),
+        };
+    }
+
+    if (!infoSampledImages2DArray.empty())
+    {
+        write[numWrites++] = VkWriteDescriptorSet
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = DescriptorSet,
+            .dstBinding = EOS::Bindings::Textures2DArray,
+            .dstArrayElement = 0,
+            .descriptorCount = static_cast<uint32_t>(infoSampledImages2DArray.size()),
+            .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            .pImageInfo = infoSampledImages2DArray.data(),
         };
     }
 

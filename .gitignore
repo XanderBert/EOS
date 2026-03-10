@@ -48,3 +48,5 @@ examples/dependencies/src
 # Linux build folder
 /bin/
 .vscode/
+
+build/

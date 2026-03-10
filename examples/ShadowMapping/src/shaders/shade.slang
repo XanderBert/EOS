@@ -1,4 +1,4 @@
-import pbr;
+import pbrShared;
 import common;
 import shadowCommon;
 
@@ -67,41 +67,27 @@ float4 fragmentMain(VSOutput input)
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
     DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
 
-    float3 albedoSample = TextureBindless2D(draw.albedo, 0, input.UV).rgb;
-    float2 normalSample = TextureBindless2D(draw.normal, 0, input.UV).rg;
-    float4 metallicRoughnessSample = TextureBindless2D(draw.metallicRoughness, 0, input.UV);
 
-    // Material properties
-    Material material;
-    material.albedo     = albedoSample;
-    material.metallic   = metallicRoughnessSample.b;
-    material.roughness  = metallicRoughnessSample.g;
+    MaterialTextureSet materialTextures;
+    materialTextures.albedo = draw.albedo;
+    materialTextures.normal = draw.normal;
+    materialTextures.metallicRoughness = draw.metallicRoughness;
 
-    float3 N = GetShadingNormal(input.Normal, input.WorldPos, normalSample, input.UV, input.Tangent);
-    float3 V = normalize(frameData.cameraPos - input.WorldPos);
-    float3 R = reflect(-V, N);
+    PBRShadingInput pbrInput;
+    pbrInput.worldPos = input.WorldPos;
+    pbrInput.geometricNormal = input.Normal;
+    pbrInput.tangent = input.Tangent;
+    pbrInput.uv = input.UV;
+    pbrInput.cameraPos = frameData.cameraPos;
+    pbrInput.lightPos = frameData.lightPos.xyz;
 
-    // simple PBR lighting
+    Material material = SampleMaterial(materialTextures, 0, input.UV);
+    float3 shadingNormal = SampleNormal(materialTextures, 0, input.UV, input.Normal, input.WorldPos, input.Tangent);
+    PBRSurface pbrSurface = BuildPBRSurface(pbrInput, material, shadingNormal);
+    float3 color = EvaluatePBR(pbrSurface);
+
+    float3 N = pbrSurface.normal;
     float3 L = normalize(frameData.lightPos.xyz - input.WorldPos);
-
-
-    float3 F0 = float3(0.04);
-    F0 = lerp(F0, material.albedo, material.metallic);
-
-    float3 Lo = Specular(L, V, N, F0, material);
-
-    float2 brdf = (0.88 * float2(max(dot(N, V), 0.0), material.roughness)).rg;
-    float3 reflection = float3(0.3);
-    float3 diffuse = 0.7 * material.albedo;
-    float3 F = F_SchlickR(max(dot(N, V), 0.0), F0, material.roughness);
-
-    float3 kD = 1.0 - F;
-	kD *= 1.0 - material.metallic;
-
-    // Specular reflectance
-    float3 specular = reflection * (F * brdf.x + brdf.y);
-    float3 ambient = (kD * diffuse + specular);
-    float3 color = ambient + Lo;
 
     float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
 

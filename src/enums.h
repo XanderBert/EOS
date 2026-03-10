@@ -286,9 +286,10 @@ namespace EOS
     {
         Textures = 0,
         Samplers = 1,
-        StorageImages = 2,
-        AccelerationStructures = 2,
-        Count = 4,
+                StorageImages = 2,
+                Textures2DArray = 3,
+                AccelerationStructures = 4,
+                Count = 5,
       };
 
     enum class LoadOp : uint8_t

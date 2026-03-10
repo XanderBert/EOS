@@ -1,12 +1,5 @@
-import pbr;
+import pbrShared;
 import common;
-
-struct MaterialHandles
-{
-    uint albedo;
-    uint normal;
-    uint metallicRoughness;
-}
 
 struct VSInput
 {
@@ -31,7 +24,7 @@ struct PerFrameData
     float4x4 Model;
     float4x4 MVP;
     float3 cameraPos;
-    MaterialHandles material;
+    MaterialTextureSet material;
 };
 
 struct PushConstants
@@ -60,42 +53,14 @@ float4 fragmentMain(VSOutput input)
 {
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
 
-    // Sample textures
-    float3 albedoSample = TextureBindless2D(frameData.material.albedo, 0, input.UV).rgb;
-    float2 normalSample = TextureBindless2D(frameData.material.normal, 0, input.UV).rg;
-    float4 metallicRoughnessSample = TextureBindless2D(frameData.material.metallicRoughness, 0, input.UV);
+    PBRShadingInput pbrInput;
+    pbrInput.worldPos = input.WorldPos;
+    pbrInput.geometricNormal = input.Normal;
+    pbrInput.tangent = input.Tangent;
+    pbrInput.uv = input.UV;
+    pbrInput.cameraPos = frameData.cameraPos;
+    pbrInput.lightPos = float3(1.0, 1.0, 1.0);
 
-    // Material properties
-    Material material;
-    material.albedo     = albedoSample;
-    material.metallic   = metallicRoughnessSample.b;
-    material.roughness  = metallicRoughnessSample.g;
-
-    float3 N = GetShadingNormal(input.Normal, input.WorldPos, normalSample, input.UV, input.Tangent);
-    float3 V = normalize(frameData.cameraPos - input.WorldPos);
-    float3 R = reflect(-V, N);
-
-    // simple PBR lighting
-    float3 L = normalize(float3(1.0, 1.0, 1.0) - input.WorldPos);
-
-
-    float3 F0 = float3(0.04);
-    F0 = lerp(F0, material.albedo, material.metallic);
-
-    float3 Lo = Specular(L, V, N, F0, material);
-
-    float2 brdf = (0.88 * float2(max(dot(N, V), 0.0), material.roughness)).rg;
-    float3 reflection = float3(0.3);
-    float3 diffuse = 0.7 * material.albedo;
-    float3 F = F_SchlickR(max(dot(N, V), 0.0), F0, material.roughness);
-
-    float3 kD = 1.0 - F;
-	kD *= 1.0 - material.metallic;
-
-    // Specular reflectance
-    float3 specular = reflection * (F * brdf.x + brdf.y);
-    float3 ambient = (kD * diffuse + specular);
-
-    float3 color = ambient + Lo;
+    float3 color = ShadePBR(pbrInput, frameData.material);
     return float4(color, 1.0);
 }
