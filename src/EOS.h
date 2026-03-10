@@ -561,8 +561,9 @@ namespace EOS
 
         /**
         * @brief Creates shader module from a compiled shader.
-        * @param shaderInfo information about the shader such as its code and stage.
-        * @return A Holder Handle to a shader module.
+        * @param fileName The name of the shader.
+        * @param shaderStage The stage of the shader
+        * @return A Holder to a shader module.
         */
         virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, ShaderStage shaderStage) = 0;
 
@@ -576,7 +577,7 @@ namespace EOS
 
         /**
         * @brief Creates a Buffer and returns a handle to it.
-        * @param description desecribes the what sort of buffer it is and its properties.
+        * @param description describes what sort of buffer it is and its properties.
         * @return A Holder Handle to the buffer.
         */
         virtual EOS::Holder<BufferHandle> CreateBuffer(const BufferDescription& description) = 0;
@@ -863,7 +864,7 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer& commandBuffer, EOS::RenderPipeli
 
 /**
  * @brief Binds the commandBuffer
- * @param commandBuffer The commandBuffer to send the command to to bind the VertexBuffer.
+ * @param commandBuffer The commandBuffer to send the command to, to bind the VertexBuffer.
  * @param index The Index of the vertexBuffer.
  * @param buffer The Handle to the buffer.
  * @param bufferOffset The offset the buffer has.
@@ -873,7 +874,7 @@ void cmdBindVertexBuffer(const EOS::ICommandBuffer& commandBuffer, uint32_t inde
 
 /**
  * @brief Binds the indexBuffer
- * @param commandBuffer The commandBuffer to send the command to to bind the indexbuffer.
+ * @param commandBuffer The commandBuffer to send the command to, to bind the indexbuffer.
  * @param indexBuffer The indexBuffer.
  * @param indexFormat The int format of the index buffer (speifies how many bytes 1 index is).
  * @param indexBufferOffset The offset of the indexBuffer
@@ -891,7 +892,7 @@ void cmdBindIndexBuffer(const EOS::ICommandBuffer& commandBuffer, const EOS::Buf
 void cmdDraw(const EOS::ICommandBuffer& commandBuffer, uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t baseInstance = 0);
 
 /**
- * @brief Records a indexed draw command into the specified commandbuffer.
+ * @brief Records an indexed draw command into the specified commandbuffer.
  * @param commandBuffer The commandbuffer we want to record into.
  * @param indexCount The amount of indices we want to draw.
  * @param instanceCount The amount of instances we want to draw.
@@ -926,7 +927,7 @@ void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const void* data
 /**
  * @brief Templated helper function to bind push constants.
  * @tparam Struct The structure we would like to bind as push constants.
- * @param commandBuffer The commandbuffer we want to record to to bind our push constants.
+ * @param commandBuffer The commandbuffer we want to record to, to bind our push constants.
  * @param data The data structure we want to bind as pushconstants
  * @param offset At what offset we would like to start to bind the data from.
  */
