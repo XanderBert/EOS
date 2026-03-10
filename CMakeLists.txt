@@ -15,6 +15,12 @@ option(EOS_VULKAN         "Enable Vulkan backend"        ON)
 option(EOS_USE_IMGUI      "Enable ImGui integration"     ON)
 option(EOS_USE_TRACY      "Enable Tracy profiler"        OFF)
 option(EOS_BUILD_EXAMPLES "Build example applications"  ON)
+option(EOS_ENABLE_SHADER_RELOADER "Enable shader hot-reload logic (disable for shipping)" ON)
+
+if(EOS_ENABLE_SHADER_RELOADER)
+    target_compile_definitions(EOS PRIVATE EOS_ENABLE_SHADER_RELOADER)
+endif ()
+
 
 # Set Debug or Release Define
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

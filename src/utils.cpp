@@ -266,6 +266,31 @@ namespace EOS
         ktxTexture_Destroy(ktxTexture(textureKTX2));
         return textureKTX1;
     }
+
+    EOS::Format CompressionToFormat(const EOS::Compression compression)
+    {
+        switch (compression)
+        {
+        case BC5: return Format::BC5_RG;
+        case BC7: return Format::BC7_RGBA;
+        case ETC2: return Format::ETC2_SRGB8;
+        }
+
+        return Format::RGBA_SRGB8;
+    }
+
+    std::filesystem::file_time_type GetLastWriteTime(const std::string& fileName)
+    {
+        CHECK(!fileName.empty(), "filename is empty");
+        if (fileName.empty()) return {};
+
+        const std::filesystem::path path(fileName);
+
+        std::error_code errorCode;
+        if (!std::filesystem::exists(path, errorCode) || errorCode) return {};
+
+        return std::filesystem::last_write_time(path, errorCode);
+    }
 }
 
 

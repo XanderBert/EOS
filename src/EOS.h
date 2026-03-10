@@ -574,6 +574,12 @@ namespace EOS
         */
         virtual EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const RenderPipelineDescription& renderPipelineDescription) = 0;
 
+        /**
+        * @brief Reloads changed shader files and rebuilds affected pipelines.
+        * @return Number of pipelines rebuilt.
+        */
+        virtual uint32_t ReloadShaders() = 0;
+
 
         /**
         * @brief Creates a Buffer and returns a handle to it.

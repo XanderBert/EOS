@@ -18,7 +18,7 @@ namespace EOS
         SLANG_ASSERT_VOID_ON_FAIL(createGlobalSession(&sessionDescription, GlobalSession.writeRef()));
     }
 
-    void ShaderCompiler::CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo)
+    bool ShaderCompiler::CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo)
     {
         CompilerOptionEntry compilerOptions[] =
         {
@@ -70,10 +70,25 @@ namespace EOS
 
         // Will load the .slang file
         IModule* module = Session->loadModule(shaderCompilationDescription.Name, Diagnostics.writeRef());
-        if(Diagnostics)
+        if (Diagnostics)
         {
-            EOS::Logger->error("Slang Shader Compiler Error:\n\n\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
-            Diagnostics.setNull();
+            std::string msgStr(static_cast<const char*>(Diagnostics->getBufferPointer()));
+            std::string_view msgView(msgStr);
+
+            bool isError = msgView.find("error[") != std::string_view::npos;
+            bool isWarning = msgView.find("warning[") != std::string_view::npos;
+
+            if (isError)
+            {
+                EOS::Logger->error("Slang Shader Compiler Error:\n\n\033[31m{}\033[0m", msgStr);
+                return false;
+            }
+
+            if (isWarning)
+            {
+                EOS::Logger->warn("\033[33m{}\033[0m", msgStr);
+                Diagnostics.setNull();
+            }
         }
 
         // Load All Entry Points (a EntryPoint is a shader within a file) and write to disk if desired
@@ -93,6 +108,8 @@ namespace EOS
                 CacheShader(shaderCompilationDescription, outShaderInfo[i]);
             }
         }
+
+        return true;
     }
 
     EOS::ShaderStage ShaderCompiler::ToShaderStage(SlangStage slangStage)
@@ -134,7 +151,7 @@ namespace EOS
         }
     }
 
-    ShaderInfo ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, bool invalidate)
+    bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo,  bool invalidate)
     {
         if (!invalidate)
         {
@@ -146,10 +163,8 @@ namespace EOS
                 file.close();
                 EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
 
-                ShaderInfo shaderInfo{};
-                LoadShaderFromCache(cachedFilePath, shaderInfo);
-
-                return shaderInfo;
+                LoadShaderFromCache(cachedFilePath, outShaderInfo);
+                return true;
             }
         }
 
@@ -157,18 +172,20 @@ namespace EOS
         //Compile all shaders in the file and cache if needed
         EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
         std::vector<ShaderInfo> shaderInfos{};
-        CompileShader({fileName}, shaderInfos);
+        bool success = CompileShader({fileName}, shaderInfos);
+        if (!success) return false;
 
         for (const auto& shaderInfo : shaderInfos)
         {
             if(shaderInfo.ShaderStage == shaderStage)
             {
-                return shaderInfo;
+                outShaderInfo = shaderInfo;
+                return true;
             }
         }
 
         CHECK(false, "Could not Load: {} - {}", fileName, ShaderStageToString(shaderStage));
-        return {};
+        return false;
     }
 
     std::string ShaderCompiler::ShaderStageToString(EOS::ShaderStage shaderStage)
@@ -208,11 +225,6 @@ namespace EOS
         }
 
         return "None";
-    }
-
-    ShaderInfo LoadShader(ShaderCompiler* shaderCompiler, const char* fileName, const EOS::ShaderStage& shaderStage)
-    {
-        return shaderCompiler->LoadShader(fileName, shaderStage);
     }
 
     void ShaderCompiler::CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const

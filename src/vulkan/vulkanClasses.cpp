@@ -6,6 +6,7 @@
 
 #include "utils.h"
 #include "shaders/shaderUtils.h"
+#include "../shaders/shaderReloader.h"
 #include "vulkan/vkTools.h"
 
 #pragma region GLOBAL_FUNCTIONS
@@ -2017,7 +2018,9 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
 
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.Config)
+, ShaderSourcePath(contextDescription.ShaderPath)
 , ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderPath))
+, ShaderReloaderImpl(std::make_unique<ShaderReloader>(contextDescription.ShaderPath))
 {
     CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
 
@@ -2072,6 +2075,8 @@ VulkanContext::~VulkanContext()
 {
     //Wait unit all work has been done
     VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
+
+    ShaderReloaderImpl.reset(nullptr);
 
     SwapChain.reset(nullptr);
     VulkanStagingBuffer.reset(nullptr);
@@ -2219,7 +2224,13 @@ EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const
 
 EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage)
 {
-    const EOS::ShaderInfo shaderInfo = ShaderCompiler->LoadShader(fileName, shaderStage);
+    EOS::ShaderInfo shaderInfo{};
+    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo))
+    {
+        EOS::Logger->error("Could not load shader: {}", fileName);
+        return {};
+    }
+
 
     VkShaderModule vkShaderModule = VK_NULL_HANDLE;
 
@@ -2241,7 +2252,273 @@ EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const cha
         .PushConstantsSize = shaderInfo.PushConstantSize
     };
 
-    return {this, ShaderModulePool.Create(std::move(state))};
+    const EOS::ShaderModuleHandle shaderHandle = ShaderModulePool.Create(std::move(state));
+    if (ShaderReloaderImpl)
+    {
+        ShaderReloaderImpl->TrackShader(shaderHandle, fileName, shaderStage);
+    }
+
+    return {this, shaderHandle};
+}
+
+bool VulkanContext::ReloadShaderModule(EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage)
+{
+    VulkanShaderModuleState* shaderState = ShaderModulePool.Get(handle);
+    if (!shaderState || !fileName)
+    {
+        return false;
+    }
+
+    EOS::ShaderInfo shaderInfo{};
+    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo))
+    {
+        EOS::Logger->error("Could not load shader: {}", fileName);
+        return {};
+    }
+
+    VkShaderModule recompiledModule = VK_NULL_HANDLE;
+    const VkShaderModuleCreateInfo createInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = shaderInfo.Spirv.size() * sizeof(uint32_t),
+        .pCode = shaderInfo.Spirv.data(),
+    };
+
+    VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &recompiledModule);)
+    CHECK(recompiledModule != VK_NULL_HANDLE, "Failed to create reloaded shader module from ShaderInfo");
+
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(recompiledModule), shaderInfo.DebugName.c_str()));
+
+    if (shaderState->ShaderModule != VK_NULL_HANDLE)
+    {
+        vkDestroyShaderModule(VulkanDevice, shaderState->ShaderModule, nullptr);
+    }
+
+    shaderState->ShaderModule = recompiledModule;
+    shaderState->PushConstantsSize = shaderInfo.PushConstantSize;
+    return true;
+}
+
+bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState)
+{
+    const EOS::RenderPipelineDescription& description = renderPipelineState.Description;
+    const uint32_t numColorAttachments = description.GetNumColorAttachments();
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachmentStates[EOS_MAX_COLOR_ATTACHMENTS]{};
+    VkFormat colorAttachmentFormats[EOS_MAX_COLOR_ATTACHMENTS]{};
+
+    for (uint32_t i{}; i != numColorAttachments; ++i)
+    {
+        const EOS::ColorAttachment& attachment = description.ColorAttachments[i];
+        CHECK(attachment.ColorFormat != EOS::Format::Invalid, "The Color Attachment Format is invalid.");
+
+        colorAttachmentFormats[i] = VkContext::FormatTovkFormat(attachment.ColorFormat);
+        if (!attachment.BlendEnabled)
+        {
+            colorBlendAttachmentStates[i] = VkPipelineColorBlendAttachmentState
+            {
+                .blendEnable = VK_FALSE,
+                .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+                .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+                .colorBlendOp = VK_BLEND_OP_ADD,
+                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+                .alphaBlendOp = VK_BLEND_OP_ADD,
+                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+            };
+        }
+        else
+        {
+            colorBlendAttachmentStates[i] = VkPipelineColorBlendAttachmentState
+            {
+                .blendEnable = VK_TRUE,
+                .srcColorBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.SrcRGBBlendFactor),
+                .dstColorBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.DstRGBBlendFactor),
+                .colorBlendOp = VkContext::BlendOpToVkBlendOp(attachment.RGBBlendOp),
+                .srcAlphaBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.SrcAlphaBlendFactor),
+                .dstAlphaBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.DstAlphaBlendFactor),
+                .alphaBlendOp = VkContext::BlendOpToVkBlendOp(attachment.AlphaBlendOp),
+                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+            };
+        }
+    }
+
+    const VulkanShaderModuleState* vertModule = ShaderModulePool.Get(description.VertexShader);
+    const VulkanShaderModuleState* tescModule = ShaderModulePool.Get(description.TessellationControlShader);
+    const VulkanShaderModuleState* teseModule = ShaderModulePool.Get(description.TesselationShader);
+    const VulkanShaderModuleState* geomModule = ShaderModulePool.Get(description.GeometryShader);
+    const VulkanShaderModuleState* fragModule = ShaderModulePool.Get(description.FragmentShader);
+    const VulkanShaderModuleState* taskModule = ShaderModulePool.Get(description.TaskShader);
+    const VulkanShaderModuleState* meshModule = ShaderModulePool.Get(description.MeshShader);
+
+    if (description.MeshShader.Valid())
+    {
+        CHECK(meshModule, "Invalid mesh shader module in pipeline: {}", description.DebugName);
+    }
+    else
+    {
+        CHECK(vertModule, "Invalid vertex shader module in pipeline: {}", description.DebugName);
+    }
+    CHECK(fragModule, "Invalid fragment shader module in pipeline: {}", description.DebugName);
+
+    if (description.TaskShader.Valid())
+    {
+        CHECK(taskModule, "Invalid task shader module in pipeline: {}", description.DebugName);
+    }
+    if (description.TessellationControlShader.Valid())
+    {
+        CHECK(tescModule, "Invalid tessellation control shader module in pipeline: {}", description.DebugName);
+    }
+    if (description.TesselationShader.Valid())
+    {
+        CHECK(teseModule, "Invalid tessellation evaluation shader module in pipeline: {}", description.DebugName);
+    }
+    if (description.GeometryShader.Valid())
+    {
+        CHECK(geomModule, "Invalid geometry shader module in pipeline: {}", description.DebugName);
+    }
+
+    const VkPipelineVertexInputStateCreateInfo ciVertexInputState
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount    = renderPipelineState.NumberOfBindings,
+        .pVertexBindingDescriptions       = renderPipelineState.NumberOfBindings ? renderPipelineState.Bindings : nullptr,
+        .vertexAttributeDescriptionCount  = renderPipelineState.NumberOfAttributes,
+        .pVertexAttributeDescriptions     = renderPipelineState.NumberOfAttributes ? renderPipelineState.Attributes : nullptr,
+    };
+
+    VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants]{};
+    const VkSpecializationInfo specializationInfo = VkContext::GetPipelineShaderStageSpecializationInfo(description.SpecInfo, entries);
+
+    VkShaderStageFlags shaderStageFlags = 0;
+    uint32_t pushConstantsSize = 0;
+
+    #define UPDATE_PUSH_CONSTANT_SIZE(sm, bit)                     \
+        if (sm)                                                    \
+        {                                                          \
+            pushConstantsSize = std::max(pushConstantsSize, sm->PushConstantsSize); \
+            shaderStageFlags |= bit;                               \
+        }
+
+    UPDATE_PUSH_CONSTANT_SIZE(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
+    UPDATE_PUSH_CONSTANT_SIZE(tescModule, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+    UPDATE_PUSH_CONSTANT_SIZE(teseModule, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+    UPDATE_PUSH_CONSTANT_SIZE(geomModule, VK_SHADER_STAGE_GEOMETRY_BIT);
+    UPDATE_PUSH_CONSTANT_SIZE(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
+    UPDATE_PUSH_CONSTANT_SIZE(taskModule, VK_SHADER_STAGE_TASK_BIT_EXT);
+    UPDATE_PUSH_CONSTANT_SIZE(meshModule, VK_SHADER_STAGE_MESH_BIT_EXT);
+
+    #undef UPDATE_PUSH_CONSTANT_SIZE
+
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(VulkanPhysicalDevice, &props);
+    CHECK(pushConstantsSize <= props.limits.maxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, props.limits.maxPushConstantsSize);
+
+    const VkDescriptorSetLayout dsls[] = {DescriptorSetLayout};
+    const VkPushConstantRange range
+    {
+        .stageFlags = shaderStageFlags,
+        .offset = 0,
+        .size = pushConstantsSize,
+    };
+
+    VkPipelineLayout newPipelineLayout = VK_NULL_HANDLE;
+    const VkPipelineLayoutCreateInfo createInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = dsls,
+        .pushConstantRangeCount = pushConstantsSize ? 1u : 0u,
+        .pPushConstantRanges = pushConstantsSize ? &range : nullptr,
+    };
+    VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &createInfo, nullptr, &newPipelineLayout));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(newPipelineLayout), fmt::format("Pipeline Layout: {}", description.DebugName).c_str()));
+
+    VkPipeline newPipeline = VK_NULL_HANDLE;
+    VK_ASSERT(VulkanPipelineBuilder()
+    .DynamicState(VK_DYNAMIC_STATE_VIEWPORT)
+    .DynamicState(VK_DYNAMIC_STATE_SCISSOR)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS)
+    .DynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)
+    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)
+    .PrimitiveTypology(VkContext::TopologyToVkPrimitiveTopology(description.PipelineTopology))
+    .RasterizationSamples(VkContext::GetVulkanSampleCountFlags(description.SamplesCount, VkContext::GetFramebufferMSAABitMask(VulkanPhysicalDevice)), description.MinSampleShading)
+    .PolygonMode(VkContext::PolygonModeToVkPolygonMode(description.PolygonModeDescription))
+    .StencilStateOps(VK_STENCIL_FACE_FRONT_BIT,
+                       VkContext::StencilOpToVkStencilOp(description.FrontFaceStencil.StencilFailureOp),
+                       VkContext::StencilOpToVkStencilOp(description.FrontFaceStencil.DepthStencilPassOp),
+                       VkContext::StencilOpToVkStencilOp(description.FrontFaceStencil.DepthFailureOp),
+                       VkContext::CompareOpToVkCompareOp(description.FrontFaceStencil.StencilCompareOp))
+      .StencilStateOps(VK_STENCIL_FACE_BACK_BIT,
+                       VkContext::StencilOpToVkStencilOp(description.BackFaceStencil.StencilFailureOp),
+                       VkContext::StencilOpToVkStencilOp(description.BackFaceStencil.DepthStencilPassOp),
+                       VkContext::StencilOpToVkStencilOp(description.BackFaceStencil.DepthFailureOp),
+                       VkContext::CompareOpToVkCompareOp(description.BackFaceStencil.StencilCompareOp))
+      .StencilMasks(VK_STENCIL_FACE_FRONT_BIT, 0xFF, description.FrontFaceStencil.WriteMask, description.FrontFaceStencil.ReadMask)
+      .StencilMasks(VK_STENCIL_FACE_BACK_BIT, 0xFF, description.BackFaceStencil.WriteMask, description.BackFaceStencil.ReadMask)
+      .ShaderStage(taskModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TASK_BIT_EXT, taskModule->ShaderModule, description.EntryPointTask, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .ShaderStage(meshModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_MESH_BIT_EXT, meshModule->ShaderModule, description.EntryPointMesh, &specializationInfo)
+                                : VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertModule->ShaderModule, description.EntryPointVert, &specializationInfo))
+      .ShaderStage(VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragModule->ShaderModule, description.EntryPointFrag, &specializationInfo))
+      .ShaderStage(tescModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, tescModule->ShaderModule, description.EntryPointTesc, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .ShaderStage(teseModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, teseModule->ShaderModule, description.EntryPointTese, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .ShaderStage(geomModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_GEOMETRY_BIT, geomModule->ShaderModule, description.EntryPointGeom, &specializationInfo)
+                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
+      .CullMode(VkContext::CullModeToVkCullMode(description.PipelineCullMode))
+      .FrontFace(VkContext::WindingModeToVkFrontFace(description.FrontFaceWinding))
+      .VertexInputState(ciVertexInputState)
+      .ColorAttachments(colorBlendAttachmentStates, colorAttachmentFormats, numColorAttachments)
+      .DepthAttachmentFormat(VkContext::FormatTovkFormat(description.DepthFormat))
+      .StencilAttachmentFormat(VkContext::FormatTovkFormat(description.StencilFormat))
+      .PatchControlPoints(description.PatchControlPoints)
+      .Build(VulkanDevice, nullptr, newPipelineLayout, &newPipeline, description.DebugName));
+
+    if (renderPipelineState.Pipeline != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = renderPipelineState.Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
+    }
+
+    if (renderPipelineState.PipelineLayout != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState.PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
+    }
+
+    renderPipelineState.ShaderStageFlags = shaderStageFlags;
+    renderPipelineState.LastDescriptorSetLayout = DescriptorSetLayout;
+    renderPipelineState.PipelineLayout = newPipelineLayout;
+    renderPipelineState.Pipeline = newPipeline;
+    return true;
+}
+
+bool VulkanContext::RebuildRenderPipeline(EOS::RenderPipelineHandle handle)
+{
+    VulkanRenderPipelineState* renderPipelineState = RenderPipelinePool.Get(handle);
+    if (!renderPipelineState)  return false;
+    return BuildRenderPipeline(*renderPipelineState);
+}
+
+uint32_t VulkanContext::ReloadShaders()
+{
+    if (!ShaderReloaderImpl)
+    {
+        return 0;
+    }
+
+    return ShaderReloaderImpl->ReloadChangedShaders(
+        [this](EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage)
+        {
+            return ReloadShaderModule(handle, fileName, shaderStage);
+        },
+        [this](EOS::RenderPipelineHandle handle)
+        {
+            return RebuildRenderPipeline(handle);
+        });
 }
 
 EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription)
@@ -2347,163 +2624,19 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
         renderPipelineState.Description.SpecInfo.Data = renderPipelineState.SpecConstantDataStorage;
     }
 
-    //Create the vulkan pipeline and pipeline layout
-    // build a new Vulkan pipeline
-    const EOS::RenderPipelineDescription& description = renderPipelineState.Description;
-    const uint32_t numColorAttachments = description.GetNumColorAttachments();
-
-
-    // Not all attachments are valid. We need to create color blend attachments only for active attachments
-    VkPipelineColorBlendAttachmentState colorBlendAttachmentStates[EOS_MAX_COLOR_ATTACHMENTS]{};
-    VkFormat colorAttachmentFormats[EOS_MAX_COLOR_ATTACHMENTS]{};
-
-    for (uint32_t i{}; i != numColorAttachments; ++i)
+    if (!BuildRenderPipeline(renderPipelineState))
     {
-        const EOS::ColorAttachment& attachment = description.ColorAttachments[i];
-        CHECK(attachment.ColorFormat != EOS::Format::Invalid, "The Color Attachment Format is invalid.");
-
-        colorAttachmentFormats[i] = VkContext::FormatTovkFormat(attachment.ColorFormat);
-        if (!attachment.BlendEnabled)
-        {
-            colorBlendAttachmentStates[i] = VkPipelineColorBlendAttachmentState
-            {
-                .blendEnable = VK_FALSE,
-                .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
-                .colorBlendOp = VK_BLEND_OP_ADD,
-                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-                .alphaBlendOp = VK_BLEND_OP_ADD,
-                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-            };
-        }
-        else
-        {
-            colorBlendAttachmentStates[i] = VkPipelineColorBlendAttachmentState
-            {
-                .blendEnable = VK_TRUE,
-                .srcColorBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.SrcRGBBlendFactor),
-                .dstColorBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.DstRGBBlendFactor),
-                .colorBlendOp = VkContext::BlendOpToVkBlendOp(attachment.RGBBlendOp),
-                .srcAlphaBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.SrcAlphaBlendFactor),
-                .dstAlphaBlendFactor = VkContext::BlendFactorToVkBlendFactor(attachment.DstAlphaBlendFactor),
-                .alphaBlendOp = VkContext::BlendOpToVkBlendOp(attachment.AlphaBlendOp),
-                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-            };
-        }
+        free(renderPipelineState.SpecConstantDataStorage);
+        return {};
     }
 
-    const VulkanShaderModuleState* vertModule = ShaderModulePool.Get(description.VertexShader);
-    const VulkanShaderModuleState* tescModule = ShaderModulePool.Get(description.TessellationControlShader);
-    const VulkanShaderModuleState* teseModule = ShaderModulePool.Get(description.TesselationShader);
-    const VulkanShaderModuleState* geomModule = ShaderModulePool.Get(description.GeometryShader);
-    const VulkanShaderModuleState* fragModule = ShaderModulePool.Get(description.FragmentShader);
-    const VulkanShaderModuleState* taskModule = ShaderModulePool.Get(description.TaskShader);
-    const VulkanShaderModuleState* meshModule = ShaderModulePool.Get(description.MeshShader);
-
-    const VkPipelineVertexInputStateCreateInfo ciVertexInputState
+    const EOS::RenderPipelineHandle handle = RenderPipelinePool.Create(std::move(renderPipelineState));
+    if (ShaderReloaderImpl)
     {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount    = renderPipelineState.NumberOfBindings,
-        .pVertexBindingDescriptions       = renderPipelineState.NumberOfBindings ? renderPipelineState.Bindings : nullptr,
-        .vertexAttributeDescriptionCount  = renderPipelineState.NumberOfAttributes,
-        .pVertexAttributeDescriptions     = renderPipelineState.NumberOfAttributes ? renderPipelineState.Attributes : nullptr,
-    };
-
-    VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants]{};
-    const VkSpecializationInfo specializationInfo = VkContext::GetPipelineShaderStageSpecializationInfo(description.SpecInfo, entries);
-
-    // create pipeline layout
-    {
-        #define UPDATE_PUSH_CONSTANT_SIZE(sm, bit)                                  \
-        if (sm)                                                                     \
-        {                                                                           \
-            pushConstantsSize = std::max(pushConstantsSize, sm->PushConstantsSize); \
-            renderPipelineState.ShaderStageFlags |= bit;                            \
-        }
-
-
-        renderPipelineState.ShaderStageFlags = 0;
-        uint32_t pushConstantsSize = 0;
-
-        UPDATE_PUSH_CONSTANT_SIZE(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
-        UPDATE_PUSH_CONSTANT_SIZE(tescModule, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
-        UPDATE_PUSH_CONSTANT_SIZE(teseModule, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
-        UPDATE_PUSH_CONSTANT_SIZE(geomModule, VK_SHADER_STAGE_GEOMETRY_BIT);
-        UPDATE_PUSH_CONSTANT_SIZE(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
-        UPDATE_PUSH_CONSTANT_SIZE(taskModule, VK_SHADER_STAGE_TASK_BIT_EXT);
-        UPDATE_PUSH_CONSTANT_SIZE(meshModule, VK_SHADER_STAGE_MESH_BIT_EXT);
-
-        #undef UPDATE_PUSH_CONSTANT_SIZE
-        VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(VulkanPhysicalDevice, &props);
-        CHECK(pushConstantsSize <= props.limits.maxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, props.limits.maxPushConstantsSize);
-
-        const VkDescriptorSetLayout dsls[] = {DescriptorSetLayout};
-        const VkPushConstantRange range
-        {
-            .stageFlags = renderPipelineState.ShaderStageFlags,
-            .offset = 0,
-            .size = pushConstantsSize,
-        };
-
-        const VkPipelineLayoutCreateInfo createInfo
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .setLayoutCount = 1,
-            .pSetLayouts = dsls,
-            .pushConstantRangeCount = pushConstantsSize ? 1u : 0u,
-            .pPushConstantRanges = pushConstantsSize ? &range : nullptr,
-        };
-        VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &createInfo, nullptr, &renderPipelineState.PipelineLayout));
-        VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(renderPipelineState.PipelineLayout), fmt::format("Pipeline Layout: {}", renderPipelineDescription.DebugName).c_str()));
+        ShaderReloaderImpl->RegisterRenderPipelineDependencies(handle, renderPipelineDescription);
     }
 
-    VK_ASSERT(VulkanPipelineBuilder()
-    .DynamicState(VK_DYNAMIC_STATE_VIEWPORT)
-    .DynamicState(VK_DYNAMIC_STATE_SCISSOR)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS)
-    .DynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)
-    .PrimitiveTypology(VkContext::TopologyToVkPrimitiveTopology(renderPipelineDescription.PipelineTopology))
-    .RasterizationSamples(VkContext::GetVulkanSampleCountFlags(renderPipelineDescription.SamplesCount, VkContext::GetFramebufferMSAABitMask(VulkanPhysicalDevice)), renderPipelineDescription.MinSampleShading)
-    .PolygonMode(VkContext::PolygonModeToVkPolygonMode(renderPipelineDescription.PolygonModeDescription))
-    .StencilStateOps(VK_STENCIL_FACE_FRONT_BIT,
-                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.FrontFaceStencil.StencilFailureOp),
-                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.FrontFaceStencil.DepthStencilPassOp),
-                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.FrontFaceStencil.DepthFailureOp),
-                       VkContext::CompareOpToVkCompareOp(renderPipelineDescription.FrontFaceStencil.StencilCompareOp))
-      .StencilStateOps(VK_STENCIL_FACE_BACK_BIT,
-                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.BackFaceStencil.StencilFailureOp),
-                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.BackFaceStencil.DepthStencilPassOp),
-                       VkContext::StencilOpToVkStencilOp(renderPipelineDescription.BackFaceStencil.DepthFailureOp),
-                       VkContext::CompareOpToVkCompareOp(renderPipelineDescription.BackFaceStencil.StencilCompareOp))
-      .StencilMasks(VK_STENCIL_FACE_FRONT_BIT, 0xFF, renderPipelineDescription.FrontFaceStencil.WriteMask, renderPipelineDescription.FrontFaceStencil.ReadMask)
-      .StencilMasks(VK_STENCIL_FACE_BACK_BIT, 0xFF, renderPipelineDescription.BackFaceStencil.WriteMask, renderPipelineDescription.BackFaceStencil.ReadMask)
-      .ShaderStage(taskModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TASK_BIT_EXT, taskModule->ShaderModule, renderPipelineDescription.EntryPointTask, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .ShaderStage(meshModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_MESH_BIT_EXT, meshModule->ShaderModule, renderPipelineDescription.EntryPointMesh, &specializationInfo)
-                                : VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertModule->ShaderModule, renderPipelineDescription.EntryPointVert, &specializationInfo))
-      .ShaderStage(VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragModule->ShaderModule, renderPipelineDescription.EntryPointFrag, &specializationInfo))
-      .ShaderStage(tescModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, tescModule->ShaderModule, renderPipelineDescription.EntryPointTesc, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .ShaderStage(teseModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, teseModule->ShaderModule, renderPipelineDescription.EntryPointTese, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .ShaderStage(geomModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_GEOMETRY_BIT, geomModule->ShaderModule, renderPipelineDescription.EntryPointGeom, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .CullMode(VkContext::CullModeToVkCullMode(renderPipelineDescription.PipelineCullMode))
-      .FrontFace(VkContext::WindingModeToVkFrontFace(renderPipelineDescription.FrontFaceWinding))
-      .VertexInputState(ciVertexInputState)
-      .ColorAttachments(colorBlendAttachmentStates, colorAttachmentFormats, numColorAttachments)
-      .DepthAttachmentFormat(VkContext::FormatTovkFormat(renderPipelineDescription.DepthFormat))
-      .StencilAttachmentFormat(VkContext::FormatTovkFormat(renderPipelineDescription.StencilFormat))
-      .PatchControlPoints(renderPipelineDescription.PatchControlPoints)
-      .Build(VulkanDevice, nullptr, renderPipelineState.PipelineLayout, &renderPipelineState.Pipeline, renderPipelineDescription.DebugName)); //TODO: Store the pipeline Cache
-
-    return {this, RenderPipelinePool.Create(std::move(renderPipelineState))};
+    return {this, handle};
 }
 
 EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription& bufferDescription)
@@ -2771,6 +2904,11 @@ void VulkanContext::Destroy(EOS::ShaderModuleHandle handle)
 
     if (!state) { return; }
 
+    if (ShaderReloaderImpl)
+    {
+        ShaderReloaderImpl->UntrackShader(handle);
+    }
+
     if (state->ShaderModule != VK_NULL_HANDLE)
     {
         vkDestroyShaderModule(VulkanDevice, state->ShaderModule, nullptr);
@@ -2787,6 +2925,11 @@ void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
     {
         EOS::Logger->warn("Tried to destroy a non-valid RenderPipelineState");
         return;
+    }
+
+    if (ShaderReloaderImpl)
+    {
+        ShaderReloaderImpl->UnregisterRenderPipelineDependencies(handle);
     }
 
     //TODO: Questionable solution ....

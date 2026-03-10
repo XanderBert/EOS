@@ -135,6 +135,11 @@ private:
             Input.left = key == GLFW_KEY_A && pressed;
             Input.right = key == GLFW_KEY_D && pressed;
             Input.space = key == GLFW_KEY_SPACE && pressed;
+
+            if (key == GLFW_KEY_MINUS)
+            {
+                Context->ReloadShaders();
+            }
         });
 
         Window.OnMouseButton([this](int button, int action, int)

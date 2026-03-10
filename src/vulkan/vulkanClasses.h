@@ -15,6 +15,7 @@ struct VulkanShaderModuleState;
 struct VulkanImage;
 struct VulkanBuffer;
 class VulkanContext;
+class ShaderReloader;
 
 static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 
@@ -412,6 +413,7 @@ public:
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
+    [[nodiscard]] uint32_t ReloadShaders() override;
     [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
     [[nodiscard]] EOS::Holder<EOS::SamplerHandle> CreateSampler(const EOS::SamplerDescription& samplerDescription) override;
@@ -460,6 +462,9 @@ private:
     void GenerateMipmaps(const EOS::TextureHandle& handle);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
+    bool BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState);
+    bool ReloadShaderModule(EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage);
+    bool RebuildRenderPipeline(EOS::RenderPipelineHandle handle);
 
 
 private:
@@ -491,9 +496,11 @@ private:
     CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.
     DeviceQueues VulkanDeviceQueues{};
     EOS::ContextConfiguration Configuration{};              //TODO: Should the lifetime of this obj be the whole application?
+    std::filesystem::path ShaderSourcePath{};
 
     std::unique_ptr<EOS::ShaderCompiler> ShaderCompiler{};
+    std::unique_ptr<ShaderReloader> ShaderReloaderImpl{};
 
     friend struct VulkanSwapChain;
     friend struct VulkanSwapChainSupportDetails;
-};
+ };

@@ -66,8 +66,16 @@ namespace EOS
             return reinterpret_cast<void*>(static_cast<ptrdiff_t>(Idx));
         }
 
-        bool operator==(const Handle<ObjectType>& other) const;
-        bool operator!=(const Handle<ObjectType>& other) const;
+        [[nodiscard]] inline bool operator==(const Handle<ObjectType>& other) const
+        {
+            return Idx == other.Idx && Generation == other.Generation;
+        }
+
+        [[nodiscard]] inline bool operator!=(const Handle<ObjectType>& other) const
+        {
+            return !(*this == other);
+        }
+
         explicit operator bool() const
         {
             return Generation != 0;
