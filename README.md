@@ -14,14 +14,29 @@ Eos aims to be:
 
 # Dependencies
 > [!NOTE] 
-> These dependencies are used by EOS and are fetched automatically by CMake during the configuration step using FetchContent
->
- 
-- [GLFW](https://github.com/glfw/glfw)
-- [VOLK](https://github.com/zeux/volk)
-- [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
-- [SPDLOG](https://github.com/gabime/spdlog)
-- [SLANG](https://github.com/shader-slang/slang)
+> Dependencies are fetched automatically during CMake configure using `FetchContent` in `cmake/deps.cmake`.
+> Versions are centralized in `cmake/deps-lock.cmake`.
+
+### Core EOS dependencies
+- [GLFW](https://github.com/glfw/glfw) (`3.4`)
+- [Volk](https://github.com/zeux/volk) (`master`, or Vulkan SDK-matched tag when available)
+- [Vulkan Utility Libraries](https://github.com/KhronosGroup/Vulkan-Utility-Libraries) (`main`, or Vulkan SDK-matched tag when available)
+- [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) (`v3.2.1`)
+- [spdlog](https://github.com/gabime/spdlog) (`v1.15.2`)
+- [stb](https://github.com/nothings/stb) (`master`)
+- [KTX-Software](https://github.com/KhronosGroup/KTX-Software) (`v4.4.2`)
+- [Slang](https://github.com/shader-slang/slang) binaries (`2026.4`, downloaded from GitHub releases)
+
+### Optional EOS dependencies
+- [Dear ImGui](https://github.com/ocornut/imgui) (`v1.92.6`) when `EOS_USE_IMGUI=ON` (default)
+- [Tracy](https://github.com/wolfpld/tracy) (`v0.10`) when `EOS_USE_TRACY=ON`
+
+### Example-only dependencies
+- [Assimp](https://github.com/assimp/assimp) (`v6.0.4`)
+- [GLM](https://github.com/g-truc/glm) (`1.0.1`)
+
+### System dependencies
+- Vulkan SDK (required)
 
 
 # Building
@@ -48,6 +63,10 @@ This project is built using CMake and Ninja.
 2.  **Run the appropriate build script:**
     * Linux: `build.sh` script in the root directory of the project.
     * Windows: `build.bat` script in the root directory of the project.
+
+
+# Screenshots
+![Shadow Mapping](assets/ShadowMapping.png)
 
 
 
