@@ -39,6 +39,36 @@ macro(SETUP_TARGET_DEFAULTS targetName)
     endif()
 endmacro()
 
+macro(SETUP_X11_NONE_WORKAROUND targetName)
+    set(EOS_X11_UNDEFINE_NONE_HEADER "${CMAKE_BINARY_DIR}/generated/EOSX11UndefineNone.h")
+
+    file(GENERATE OUTPUT "${EOS_X11_UNDEFINE_NONE_HEADER}" CONTENT [=[
+        #pragma once
+        #if defined(EOS_PLATFORM_X11)
+        #include <X11/X.h>
+        
+        // https://searchfox.org/mozilla-central/source/gfx/src/X11UndefineNone.h
+        // The header <X11/X.h> defines "None" as a macro that expands to "0L".
+        // This is terrible because many enumerations have an enumerator named "None".
+        // To work around this, we undefine the macro "None", and define a replacement
+        // macro named "X11None".
+        #ifdef None
+        #  undef None
+        #  define X11None 0L
+        // <X11/X.h> also defines "RevertToNone" as a macro that expands to "(int)None".
+        // Since we are undefining "None", that stops working. To keep it working,
+        // we undefine "RevertToNone" and redefine it in terms of "X11None".
+        #  ifdef RevertToNone
+        #    undef RevertToNone
+        #    define RevertToNone (int)X11None
+        #  endif
+        #endif
+        #endif
+]=])
+
+    target_compile_options(${targetName} PUBLIC "$<$<COMPILE_LANGUAGE:C,CXX>:-include${EOS_X11_UNDEFINE_NONE_HEADER}>")
+endmacro()
+
 macro(CREATE_LIB name)
     set(PROJECT_NAME ${name})
     project(${PROJECT_NAME} CXX)
@@ -121,6 +151,7 @@ macro(DEFINE_PLATFORM)
         elseif(USE_X11)
             message(STATUS "X11 session detected")
             target_compile_definitions(EOS PUBLIC EOS_PLATFORM_X11)
+            SETUP_X11_NONE_WORKAROUND(EOS)
         else()
             # Fallback: detect from environment
             if(DEFINED ENV{WAYLAND_DISPLAY})
@@ -131,6 +162,7 @@ macro(DEFINE_PLATFORM)
                 message(STATUS "X11 session detected (env)")
                 target_compile_definitions(EOS PUBLIC EOS_PLATFORM_X11)
                 set(USE_X11 TRUE)
+                SETUP_X11_NONE_WORKAROUND(EOS)
             endif()
         endif()
     endif()
