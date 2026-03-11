@@ -18,9 +18,9 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
     VSOutput output;
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    //output.Pos = mul(float4(input.Pos, 1.0), frameData.depthMVP);
     float4 worldPos = mul(float4(input.Pos, 1.0), frameData.Model);
     output.Pos = mul(worldPos, frameData.cascadeViewProj[pc.cascadeID]);
+    output.Pos.z = max(output.Pos.z, 0.0);  // Pancaking - https://therealmjp.github.io/posts/shadow-maps/
 
     return output;
 }
