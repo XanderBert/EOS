@@ -640,7 +640,7 @@ VkImageViewType VulkanImage::ToImageViewType(EOS::ImageType imageType)
 }
 
 void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, const EOS::ImageType imageType,
-    const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName, const EOS::ComponentMapping& componentMapping)
+    const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName, const EOS::ComponentMapping& componentMapping, const uint32_t baseMipLevel, const uint32_t baseArrayLayer)
 {
     VkImageAspectFlags aspect{};
 
@@ -678,7 +678,7 @@ void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkIma
         .viewType = ToImageViewType(imageType),
         .format = imageFormat,
         .components =  mapping,
-        .subresourceRange = {aspect, 0, levels , 0, layers},
+        .subresourceRange = {aspect, baseMipLevel, levels , baseArrayLayer, layers},
     };
 
     VK_ASSERT(vkCreateImageView(device, &createInfo, nullptr, &imageView));
@@ -703,7 +703,7 @@ VkImageView VulkanImage::GetImageViewForFramebuffer(VkDevice vulkanDevice, uint3
 
     if (!DebugName){ DebugName = "ImageView"; }
     const std::string imageViewDebugName = fmt::format("{} - Framebuffer Image View [{}][{}]", DebugName , level, layer);
-    CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, imageViewDebugName.c_str());
+    CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, imageViewDebugName.c_str(), {}, level, layer);
 
     return ImageViewForFramebuffer[level][layer];
 }

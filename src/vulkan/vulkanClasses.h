@@ -106,7 +106,7 @@ struct VulkanImage final
     [[nodiscard]] static inline bool IsSwapChainImage(const VulkanImage& image) { return (image.ImageType == EOS::ImageType::SwapChain); }
     [[nodiscard]] static VkImageType ToImageType(EOS::ImageType imageType);
     [[nodiscard]] static VkImageViewType ToImageViewType(EOS::ImageType imageType);
-    static void CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, EOS::ImageType imageType, const VkFormat& imageFormat, uint32_t levels, uint32_t layers ,const char* debugName, const EOS::ComponentMapping& componentMapping = {});
+    static void CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, EOS::ImageType imageType, const VkFormat& imageFormat, uint32_t levels, uint32_t layers ,const char* debugName, const EOS::ComponentMapping& componentMapping = {}, uint32_t baseMipLevel = 0, uint32_t baseArrayLayer = 0);
 
     [[nodiscard]] VkImageView GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer);
     [[nodiscard]] VkImageAspectFlags GetImageAspectFlags() const;
