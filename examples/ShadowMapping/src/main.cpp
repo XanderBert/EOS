@@ -3,7 +3,7 @@
 #include "EOS.h"
 #include "imgui.h"
 #include "logger.h"
-#include "shaders/shaderUtils.h"
+#include "shaders/shaderCompiler.h"
 #include "utils.h"
 #include "glm/gtc/type_ptr.hpp"
 

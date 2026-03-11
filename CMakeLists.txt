@@ -11,15 +11,11 @@ include(cmake/deps.cmake)
 CREATE_LIB(EOS)
 DEFINE_PLATFORM()
 
-option(EOS_VULKAN         "Enable Vulkan backend"        ON)
-option(EOS_USE_IMGUI      "Enable ImGui integration"     ON)
-option(EOS_USE_TRACY      "Enable Tracy profiler"        OFF)
-option(EOS_BUILD_EXAMPLES "Build example applications"  ON)
-option(EOS_ENABLE_SHADER_RELOADER "Enable shader hot-reload logic (disable for shipping)" ON)
-
-if(EOS_ENABLE_SHADER_RELOADER)
-    target_compile_definitions(EOS PRIVATE EOS_ENABLE_SHADER_RELOADER)
-endif ()
+set(EOS_VULKAN          ON) # Enable Vulkan backend
+set(EOS_USE_IMGUI       ON) # Enable ImGui integration
+set(EOS_USE_TRACY       OFF)# Enable Tracy profiler
+set(EOS_BUILD_EXAMPLES  ON) # Build example applications
+set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
 
 
 # Set Debug or Release Define
@@ -82,16 +78,13 @@ endif ()
 
 eos_require_glfw(EOS)
 eos_require_spdlog(EOS)
-eos_require_slang(EOS)
 eos_require_stb(EOS)
 eos_require_ktx(EOS)
 
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_compile_options(-g) # Add debug symbols
-    add_compile_options(-O0) # The -O0 flag disables optimization
-endif()
-
+if(EOS_SHADER_COMPILER)
+    target_compile_definitions(EOS PRIVATE EOS_SHADER_COMPILER)
+    eos_require_slang(EOS)
+endif ()
 
 if(EOS_USE_TRACY)
     target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
@@ -105,4 +98,9 @@ endif()
 
 if(EOS_BUILD_EXAMPLES)
     add_subdirectory(examples)
-endif ()
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-g) # Add debug symbols
+    add_compile_options(-O0) # The -O0 flag disables optimization
+endif()

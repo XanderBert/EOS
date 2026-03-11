@@ -1,6 +1,6 @@
 #include "EOS.h"
 #include "logger.h"
-#include "shaders/shaderUtils.h"
+#include "shaders/shaderCompiler.h"
 #include "utils.h"
 
 int main()

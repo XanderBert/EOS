@@ -1,4 +1,4 @@
-#include "shaderUtils.h"
+#include "shaderCompiler.h"
 #include <fstream>
 
 #include "logger.h"
@@ -7,17 +7,21 @@
 
 namespace EOS
 {
+#if defined(EOS_SHADER_COMPILER)
     using namespace slang;
+#endif
 
     //https://shader-slang.org/slang/user-guide/compiling.html#using-the-compilation-api
     ShaderCompiler::ShaderCompiler(const std::filesystem::path& shaderFolder)
     : ShaderFolder(shaderFolder)
     {
+#if defined(EOS_SHADER_COMPILER)
         //Create a Global Session, This is not threadsafe, so if we want to multithread shader compilation we need to create a global session for each thread
         SlangGlobalSessionDesc sessionDescription = {};
         SLANG_ASSERT_VOID_ON_FAIL(createGlobalSession(&sessionDescription, GlobalSession.writeRef()));
+#endif
     }
-
+#if defined(EOS_SHADER_COMPILER)
     bool ShaderCompiler::CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo)
     {
         CompilerOptionEntry compilerOptions[] =
@@ -150,9 +154,15 @@ namespace EOS
                 return ShaderStage::None;
         }
     }
-
+#endif
     bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo,  bool invalidate)
     {
+
+#if defined(EOS_SHADER_COMPILER)
+        //We never want to recompile shaders when there is no compiler
+        invalidate = false;
+#endif
+
         if (!invalidate)
         {
             // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
@@ -168,7 +178,7 @@ namespace EOS
             }
         }
 
-
+#if defined(EOS_SHADER_COMPILER)
         //Compile all shaders in the file and cache if needed
         EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
         std::vector<ShaderInfo> shaderInfos{};
@@ -185,48 +195,12 @@ namespace EOS
         }
 
         CHECK(false, "Could not Load: {} - {}", fileName, ShaderStageToString(shaderStage));
+#endif
         return false;
     }
 
-    std::string ShaderCompiler::ShaderStageToString(EOS::ShaderStage shaderStage)
-    {
-        switch (shaderStage)
-        {
-        case ShaderStage::Amplification:
-            return "Amplification";
-        case ShaderStage::Vertex:
-            return "Vertex";
-        case ShaderStage::Hull:
-            return "Hull";
-        case ShaderStage::Domain:
-            return "Domain";
-        case ShaderStage::Geometry:
-            return "Geometry";
-        case ShaderStage::Fragment:
-            return "Fragment";
-        case ShaderStage::Compute:
-            return "Compute";
-        case ShaderStage::RayGen:
-            return "RayGen";
-        case ShaderStage::Intersection:
-            return "Intersection";
-        case ShaderStage::AnyHit:
-            return "AnyHit";
-        case ShaderStage::ClosestHit:
-            return "ClosestHit";
-        case ShaderStage::Miss:
-            return "Miss";
-        case ShaderStage::Callable:
-            return "Callable";
-        case ShaderStage::Mesh:
-            return "Mesh";
-        case ShaderStage::None:
-            return "None";
-        }
 
-        return "None";
-    }
-
+#if defined(EOS_SHADER_COMPILER)
     void ShaderCompiler::CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const
     {
         std::string baseName = shaderCompilationDescription.Name;
@@ -259,24 +233,6 @@ namespace EOS
         file.write(reinterpret_cast<const char*>(shaderInfo.Spirv.data()), header.spirvSize);
     }
 
-    void ShaderCompiler::LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo)
-    {
-        std::ifstream file(path, std::ios::binary);
-        CHECK(file, "Could not find cached shader file: {}", path.string());
-
-        CachedShaderHeader header;
-        file.read(reinterpret_cast<char*>(&header), sizeof(header));
-        CHECK(header.checksum == EOS_SHADER_CHECKSUM,"Loaded shader cache: {}, got corrupted!", path.string());
-
-        outInfo.ShaderStage = header.stage;
-        outInfo.PushConstantSize = header.pushConstantSize;
-
-        outInfo.DebugName.resize(header.debugNameLength);
-        file.read(outInfo.DebugName.data(), header.debugNameLength);
-
-        outInfo.Spirv.resize(header.spirvSize / sizeof(uint32_t));
-        file.read(reinterpret_cast<char*>(outInfo.Spirv.data()), header.spirvSize);
-    }
 
     void ShaderCompiler::HandleEntryPoint(ShaderInfo& outShaderInfo, IModule* module, const char* shaderName, SlangInt32 entryPointIndex)
     {
@@ -347,5 +303,64 @@ namespace EOS
 
         outShaderInfo.PushConstantSize = totalPushConstantSize;
         outShaderInfo.DebugName = shaderName;
+    }
+#endif
+
+    std::string ShaderCompiler::ShaderStageToString(EOS::ShaderStage shaderStage)
+    {
+        switch (shaderStage)
+        {
+        case ShaderStage::Amplification:
+            return "Amplification";
+        case ShaderStage::Vertex:
+            return "Vertex";
+        case ShaderStage::Hull:
+            return "Hull";
+        case ShaderStage::Domain:
+            return "Domain";
+        case ShaderStage::Geometry:
+            return "Geometry";
+        case ShaderStage::Fragment:
+            return "Fragment";
+        case ShaderStage::Compute:
+            return "Compute";
+        case ShaderStage::RayGen:
+            return "RayGen";
+        case ShaderStage::Intersection:
+            return "Intersection";
+        case ShaderStage::AnyHit:
+            return "AnyHit";
+        case ShaderStage::ClosestHit:
+            return "ClosestHit";
+        case ShaderStage::Miss:
+            return "Miss";
+        case ShaderStage::Callable:
+            return "Callable";
+        case ShaderStage::Mesh:
+            return "Mesh";
+        case ShaderStage::None:
+            return "None";
+        }
+
+        return "None";
+    }
+
+    void ShaderCompiler::LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo)
+    {
+        std::ifstream file(path, std::ios::binary);
+        CHECK(file, "Could not find cached shader file: {}", path.string());
+
+        CachedShaderHeader header;
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        CHECK(header.checksum == EOS_SHADER_CHECKSUM,"Loaded shader cache: {}, got corrupted!", path.string());
+
+        outInfo.ShaderStage = header.stage;
+        outInfo.PushConstantSize = header.pushConstantSize;
+
+        outInfo.DebugName.resize(header.debugNameLength);
+        file.read(outInfo.DebugName.data(), header.debugNameLength);
+
+        outInfo.Spirv.resize(header.spirvSize / sizeof(uint32_t));
+        file.read(reinterpret_cast<char*>(outInfo.Spirv.data()), header.spirvSize);
     }
 }

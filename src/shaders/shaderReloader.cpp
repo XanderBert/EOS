@@ -14,7 +14,7 @@ ShaderReloader::ShaderReloader(std::filesystem::path shaderSourcePath)
 
 void ShaderReloader::TrackShader([[maybe_unused]] const EOS::ShaderModuleHandle& shaderHandle,[[maybe_unused]]  const char* fileName,[[maybe_unused]]  EOS::ShaderStage shaderStage)
 {
-#if defined(EOS_ENABLE_SHADER_RELOADER)
+#if defined(EOS_SHADER_COMPILER)
     if (!shaderHandle.Valid() || !fileName)  return;
 
     TrackedShader& trackedShader = ShaderMap[shaderHandle];
@@ -26,14 +26,14 @@ void ShaderReloader::TrackShader([[maybe_unused]] const EOS::ShaderModuleHandle&
 
 void ShaderReloader::UntrackShader([[maybe_unused]] const EOS::ShaderModuleHandle& shaderHandle)
 {
-#if defined(EOS_ENABLE_SHADER_RELOADER)
+#if defined(EOS_SHADER_COMPILER)
     ShaderMap.erase(shaderHandle);
 #endif
 }
 
 void ShaderReloader::RegisterRenderPipelineDependencies([[maybe_unused]] const EOS::RenderPipelineHandle& pipelineHandle, [[maybe_unused]] const EOS::RenderPipelineDescription& renderPipelineDescription)
 {
-#if defined(EOS_ENABLE_SHADER_RELOADER)
+#if defined(EOS_SHADER_COMPILER)
     CHECK_RETURN(pipelineHandle.Valid(), "RenderPipeline is not valid!");
 
     const std::array<EOS::ShaderModuleHandle, 7> shaderHandles =
@@ -59,7 +59,7 @@ void ShaderReloader::RegisterRenderPipelineDependencies([[maybe_unused]] const E
 
 void ShaderReloader::UnregisterRenderPipelineDependencies([[maybe_unused]] const EOS::RenderPipelineHandle& pipelineHandle)
 {
-#if defined(EOS_ENABLE_SHADER_RELOADER)
+#if defined(EOS_SHADER_COMPILER)
     CHECK_RETURN(pipelineHandle.Valid(), "RenderPipeline is not valid!");
 
     for (auto& [shaderHandle, trackedShader] : ShaderMap)
@@ -72,7 +72,7 @@ void ShaderReloader::UnregisterRenderPipelineDependencies([[maybe_unused]] const
 
 uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShaderModuleCallback& reloadShaderModuleCallback,[[maybe_unused]] const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback)
 {
-#if defined(EOS_ENABLE_SHADER_RELOADER)
+#if defined(EOS_SHADER_COMPILER)
     if (!reloadShaderModuleCallback || !rebuildRenderPipelineCallback) return 0;
 
     std::vector<EOS::RenderPipelineHandle> pipelinesToRebuild;
@@ -138,7 +138,7 @@ uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShade
     return 0;
 }
 
-#if defined(EOS_ENABLE_SHADER_RELOADER)
+#if defined(EOS_SHADER_COMPILER)
 void ShaderReloader::AddUniqueRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle)
 {
     CHECK_RETURN(handle.Valid(), "The renderPipelineHandle is not valid!");

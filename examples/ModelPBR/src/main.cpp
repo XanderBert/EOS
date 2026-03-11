@@ -1,7 +1,7 @@
 #include "../../Common/App.h"
 #include "EOS.h"
 #include "logger.h"
-#include "shaders/shaderUtils.h"
+#include "shaders/shaderCompiler.h"
 #include "utils.h"
 
 struct PerFrameData final

@@ -1,5 +1,7 @@
 #pragma once
+#if defined(EOS_SHADER_COMPILER)
 #include <slang-include.h>
+#endif
 #include <filesystem>
 
 #include "defines.h"
@@ -32,22 +34,23 @@ namespace EOS
 
         [[nodiscard]] bool LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo, bool invalidate = true);
         static inline const char* ShaderFileFormat = ".EOS";
-        
+
+#if defined(EOS_SHADER_COMPILER)
     private:
 
         static EOS::ShaderStage ToShaderStage(SlangStage slangStage);
-        static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
 
         [[nodiscard]] bool CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo);
-        static void LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo);
         void CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& info) const;
-
         void HandleEntryPoint(ShaderInfo& outShaderInfo, slang::IModule* module, const char* shaderName, SlangInt32 entryPointIndex);
 
         Slang::ComPtr<slang::IGlobalSession> GlobalSession;
         Slang::ComPtr<slang::ISession> Session;
         Slang::ComPtr<ISlangBlob> Diagnostics;
+#endif
 
+        static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
+        static void LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo);
         std::filesystem::path ShaderFolder;
     };
 }

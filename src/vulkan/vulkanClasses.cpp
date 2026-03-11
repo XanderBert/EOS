@@ -5,7 +5,7 @@
 #include <ranges>
 
 #include "utils.h"
-#include "shaders/shaderUtils.h"
+#include "shaders/shaderCompiler.h"
 #include "../shaders/shaderReloader.h"
 #include "vulkan/vkTools.h"
 
@@ -2225,7 +2225,7 @@ EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const
 EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage)
 {
     EOS::ShaderInfo shaderInfo{};
-    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo))
+    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo, false))
     {
         EOS::Logger->error("Could not load shader: {}", fileName);
         return {};
