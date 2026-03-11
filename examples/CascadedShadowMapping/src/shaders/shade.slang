@@ -26,9 +26,9 @@ struct VSOutput
     float3 Tangent  : TANGENT;
     float2 UV       : TEXCOORD0;
     uint   DrawIndex : TEXCOORD3;
-    float3 ViewVec;
-    float3 LightVec;
-    float4 ShadowCoord;
+    //float3 ViewVec;
+    //float3 LightVec;
+    //float4 ShadowCoord;
 };
 
 struct DrawData
@@ -39,6 +39,14 @@ struct DrawData
     uint pad;
 };
 
+
+uint SelectCascade(float viewDepth, float4 cascadeSplits)
+{
+    if (viewDepth < cascadeSplits.x) { return 0; }
+    if (viewDepth < cascadeSplits.y) { return 1; }
+    if (viewDepth < cascadeSplits.z) { return 2; }
+    return 3;
+}
 
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
@@ -53,9 +61,9 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     output.Tangent      = mul(input.Tangent.xyz, float3x3(frameData.Model));
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
-    output.ViewVec      = -output.Pos.xyz;
-    output.LightVec = normalize(frameData.lightPos.xyz - output.WorldPos);
-    output.ShadowCoord = mul(float4(input.Pos, 1.0), frameData.depthMVP);
+    //output.ViewVec      = -output.Pos.xyz;
+    //output.LightVec = normalize(frameData.lightPos.xyz - output.WorldPos);
+    //output.ShadowCoord = mul(float4(input.Pos, 1.0), frameData.depthMVP);
 
     return output;
 }
@@ -66,7 +74,7 @@ float4 fragmentMain(VSOutput input)
     // Sample textures
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
     DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
-
+    //uint cascadeIndex = pc.cascadeID;
 
     MaterialTextureSet materialTextures;
     materialTextures.albedo = draw.albedo;
@@ -89,7 +97,14 @@ float4 fragmentMain(VSOutput input)
     float3 N = pbrSurface.normal;
     float3 L = normalize(frameData.lightPos.xyz - input.WorldPos);
 
-    float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
+
+    float4 viewPos = mul(float4(input.WorldPos, 1.0), frameData.View);
+    float viewDepth = -viewPos.z;
+    uint cascadeIndex = SelectCascade(viewDepth, frameData.cascadeSplits);
+    //uint cascadeIndex = 0;//SelectCascade(viewDepth, frameData.cascadeSplits);
+    //float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
+    float4 shadowCoord = mul(float4(input.WorldPos, 1.0), frameData.cascadeViewProj[cascadeIndex]);
+    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
     //If the coord is outside the light frustum don't shadow it.
     if(projCoords.z > 1.0) return float4(color, 1.0);
@@ -109,7 +124,7 @@ float4 fragmentMain(VSOutput input)
     {
         for(int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(projCoords.xy, frameData.cascadeID)).r;
+            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(projCoords.xy, cascadeIndex)).r;
             shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
         }
     }

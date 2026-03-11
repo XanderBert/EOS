@@ -1,8 +1,6 @@
 import common;
 import shadowCommon;
 
-
-//TODO: Reduce to just Pos
 struct VSInput
 {
     uint vertexID   : SV_VertexID;
@@ -20,7 +18,9 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
     VSOutput output;
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    output.Pos = mul(float4(input.Pos, 1.0), frameData.depthMVP);
+    //output.Pos = mul(float4(input.Pos, 1.0), frameData.depthMVP);
+    float4 worldPos = mul(float4(input.Pos, 1.0), frameData.Model);
+    output.Pos = mul(worldPos, frameData.cascadeViewProj[pc.cascadeID]);
 
     return output;
 }

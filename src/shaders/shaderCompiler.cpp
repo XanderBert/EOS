@@ -289,9 +289,10 @@ namespace EOS
             if ( variableLayout->getCategory() == slang::PushConstantBuffer)
             {
                 totalPushConstantSize += variableLayout->getTypeLayout()->getElementVarLayout()->getTypeLayout()->getSize();
-                EOS::Logger->debug("Found Shader Variable: {}, of Type: {}, as PushConstant in Shader: {}, with Stage: {}", variableLayout->getName(), variableLayout->getType()->getName(), shaderName, ShaderStageToString(outShaderInfo.ShaderStage));
+                EOS::Logger->debug("\tFound Shader Variable: {}, of Type: {}, as PushConstant in Shader: {}, with Stage: {}", variableLayout->getName(), variableLayout->getType()->getName(), shaderName, ShaderStageToString(outShaderInfo.ShaderStage));
             }
         }
+        EOS::Logger->debug("Total Push Constant Size:{}", totalPushConstantSize);
 
         outShaderInfo.PushConstantSize = totalPushConstantSize;
         outShaderInfo.DebugName = shaderName;
