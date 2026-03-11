@@ -7,7 +7,7 @@
 #include "utils.h"
 #include "glm/gtc/type_ptr.hpp"
 
-
+#define CASCADES 4
 struct PerFrameData final
 {
     glm::mat4 model;
@@ -16,6 +16,7 @@ struct PerFrameData final
     glm::vec4 lightPos;
     glm::vec3 cameraPos;
     uint32_t  shadowMapID;
+    uint32_t cascadeID;
 };
 
 struct DrawData final
@@ -75,6 +76,23 @@ int main()
     EOS::ShaderModuleHolder shaderHandleShadowVert = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Vertex);
     EOS::ShaderModuleHolder shaderHandleShadowFrag = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Fragment);
 
+    constexpr EOS::RenderPass renderPass
+    {
+        .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
+        .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
+    };
+
+    constexpr EOS::RenderPass shadowRenderPass
+    {
+        .Depth{.LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
+    };
+
+    constexpr EOS::DepthState depthState
+    {
+        .CompareOpState = EOS::CompareOp::Less,
+        .IsDepthWriteEnabled = true,
+    };
+
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vertexDesc
     {
@@ -101,14 +119,17 @@ int main()
 
     EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
 
-    EOS::Holder<EOS::TextureHandle> shadowDepthTexture = App.Context->CreateTexture(
-{
-        .Type                   = EOS::ImageType::Image_2D,
-        .TextureFormat          = EOS::Format::Z_F32,
-        .TextureDimensions      = {static_cast<uint32_t>(2048), static_cast<uint32_t>(2048)},
-        .Usage                  = EOS::TextureUsageFlags::Attachment | EOS::TextureUsageFlags::Sampled,
-        .DebugName              = "Shadow Depth Buffer",
-    });
+    constexpr EOS::Dimensions shadowMapSize{4096, 4096};
+    constexpr EOS::TextureDescription shadowMapDescription
+    {
+        .Type = EOS::ImageType::Image_2D_Array,
+        .TextureFormat = EOS::Format::Z_F32,
+        .TextureDimensions = shadowMapSize,
+        .NumberOfLayers = CASCADES,
+        .Usage = EOS::TextureUsageFlags::Attachment | EOS::TextureUsageFlags::Sampled,
+        .DebugName = "Shadow Depth Buffer"
+    };
+    EOS::Holder<EOS::TextureHandle> shadowDepthTexture = App.Context->CreateTexture(shadowMapDescription);
 
 
     constexpr EOS::SamplerDescription depthMapSamplerDesc
@@ -238,6 +259,8 @@ int main()
         .drawDataPtr = App.Context->GetGPUAddress(perDrawBuffer),
     };
 
+    int cascadeID = 0;
+
     App.Run([&]()
     {
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
@@ -261,6 +284,7 @@ int main()
             .lightPos = glm::vec4(lightPos, 1.0f),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = shadowDepthTexture.Index(),
+            .cascadeID = static_cast<uint32_t>(cascadeID),
         };
         App.Context->Upload(perFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
 
@@ -269,29 +293,6 @@ int main()
             .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
             .DepthStencil = { .Texture = depthTexture },
             .DebugName = "Basic Color Depth Framebuffer",
-        };
-
-        EOS::Framebuffer framebufferShadow
-        {
-            .DepthStencil = { .Texture = shadowDepthTexture },
-            .DebugName = "ShadowMap framebuffer"
-        };
-
-        constexpr EOS::RenderPass renderPass
-        {
-            .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
-            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
-        };
-
-        constexpr EOS::RenderPass shadowRenderPass
-        {
-            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
-        };
-
-        constexpr EOS::DepthState depthState
-        {
-            .CompareOpState = EOS::CompareOp::Less,
-            .IsDepthWriteEnabled = true,
         };
 
 
@@ -305,16 +306,28 @@ int main()
             });
 
         cmdPushMarker(cmdBuffer, "Shadow Pass", 0xff0000ff);
-        cmdBeginRendering(cmdBuffer, shadowRenderPass, framebufferShadow);
+        for (uint32_t cascadeLayer = 0; cascadeLayer < CASCADES; ++cascadeLayer)
         {
-            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(cmdBuffer, renderPipelineShadowHandle);
-            cmdPushConstants(cmdBuffer, framePointers);
-            cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
+            EOS::RenderPass shadowRenderPassForCascade = shadowRenderPass;
+            shadowRenderPassForCascade.Depth.Layer = static_cast<uint8_t>(cascadeLayer);
+
+            EOS::Framebuffer framebufferShadow
+            {
+                .DepthStencil = { .Texture = shadowDepthTexture },
+                .DebugName = "ShadowMap framebuffer"
+            };
+
+            cmdBeginRendering(cmdBuffer, shadowRenderPassForCascade, framebufferShadow);
+            {
+                cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
+                cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
+                cmdBindRenderPipeline(cmdBuffer, renderPipelineShadowHandle);
+                cmdPushConstants(cmdBuffer, framePointers);
+                cmdSetDepthState(cmdBuffer, depthState);
+                cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
+            }
+            cmdEndRendering(cmdBuffer);
         }
-        cmdEndRendering(cmdBuffer);
         cmdPopMarker(cmdBuffer);
 
 
@@ -334,13 +347,14 @@ int main()
         //Render UI
         App.ImGuiRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(500, 200), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
             ImGui::Begin("Light Settings");
 
             ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));
             ImGui::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
-            ImGui::Image(shadowDepthTexture.Index(), {200,200});
-
+            const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(shadowDepthTexture, static_cast<uint32_t>(cascadeID), EOS::ImGuiTextureView::Texture2DArray);
+            ImGui::Image(shadowArrayLayerTextureID, {200,200});
+            ImGui::SliderInt("CascadeID", &cascadeID, 0, CASCADES - 1);
             ImGui::End();
         }
         App.ImGuiRenderer->EndFrame(cmdBuffer);

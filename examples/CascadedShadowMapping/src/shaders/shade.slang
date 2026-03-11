@@ -109,7 +109,7 @@ float4 fragmentMain(VSOutput input)
     {
         for(int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy).r;
+            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(projCoords.xy, frameData.cascadeID)).r;
             shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
         }
     }

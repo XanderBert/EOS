@@ -339,7 +339,8 @@ int main()
 
             ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));
             ImGui::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
-            ImGui::Image(shadowDepthTexture.Index(), {200,200});
+            const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(shadowDepthTexture);
+            ImGui::Image(shadowArrayLayerTextureID, {200,200});
 
             ImGui::End();
         }

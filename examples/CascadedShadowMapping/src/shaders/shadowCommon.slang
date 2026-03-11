@@ -8,6 +8,7 @@ public struct PerFrameData
     public float4   lightPos;
     public float3   cameraPos;
     public uint     shadowMapID;
+    public uint     cascadeID;
 };
 
 public struct PushConstants
