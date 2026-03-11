@@ -18,6 +18,7 @@ struct PerFrameData final
     glm::vec4 cascadeSplits;
     glm::vec3 cameraPos;
     uint32_t  shadowMapID;
+    bool      showCascades;
 };
 
 struct DrawData final
@@ -248,7 +249,7 @@ int main()
         .VertexShader = shaderHandleShadowVert,
         .FragmentShader = shaderHandleShadowFrag,
         .DepthFormat = App.Context->GetFormat(shadowDepthTexture),
-        .PipelineCullMode = EOS::CullMode::Front,
+        .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "ShadowMap Render Pipeline",
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
@@ -266,6 +267,7 @@ int main()
 
     std::array<Cascade, CASCADES> cascades;
     int shadowDebugCascadeLayer = 0;
+    bool showCascades = false;
 
     App.Run([&]()
     {
@@ -282,7 +284,8 @@ int main()
         //Get camera matrices
         const glm::mat4 view = App.MainCamera.GetViewMatrix();
         const glm::mat4 projection = App.MainCamera.GetProjectionMatrix(aspectRatio);
-        const glm::mat4 mvp = projection * view * m;
+        const glm::mat4 viewProjection = projection * view;
+        const glm::mat4 mvp = viewProjection * m;
 
         //Calculate Cascades
         float cascadeSplits[CASCADES];
@@ -301,7 +304,7 @@ int main()
         //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
         for (uint32_t i = 0; i < CASCADES; ++i)
         {
-            constexpr float cascadeLambda = 0.95f;
+            constexpr float cascadeLambda = 0.5f;
             float p = (i + 1) / static_cast<float>(CASCADES);
             float log = minZ * std::pow(ratio, p);
             float uniform = minZ + range * p;
@@ -328,10 +331,10 @@ int main()
             };
 
             // Project frustum corners into world space
-            glm::mat4 invCam = glm::inverse(App.MainCamera.GetViewProjectionMatrix(aspectRatio));
+            glm::mat4 invCam = glm::inverse(viewProjection);
             for (uint32_t j = 0; j < 8; ++j)
             {
-                glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[j], 1.0f);
+                glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[j], 1.0f) ;
                 frustumCorners[j] = invCorner / invCorner.w;
             }
 
@@ -357,31 +360,12 @@ int main()
                 radius = glm::max(radius, distance);
             }
             radius = std::ceil(radius * 16.0f) / 16.0f;
-
-            glm::vec3 lightDir = glm::normalize(lightForward);
+            glm::vec3 maxExtents = glm::vec3(radius);
+            glm::vec3 minExtents = -maxExtents;
             glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
-            if (glm::abs(glm::dot(lightDir, lightUp)) > 0.99f)
-            {
-                lightUp = glm::vec3(0.0f, 0.0f, 1.0f);
-            }
 
-            glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightDir * (radius * 2.0f), frustumCenter, lightUp);
-
-            glm::vec3 minExtents = glm::vec3(std::numeric_limits<float>::max());
-            glm::vec3 maxExtents = glm::vec3(std::numeric_limits<float>::lowest());
-
-            for (uint32_t j = 0; j < 8; ++j)
-            {
-                glm::vec3 cornerLS = glm::vec3(lightViewMatrix * glm::vec4(frustumCorners[j], 1.0f));
-                minExtents = glm::min(minExtents, cornerLS);
-                maxExtents = glm::max(maxExtents, cornerLS);
-            }
-
-            constexpr float depthPadding = 50.0f;
-            minExtents.z -= depthPadding;
-            maxExtents.z += depthPadding;
-
-            glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, minExtents.z, maxExtents.z);
+            glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightForward * -minExtents.z, frustumCenter, lightUp);
+            glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0f, maxExtents.z - minExtents.z);
 
             // Store split distance and matrix in cascade
             cascades[i].splitDepth = App.MainCamera.GetNearPlane() + splitDist * clipRange;
@@ -389,9 +373,6 @@ int main()
 
             lastSplitDist = cascadeSplits[i];
         }
-
-
-
 
 
         PerFrameData perFrameData
@@ -403,6 +384,7 @@ int main()
             .cascadeSplits = glm::vec4(cascades[0].splitDepth, cascades[1].splitDepth, cascades[2].splitDepth, cascades[3].splitDepth),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = shadowDepthTexture.Index(),
+            .showCascades = showCascades,
         };
         for (uint32_t i = 0; i < CASCADES; ++i)
         {
@@ -471,14 +453,15 @@ int main()
         //Render UI
         App.ImGuiRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(450, 520), ImGuiCond_FirstUseEver);
             ImGui::Begin("Light Settings");
 
             ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));
             ImGui::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
             const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(shadowDepthTexture, static_cast<uint32_t>(shadowDebugCascadeLayer), EOS::ImGuiTextureView::Texture2DArray);
-            ImGui::Image(shadowArrayLayerTextureID, {500,500});
+            ImGui::Image(shadowArrayLayerTextureID, {400,400});
             ImGui::SliderInt("CascadeID", &shadowDebugCascadeLayer, 0, CASCADES - 1);
+            ImGui::Checkbox("Show Cascades", &showCascades);
             ImGui::End();
         }
         App.ImGuiRenderer->EndFrame(cmdBuffer);

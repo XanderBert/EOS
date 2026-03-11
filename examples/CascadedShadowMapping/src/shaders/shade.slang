@@ -26,9 +26,6 @@ struct VSOutput
     float3 Tangent  : TANGENT;
     float2 UV       : TEXCOORD0;
     uint   DrawIndex : TEXCOORD3;
-    //float3 ViewVec;
-    //float3 LightVec;
-    //float4 ShadowCoord;
 };
 
 struct DrawData
@@ -61,9 +58,6 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     output.Tangent      = mul(input.Tangent.xyz, float3x3(frameData.Model));
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
-    //output.ViewVec      = -output.Pos.xyz;
-    //output.LightVec = normalize(frameData.lightPos.xyz - output.WorldPos);
-    //output.ShadowCoord = mul(float4(input.Pos, 1.0), frameData.depthMVP);
 
     return output;
 }
@@ -74,7 +68,6 @@ float4 fragmentMain(VSOutput input)
     // Sample textures
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
     DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
-    //uint cascadeIndex = pc.cascadeID;
 
     MaterialTextureSet materialTextures;
     materialTextures.albedo = draw.albedo;
@@ -101,8 +94,16 @@ float4 fragmentMain(VSOutput input)
     float4 viewPos = mul(float4(input.WorldPos, 1.0), frameData.View);
     float viewDepth = -viewPos.z;
     uint cascadeIndex = SelectCascade(viewDepth, frameData.cascadeSplits);
-    //uint cascadeIndex = 0;//SelectCascade(viewDepth, frameData.cascadeSplits);
-    //float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
+
+    if(frameData.showCascades)
+    {
+        float4 color4 = float4(color, 1);
+        if(cascadeIndex == 0) return color4 * float4(1, 0 ,0 ,1);
+        if(cascadeIndex == 1) return color4 * float4(0, 1 ,0 ,1);
+        if(cascadeIndex == 2) return color4 * float4(0, 0 ,1 ,1);
+        if(cascadeIndex == 3) return color4 * float4(1, 0 ,1 ,1);
+    }
+
     float4 shadowCoord = mul(float4(input.WorldPos, 1.0), frameData.cascadeViewProj[cascadeIndex]);
     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
