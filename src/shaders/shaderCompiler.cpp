@@ -155,29 +155,8 @@ namespace EOS
         }
     }
 #endif
-    bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo,  bool invalidate)
+    bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo)
     {
-
-#if defined(EOS_SHADER_COMPILER)
-        //We never want to recompile shaders when there is no compiler
-        invalidate = false;
-#endif
-
-        if (!invalidate)
-        {
-            // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
-            const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderStageToString(shaderStage), ShaderFileFormat);
-            std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-            if (file.is_open())
-            {
-                file.close();
-                EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
-
-                LoadShaderFromCache(cachedFilePath, outShaderInfo);
-                return true;
-            }
-        }
-
 #if defined(EOS_SHADER_COMPILER)
         //Compile all shaders in the file and cache if needed
         EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
@@ -193,10 +172,23 @@ namespace EOS
                 return true;
             }
         }
-
         CHECK(false, "Could not Load: {} - {}", fileName, ShaderStageToString(shaderStage));
-#endif
         return false;
+#else
+        //We never want to recompile shaders when there is no compiler
+        // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
+        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderStageToString(shaderStage), ShaderFileFormat);
+        std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
+        if (file.is_open())
+        {
+            file.close();
+            EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
+
+            LoadShaderFromCache(cachedFilePath, outShaderInfo);
+            return true;
+        }
+        return false;
+#endif
     }
 
 

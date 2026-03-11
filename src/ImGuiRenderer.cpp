@@ -5,6 +5,59 @@
 
 namespace EOS
 {
+    namespace
+    {
+        constexpr uint64_t kImGuiTextureIDEncodedBit = 1ull << 63;
+        constexpr uint64_t kImGuiTextureIDTextureMask = 0x00000000ffffffffull;
+        constexpr uint64_t kImGuiTextureIDLayerMask = 0x0fffffffull;
+        constexpr uint32_t kImGuiTextureIDLayerShift = 32;
+        constexpr uint32_t kImGuiTextureIDViewShift = 60;
+
+        struct DecodedImGuiTextureID final
+        {
+            uint32_t TextureID = 0;
+            uint32_t Layer = 0;
+            ImGuiTextureView View = ImGuiTextureView::Texture2D;
+        };
+
+        [[nodiscard]] DecodedImGuiTextureID DecodeImGuiTextureID(const uint64_t packedTextureID)
+        {
+            if ((packedTextureID & kImGuiTextureIDEncodedBit) == 0)
+            {
+                return {.TextureID = static_cast<uint32_t>(packedTextureID)};
+            }
+
+            const uint32_t textureID = static_cast<uint32_t>(packedTextureID & kImGuiTextureIDTextureMask);
+            const uint32_t layer = static_cast<uint32_t>((packedTextureID >> kImGuiTextureIDLayerShift) & kImGuiTextureIDLayerMask);
+            const uint32_t view = static_cast<uint32_t>((packedTextureID >> kImGuiTextureIDViewShift) & 0x7ull);
+            const ImGuiTextureView textureView = view == static_cast<uint32_t>(ImGuiTextureView::Texture2DArray)
+                ? ImGuiTextureView::Texture2DArray
+                : ImGuiTextureView::Texture2D;
+
+            return
+            {
+                .TextureID = textureID,
+                .Layer = layer,
+                .View = textureView,
+            };
+        }
+    }
+
+    uint64_t MakeImGuiTextureID(const TextureHandle texture, const uint32_t layer, const ImGuiTextureView view)
+    {
+        const uint64_t textureID = texture.Index();
+        if (view == ImGuiTextureView::Texture2D && layer == 0)
+        {
+            return textureID;
+        }
+
+        return
+            kImGuiTextureIDEncodedBit |
+            ((static_cast<uint64_t>(view) & 0x7ull) << kImGuiTextureIDViewShift) |
+            ((static_cast<uint64_t>(layer) & kImGuiTextureIDLayerMask) << kImGuiTextureIDLayerShift) |
+            textureID;
+    }
+
     ImGuiRenderer::ImGuiRenderer(IContext* context, const Window& window, const char* defaultFont, float fontSize)
     :Context(context)
     {
@@ -80,7 +133,7 @@ namespace EOS
         };
 
         FontTexture = Context->CreateTexture(textureDesc);
-        io.Fonts->TexID = FontTexture.Index();
+        io.Fonts->TexID = MakeImGuiTextureID(FontTexture);
         io.FontDefault = font;
     }
 
@@ -216,12 +269,16 @@ namespace EOS
                 if (clipMax.y > framebufferHeight) clipMax.y = framebufferHeight;
                 if (clipMax.x <= clipMin.x || clipMax.y <= clipMin.y) continue;
 
+                const DecodedImGuiTextureID textureData = DecodeImGuiTextureID(static_cast<uint64_t>(ImCmd.GetTexID()));
+
                 BindData bindData
                 {
                     .LRTB               = {left, right, top, bottom},
                     .vertexBufferPtr    = Context->GetGPUAddress(VertexBuffer),
-                    .textureId          = static_cast<uint32_t>(ImCmd.GetTexID()),
+                    .textureId          = textureData.TextureID,
                     .samplerId          = Sampler.Index(),
+                    .textureLayer       = textureData.Layer,
+                    .textureView        = static_cast<uint32_t>(textureData.View),
                 };
 
                 cmdPushConstants(cmd, bindData);

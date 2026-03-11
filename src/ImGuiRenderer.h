@@ -4,6 +4,14 @@
 
 namespace EOS
 {
+    enum class ImGuiTextureView : uint32_t
+    {
+        Texture2D = 0,
+        Texture2DArray = 1,
+    };
+
+    [[nodiscard]] uint64_t MakeImGuiTextureID(TextureHandle texture, uint32_t layer = 0, ImGuiTextureView view = ImGuiTextureView::Texture2D);
+
     class ImGuiRenderer final
     {
     public:
@@ -45,6 +53,8 @@ namespace EOS
             uint64_t vertexBufferPtr = 0;
             uint32_t textureId = 0;
             uint32_t samplerId = 0;
+            uint32_t textureLayer = 0;
+            uint32_t textureView = 0;
         };
 
     };

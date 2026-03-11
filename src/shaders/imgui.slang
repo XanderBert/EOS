@@ -6,6 +6,8 @@ struct ImGuiPushConstants
     uint64_t vertexBuffer;
     uint     textureId;
     uint     samplerId;
+    uint     textureLayer;
+    uint     textureView;
 };
 
 struct ImGuiVertex
@@ -53,7 +55,16 @@ VSOutput vertexMain(uint vertexID : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input)
 {
-    float4 c = input.Color * TextureBindless2D(pc.textureId, pc.samplerId, input.UV);
-    // Render UI in linear color space to sRGB framebuffer
+    float4 sampledColor;
+    if (pc.textureView == 1)
+    {
+        sampledColor = TextureBindless2DArray(pc.textureId, pc.samplerId, float3(input.UV, float(pc.textureLayer)));
+    }
+    else
+    {
+        sampledColor = TextureBindless2D(pc.textureId, pc.samplerId, input.UV);
+    }
+
+    float4 c = input.Color * sampledColor;
     return kNonLinearColorSpace ? float4(pow(c.rgb, float3(2.2)), c.a) : c;
 }
