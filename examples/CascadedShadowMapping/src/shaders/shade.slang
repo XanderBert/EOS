@@ -108,7 +108,7 @@ float4 fragmentMain(VSOutput input)
     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
     //If the coord is outside the light frustum don't shadow it.
-    if(projCoords.z > 1.0) return float4(color, 1.0);
+    if(projCoords.z <= 0.0 || projCoords.z >= 1.0) return float4(color, 1.0);
     
     // Only remap XY -> Vulkan depth already stays in [0, 1].
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
@@ -116,16 +116,26 @@ float4 fragmentMain(VSOutput input)
     // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
     projCoords.y = 1.0 - projCoords.y;
 
-    float bias = max(0.0005 * (1.0 - dot(N, L)), 0.00005);
+    if (projCoords.x <= 0.0 || projCoords.x >= 1.0 || projCoords.y <= 0.0 || projCoords.y >= 1.0)
+    {
+        return float4(color, 1.0);
+    }
+
+
+    //TODO: Interpolate this scale as now, this will have a hard change while changing cascade
+    float cascadeScale = 1.0 - float(cascadeIndex) * 0.15;
+    float ndotl = saturate(dot(N, L));
+    float bias = ndotl * 0.009 * cascadeScale;
+
     float currentDepth = projCoords.z;
     float shadow = 0.0;
-    float2 texelSize = 1.0 / float2(2000.0, 2000.0);
-
+    float2 texelSize = 1.0 / float2(4096.0, 4096.0);
     for(int x = -1; x <= 1; ++x)
     {
         for(int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(projCoords.xy, cascadeIndex)).r;
+            float2 offset = float2(x,y) * texelSize;
+            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(projCoords.xy + offset, cascadeIndex)).r;
             shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
         }
     }

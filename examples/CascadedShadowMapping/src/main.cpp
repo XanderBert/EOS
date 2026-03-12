@@ -367,6 +367,17 @@ int main()
             glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightForward * -minExtents.z, frustumCenter, lightUp);
             glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0f, maxExtents.z - minExtents.z);
 
+            //Texel Grid Stabilization
+            constexpr float shadowMapResolution = 4096.0f;
+            const glm::mat4 shadowMatrix = lightOrthoMatrix * lightViewMatrix;
+            glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            shadowOrigin = shadowOrigin * (shadowMapResolution * 0.5f);
+            const glm::vec4 roundedOrigin = glm::round(shadowOrigin);
+            glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) * (2.0f / shadowMapResolution);
+            roundOffset.z = 0.0f;
+            roundOffset.w = 0.0f;
+            lightOrthoMatrix[3] += roundOffset;
+
             // Store split distance and matrix in cascade
             cascades[i].splitDepth = App.MainCamera.GetNearPlane() + splitDist * clipRange;
             cascades[i].viewProjMatrix = lightOrthoMatrix * lightViewMatrix;
