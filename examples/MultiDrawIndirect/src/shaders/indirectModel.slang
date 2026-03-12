@@ -26,6 +26,7 @@ struct DrawData
     uint normal;
     uint metallicRoughness;
     uint pad;
+    float4x4 transform;
 };
 
 struct PerFrameData
@@ -46,12 +47,16 @@ struct PushConstants
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
     PerFrameData frameData = pc.PerFramePointer.get();
+    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, (uint64_t)drawIndex);
+
+    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
+    float3x3 normalMatrix   = float3x3(mul(draw.transform, frameData.Model));
 
     VSOutput output;
-    output.Pos          = mul(float4(input.Pos, 1.0), frameData.MVP);
-    output.WorldPos     = mul(float4(input.Pos, 1.0), frameData.Model).xyz;
-    output.Normal       = normalize(mul(input.Normal, float3x3(frameData.Model)));
-    output.Tangent      = mul(input.Tangent.xyz, float3x3(frameData.Model));
+    output.Pos          = mul(localTransformed, frameData.MVP);
+    output.WorldPos     = mul(localTransformed, frameData.Model).xyz;
+    output.Normal       = normalize(mul(input.Normal, normalMatrix));
+    output.Tangent      = mul(input.Tangent.xyz, normalMatrix);
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
 

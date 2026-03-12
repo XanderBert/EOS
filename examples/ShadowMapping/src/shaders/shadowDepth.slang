@@ -1,6 +1,14 @@
 import common;
 import shadowCommon;
 
+struct DrawData
+{
+    uint albedo;
+    uint normal;
+    uint metallicRoughness;
+    uint pad;
+    float4x4 transform;
+};
 
 //TODO: Reduce to just Pos
 struct VSInput
@@ -20,7 +28,10 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
     VSOutput output;
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    output.Pos = mul(float4(input.Pos, 1.0), frameData.depthMVP);
+    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, drawIndex);
+
+    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
+    output.Pos = mul(localTransformed, frameData.depthMVP);
 
     return output;
 }

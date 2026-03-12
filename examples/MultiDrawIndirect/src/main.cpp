@@ -18,6 +18,7 @@ struct DrawData final
     uint32_t normalID{};
     uint32_t metallicRoughnessID{};
     uint32_t pad{};
+    glm::mat4 transform{};
 };
 
 struct Vertex final
@@ -59,9 +60,9 @@ int main()
 
     constexpr CameraDescription cameraDescription
     {
-        .origin = {0.0f, 10.0f, -3.5f},
+        .origin = {0.0f, 1.f, 0.0f},
         .rotation = {0, 0.0f},
-        .acceleration = 200.0f
+        .acceleration = 100.0f
     };
 
     ExampleAppDescription appDescription
@@ -122,9 +123,10 @@ int main()
     for (auto& mesh : scene.meshes)
     {
         drawData.push_back({
-            .albedoID            = mesh.textures.albedo.Index(),
-            .normalID            = mesh.textures.normal.Index(),
-            .metallicRoughnessID = mesh.textures.metallicRoughness.Index(),
+            .albedoID            = mesh.albedoTextureIdx,
+            .normalID            = mesh.normalTextureIdx,
+            .metallicRoughnessID = mesh.metallicRoughnessTextureIdx,
+            .transform           = mesh.transform,
         });
     }
 
@@ -195,7 +197,7 @@ int main()
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
         if (std::isnan(aspectRatio)) return;
 
-        glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.05f));
+        glm::mat4 m = glm::mat4(1);
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
         const PerFrameData perFrameData

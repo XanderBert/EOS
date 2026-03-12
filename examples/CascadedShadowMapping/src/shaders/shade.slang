@@ -28,14 +28,6 @@ struct VSOutput
     uint   DrawIndex : TEXCOORD3;
 };
 
-struct DrawData
-{
-    uint albedo;
-    uint normal;
-    uint metallicRoughness;
-    uint pad;
-};
-
 
 uint SelectCascade(float viewDepth, float4 cascadeSplits)
 {
@@ -50,12 +42,16 @@ uint SelectCascade(float viewDepth, float4 cascadeSplits)
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
     PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
+    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, drawIndex);
+
+    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
+    float3x3 normalMatrix   = float3x3(mul(draw.transform, frameData.Model));
 
     VSOutput output;
-    output.Pos          = mul(float4(input.Pos, 1.0), frameData.MVP);
-    output.WorldPos     = mul(float4(input.Pos, 1.0), frameData.Model).xyz;
-    output.Normal       = normalize(mul(input.Normal, float3x3(frameData.Model)));
-    output.Tangent      = mul(input.Tangent.xyz, float3x3(frameData.Model));
+    output.Pos          = mul(localTransformed, frameData.MVP);
+    output.WorldPos     = mul(localTransformed, frameData.Model).xyz;
+    output.Normal       = normalize(mul(input.Normal, normalMatrix));
+    output.Tangent      = mul(input.Tangent.xyz, normalMatrix);
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
 

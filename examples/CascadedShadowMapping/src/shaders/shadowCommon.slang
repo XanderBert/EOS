@@ -13,6 +13,15 @@ public struct PerFrameData
     public bool     showCascades;
 };
 
+public struct DrawData
+{
+    public uint albedo;
+    public uint normal;
+    public uint metallicRoughness;
+    public uint pad;
+    public float4x4 transform;
+};
+
 public struct PushConstants
 {
     public uint64_t PerFramePointer;

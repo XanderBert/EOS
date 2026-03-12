@@ -24,6 +24,7 @@ struct DrawData final
     uint32_t normalID;
     uint32_t metallicRoughnessID;
     uint32_t pad;
+    glm::mat4 transform;
 };
 
 struct Vertex final
@@ -55,9 +56,9 @@ int main()
         .ApplicationName        = "EOS - ShadowMapping",
     };
 
-    CameraDescription cameraDescription
+    constexpr CameraDescription cameraDescription
     {
-        .origin = {0.0f, 10.0f, -3.0f},
+        .origin = {0.0f, 1.f, 0.0f},
         .rotation = {0, 0.0f},
         .acceleration = 100.0f
     };
@@ -105,7 +106,7 @@ int main()
 {
         .Type                   = EOS::ImageType::Image_2D,
         .TextureFormat          = EOS::Format::Z_F32,
-        .TextureDimensions      = {static_cast<uint32_t>(2048), static_cast<uint32_t>(2048)},
+        .TextureDimensions      = {static_cast<uint32_t>(4096), static_cast<uint32_t>(4096)},
         .Usage                  = EOS::TextureUsageFlags::Attachment | EOS::TextureUsageFlags::Sampled,
         .DebugName              = "Shadow Depth Buffer",
     });
@@ -152,9 +153,10 @@ int main()
     for (auto& mesh : scene.meshes)
     {
         drawData.push_back({
-            .albedoID            = mesh.textures.albedo.Index(),
-            .normalID            = mesh.textures.normal.Index(),
-            .metallicRoughnessID = mesh.textures.metallicRoughness.Index(),
+            .albedoID            = mesh.albedoTextureIdx,
+            .normalID            = mesh.normalTextureIdx,
+            .metallicRoughnessID = mesh.metallicRoughnessTextureIdx,
+            .transform           = mesh.transform,
         });
     }
 
@@ -227,10 +229,10 @@ int main()
 
     //TODO: Make a abstracted movement class or something, that can either behave like projection or camera projection things.
     //Light and Camera Can implement those
-    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
-    glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
+    const glm::mat4 m = glm::mat4(1.0f);
+    glm::vec3 lightPos          = {0.0f, 20.0f, 20.0f};
     glm::vec2 lightRotation     = {-73, -90};
-    const glm::mat4 lightProjection   = glm::ortho(-150.0f, 150.0f,-150.0f, 150.0f,0.1f,250.0f);
+    const glm::mat4 lightProjection   = glm::ortho(-25.0f, 25.0f,-25.0f, 25.0f,0.1f,50.0f);
     glm::vec3 lightUp           = {0.0f, 1.0f, 0.0f};
     const FramePointers framePointers
     {
@@ -334,7 +336,7 @@ int main()
         //Render UI
         App.ImGuiRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(500, 200), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(300, 300), ImGuiCond_FirstUseEver);
             ImGui::Begin("Light Settings");
 
             ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));

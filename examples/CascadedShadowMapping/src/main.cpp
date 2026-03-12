@@ -27,6 +27,7 @@ struct DrawData final
     uint32_t normalID;
     uint32_t metallicRoughnessID;
     uint32_t pad;
+    glm::mat4 transform;
 };
 
 struct Vertex final
@@ -67,9 +68,9 @@ int main()
         .ApplicationName        = "EOS - ShadowMapping",
     };
 
-    CameraDescription cameraDescription
+    constexpr CameraDescription cameraDescription
     {
-        .origin = {0.0f, 10.0f, -3.0f},
+        .origin = {0.0f, 1.f, 0.0f},
         .rotation = {0, 0.0f},
         .acceleration = 100.0f
     };
@@ -155,7 +156,10 @@ int main()
     EOS::SamplerHolder depthMapSampler = App.Context->CreateSampler(depthMapSamplerDesc);
 
 
-    Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
+    Scene scene = LoadModel("../data/ABeautifulGame/ABeautifulGame.gltf", App.Context.get());
+    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(10.00f));
+    //Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
+    //const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
     std::vector<Vertex> vertices;
     vertices.reserve(scene.vertices.size());
     for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
@@ -183,10 +187,12 @@ int main()
     drawData.reserve(scene.meshes.size());
     for (auto& mesh : scene.meshes)
     {
-        drawData.push_back({
-            .albedoID            = mesh.textures.albedo.Index(),
-            .normalID            = mesh.textures.normal.Index(),
-            .metallicRoughnessID = mesh.textures.metallicRoughness.Index(),
+        drawData.push_back(
+    {
+            .albedoID            = mesh.albedoTextureIdx,
+            .normalID            = mesh.normalTextureIdx,
+            .metallicRoughnessID = mesh.metallicRoughnessTextureIdx,
+            .transform           = mesh.transform,
         });
     }
 
@@ -254,8 +260,6 @@ int main()
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
-
-    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(0.04f));
     glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
     glm::vec2 lightRotation     = {-73, -90};
 
@@ -304,7 +308,7 @@ int main()
         //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
         for (uint32_t i = 0; i < CASCADES; ++i)
         {
-            constexpr float cascadeLambda = 0.5f;
+            constexpr float cascadeLambda = 0.1f;
             float p = (i + 1) / static_cast<float>(CASCADES);
             float log = minZ * std::pow(ratio, p);
             float uniform = minZ + range * p;
