@@ -131,9 +131,9 @@ int main()
             .model = m,
             .mvp = mvp,
             .cameraPos = App.MainCamera.GetPosition(),
-            .albedoID = scene.meshes[0].textures.albedo.Index(),
-            .normalID = scene.meshes[0].textures.normal.Index(),
-            .metallicRoughnessID = scene.meshes[0].textures.metallicRoughness.Index(),
+            .albedoID = scene.meshes[0].albedoTextureIdx,
+            .normalID = scene.meshes[0].normalTextureIdx,
+            .metallicRoughnessID = scene.meshes[0].metallicRoughnessTextureIdx,
         };
 
 
