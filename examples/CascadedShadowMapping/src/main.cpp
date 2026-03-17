@@ -38,7 +38,6 @@ struct Vertex final
     glm::vec4 tangent;
 };
 
-
 struct VertexShadow final
 {
     glm::vec3 position;
@@ -54,7 +53,6 @@ struct FramePointers final
 
 struct Cascade final
 {
-    EOS::Framebuffer    frameBuffer;
     float               splitDepth;
     glm::mat4           viewProjMatrix;
 };
@@ -91,12 +89,12 @@ int main()
     constexpr EOS::RenderPass renderPass
     {
         .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
-        .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
+        .Depth{ .LoadOpState = EOS::LoadOp::Clear}
     };
 
     constexpr EOS::RenderPass shadowRenderPass
     {
-        .Depth{.LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
+        .Depth{.LoadOpState = EOS::LoadOp::Clear}
     };
 
     constexpr EOS::DepthState depthState
@@ -122,7 +120,6 @@ int main()
         }
     };
 
-
     constexpr EOS::VertexInputData vertexDescriptionShadow
     {
         .Attributes ={{ .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) }},
@@ -143,7 +140,6 @@ int main()
     };
     EOS::Holder<EOS::TextureHandle> shadowDepthTexture = App.Context->CreateTexture(shadowMapDescription);
 
-
     constexpr EOS::SamplerDescription depthMapSamplerDesc
     {
         .wrapU = EOS::SamplerWrap::ClampToBorder,
@@ -156,10 +152,10 @@ int main()
     EOS::SamplerHolder depthMapSampler = App.Context->CreateSampler(depthMapSamplerDesc);
 
 
-    Scene scene = LoadModel("../data/ABeautifulGame/ABeautifulGame.gltf", App.Context.get());
-    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(10.00f));
-    //Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
-    //const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+    //Scene scene = LoadModel("../data/ABeautifulGame/ABeautifulGame.gltf", App.Context.get());
+    //const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(10.00f));
+    Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
+    const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
     std::vector<Vertex> vertices;
     vertices.reserve(scene.vertices.size());
     for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
@@ -204,8 +200,7 @@ int main()
         .DebugName = "perDrawBuffer",
     });
 
-    EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer(
-{
+    EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
         .Size      = sizeof(PerFrameData),
@@ -235,8 +230,6 @@ int main()
         .DebugName = "indirectBuffer",
     });
 
-
-    //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineShade
     {
         .VertexInput = vertexDesc,
@@ -260,14 +253,15 @@ int main()
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
-    glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
-    glm::vec2 lightRotation     = {-73, -90};
-
     FramePointers framePointers
     {
         .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
         .drawDataPtr = App.Context->GetGPUAddress(perDrawBuffer),
     };
+
+
+    glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
+    glm::vec2 lightRotation     = {-73, -90};
 
     std::array<Cascade, CASCADES> cascades;
     int shadowDebugCascadeLayer = 0;
@@ -294,21 +288,24 @@ int main()
         //Calculate Cascades
         float cascadeSplits[CASCADES];
 
-        float nearClip = App.MainCamera.GetNearPlane();
-        float farClip = App.MainCamera.GetFarPlane();
-        float clipRange = farClip - nearClip;
+        const float nearClip = App.MainCamera.GetNearPlane();
+        const float farClip = App.MainCamera.GetFarPlane();
+        const float clipRange = farClip - nearClip;
 
-        float minZ = nearClip;
-        float maxZ = nearClip + clipRange;
+        const float minZ = nearClip;
+        const float maxZ = nearClip + clipRange;
 
-        float range = maxZ - minZ;
-        float ratio = maxZ / minZ;
+        const float range = maxZ - minZ;
+        const float ratio = maxZ / minZ;
 
 
+        //https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
         //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
+        //http://the-witness.net/news/2010/03/graphics-tech-shadow-maps-part-1/
+        //https://therealmjp.github.io/posts/shadow-maps/
         for (uint32_t i = 0; i < CASCADES; ++i)
         {
-            constexpr float cascadeLambda = 0.1f;
+            constexpr float cascadeLambda = 0.25f;
             float p = (i + 1) / static_cast<float>(CASCADES);
             float log = minZ * std::pow(ratio, p);
             float uniform = minZ + range * p;
@@ -316,12 +313,12 @@ int main()
             cascadeSplits[i] = (d - nearClip) / clipRange;
         }
 
-
         float lastSplitDist = 0.0;
         for (uint32_t i = 0; i < CASCADES; ++i)
         {
             float splitDist = cascadeSplits[i];
 
+            //Vulkan Depth is [0 - 1]
             glm::vec3 frustumCorners[8] =
             {
                 glm::vec3(-1.0f,  1.0f, 0.0f),
@@ -389,7 +386,6 @@ int main()
             lastSplitDist = cascadeSplits[i];
         }
 
-
         PerFrameData perFrameData
         {
             .model = m,
@@ -405,21 +401,14 @@ int main()
         {
             perFrameData.cascadeViewProj[i] = cascades[i].viewProjMatrix;
         }
-        App.Context->Upload(perFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
-
-        EOS::Framebuffer framebufferShade
-        {
-            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DepthStencil = { .Texture = depthTexture },
-            .DebugName = "Basic Color Depth Framebuffer",
-        };
-
-
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
+        const EOS::TextureHandle swapChainTexture = App.Context->GetSwapChainTexture();
 
+
+        App.Context->Upload(perFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
         cmdPipelineBarrier(cmdBuffer, {},
             {
-                { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+                { swapChainTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
                 { depthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
                 { shadowDepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
             });
@@ -455,6 +444,12 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {},{{ shadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },});
 
         cmdPushMarker(cmdBuffer, "Shade Pass", 0xff00f0ff);
+        EOS::Framebuffer framebufferShade
+        {
+            .Color = {{.Texture = swapChainTexture}},
+            .DepthStencil = { .Texture = depthTexture },
+            .DebugName = "Basic Color Depth Framebuffer",
+        };
         cmdBeginRendering(cmdBuffer, renderPass, framebufferShade);
         {
             cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
@@ -482,8 +477,8 @@ int main()
         App.ImGuiRenderer->EndFrame(cmdBuffer);
 
 
-        cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
+        cmdPipelineBarrier(cmdBuffer, {}, {{swapChainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
+        App.Context->Submit(cmdBuffer, swapChainTexture);
     });
 
     return 0;

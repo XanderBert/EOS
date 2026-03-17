@@ -119,7 +119,7 @@ float4 fragmentMain(VSOutput input)
 
 
     //TODO: Interpolate this scale as now, this will have a hard change while changing cascade
-    float cascadeScale = 1.0 - float(cascadeIndex) * 0.15;
+    float cascadeScale = 1.0 - float(cascadeIndex) * 0.0015;
     float ndotl = saturate(dot(N, L));
     float bias = ndotl * 0.009 * cascadeScale;
 

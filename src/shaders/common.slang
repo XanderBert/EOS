@@ -32,8 +32,7 @@ public struct Material
     public float3 albedo;
     public float metallic;
     public float roughness;
-};
-
+}
 
 //[Drobot2014] https://blog.selfshadow.com/publications/s2016-shading-course/activision/s2016_pbs_activision_occlusion.pdf
 public float sqrtFast(float x)

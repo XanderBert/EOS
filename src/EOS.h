@@ -535,8 +535,26 @@ namespace EOS
         virtual SubmitHandle Submit(ICommandBuffer& commandBuffer, TextureHandle present) = 0;
 
         /**
-         * @brief Gets the handle to the currently in use SwapChain.
-         * @return The handle of the currently in use SwapChain.
+         * @brief Gets the handle to the currently in use SwapChain image and advances to the
+         *        next one. Internally this CPU-waits (via the timeline semaphore) until the
+         *        previous frame's GPU work for this swapchain slot is fully complete.
+         *
+         * @note  **Call this BEFORE uploading any per-frame GPU buffers** (e.g. via Upload()).
+         *        The wait that happens inside this call is what makes it safe to overwrite
+         *        those buffers. Uploading before this call creates a data race: the previous
+         *        frame's GPU commands may still be reading the buffer while the CPU writes
+         *        the new frame's data into it, causing one-frame-stale values to be used
+         *        on the GPU
+         *
+         *        Correct per-frame pattern:
+         *        @code
+         *        ICommandBuffer& cmd = AcquireCommandBuffer();
+         *        TextureHandle swapchain = GetSwapChainTexture(); // <-- wait happens here
+         *        Upload(myPerFrameBuffer, data, size, 0);         // <-- now safe to write
+         *        cmdPipelineBarrier(cmd, {}, {{ swapchain, ... }});
+         *        @endcode
+         *
+         * @return The handle of the currently in use SwapChain image.
          */
         virtual TextureHandle GetSwapChainTexture() = 0;
 
@@ -635,11 +653,17 @@ namespace EOS
         virtual void Destroy(EOS::SamplerHandle handle) = 0;
 
         /**
-        * @brief Handles the uploading of buffers to the GPU
+        * @brief Handles the uploading of buffers to the GPU.
         * @param handle The handle of the buffer we want to upload to.
         * @param data The data we want to upload.
         * @param size The size of the data we want to upload.
         * @param offset The offset it needs to have inside the buffer.
+        *
+        * @warning For per-frame GPU buffers (e.g. uniform/storage buffers updated every frame),
+        *          you MUST call GetSwapChainTexture() before calling this. GetSwapChainTexture()
+        *          performs the CPU-side wait that ensures the previous frame's GPU commands have
+        *          finished reading the buffer. Uploading before that wait is a data race.
+        *          See GetSwapChainTexture() for the correct call order.
         */
         virtual void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) = 0;
 
