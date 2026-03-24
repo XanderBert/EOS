@@ -8,6 +8,7 @@
 #include "glm/gtc/type_ptr.hpp"
 
 #define CASCADES 4
+#define SHADOW_SIZE 4096
 struct PerFrameData final
 {
     glm::mat4 model;
@@ -103,7 +104,6 @@ int main()
         .IsDepthWriteEnabled = true,
     };
 
-    //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vertexDesc
     {
         .Attributes =
@@ -128,7 +128,7 @@ int main()
 
     EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
 
-    constexpr EOS::Dimensions shadowMapSize{4096, 4096};
+    constexpr EOS::Dimensions shadowMapSize{SHADOW_SIZE, SHADOW_SIZE};
     constexpr EOS::TextureDescription shadowMapDescription
     {
         .Type = EOS::ImageType::Image_2D_Array,
@@ -253,6 +253,7 @@ int main()
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
+    //Get UBO pointers
     FramePointers framePointers
     {
         .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
@@ -260,9 +261,11 @@ int main()
     };
 
 
+    //Setup light
     glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
     glm::vec2 lightRotation     = {-73, -90};
 
+    //Setup Cascades
     std::array<Cascade, CASCADES> cascades;
     int shadowDebugCascadeLayer = 0;
     bool showCascades = false;
@@ -286,6 +289,11 @@ int main()
         const glm::mat4 mvp = viewProjection * m;
 
         //Calculate Cascades
+        //https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
+        //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
+        //http://the-witness.net/news/2010/03/graphics-tech-shadow-maps-part-1/
+        //https://therealmjp.github.io/posts/shadow-maps/
+        //https://mynameismjp.wordpress.com/2013/09/10/shadow-maps/
         float cascadeSplits[CASCADES];
 
         const float nearClip = App.MainCamera.GetNearPlane();
@@ -298,11 +306,8 @@ int main()
         const float range = maxZ - minZ;
         const float ratio = maxZ / minZ;
 
-
-        //https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
-        //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
-        //http://the-witness.net/news/2010/03/graphics-tech-shadow-maps-part-1/
-        //https://therealmjp.github.io/posts/shadow-maps/
+        //Calculate split distances based on article in GPU Gems 3
+        //Uses logarithmic and uniform split scheme
         for (uint32_t i = 0; i < CASCADES; ++i)
         {
             constexpr float cascadeLambda = 0.25f;
@@ -318,6 +323,7 @@ int main()
         {
             float splitDist = cascadeSplits[i];
 
+            //Get NDC Coordinates
             //Vulkan Depth is [0 - 1]
             glm::vec3 frustumCorners[8] =
             {
@@ -331,7 +337,7 @@ int main()
                 glm::vec3(-1.0f, -1.0f,  1.0f),
             };
 
-            // Project frustum corners into world space
+            //Project frustum corners into world space
             glm::mat4 invCam = glm::inverse(viewProjection);
             for (uint32_t j = 0; j < 8; ++j)
             {
@@ -354,6 +360,7 @@ int main()
             }
             frustumCenter /= 8.0f;
 
+            //Find the longest radius of the frustum
             float radius = 0.0f;
             for (uint32_t j = 0; j < 8; j++)
             {
@@ -361,14 +368,16 @@ int main()
                 radius = glm::max(radius, distance);
             }
             radius = std::ceil(radius * 16.0f) / 16.0f;
+
+            //Create light ortho based on the AABB for this cascade
             glm::vec3 maxExtents = glm::vec3(radius);
             glm::vec3 minExtents = -maxExtents;
             glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
-
             glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightForward * -minExtents.z, frustumCenter, lightUp);
             glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0f, maxExtents.z - minExtents.z);
 
             //Texel Grid Stabilization
+            //Avoid light shimmering -> Create rounding matrix so we move in texel sized increments
             constexpr float shadowMapResolution = 4096.0f;
             const glm::mat4 shadowMatrix = lightOrthoMatrix * lightViewMatrix;
             glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -378,6 +387,8 @@ int main()
             roundOffset.z = 0.0f;
             roundOffset.w = 0.0f;
             lightOrthoMatrix[3] += roundOffset;
+
+
 
             // Store split distance and matrix in cascade
             cascades[i].splitDepth = App.MainCamera.GetNearPlane() + splitDist * clipRange;

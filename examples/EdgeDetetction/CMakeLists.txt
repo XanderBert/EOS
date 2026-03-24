@@ -1,0 +1,3 @@
+CREATE_EXAMPLE(EdgeDetection)
+eos_require_assimp(EdgeDetection)
+eos_require_glm(EdgeDetection)
