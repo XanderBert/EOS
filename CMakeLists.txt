@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
 project(EOS)
 
+
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(EOS_DEPENDENCIES_DIR ${EOS_ROOT_DIR}/dependencies)
 

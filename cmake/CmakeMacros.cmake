@@ -27,6 +27,7 @@ macro(COPY_SHADERS_TO_BIN targetName shaderFiles)
 
     # Runs on every build, before the target is linked
     add_custom_target(${COPY_TARGET_NAME} ALL ${SHADER_COPY_COMMANDS})
+    set_property(TARGET ${COPY_TARGET_NAME} PROPERTY FOLDER "Internal/ShaderCopy")
     add_dependencies(${targetName} ${COPY_TARGET_NAME})
 endmacro()
 
@@ -125,6 +126,7 @@ macro(CREATE_EXAMPLE name)
     file(GLOB_RECURSE SHADER_FILES LIST_DIRECTORIES false src/*.slang)
 
     add_executable(${PROJECT_NAME} ${SRC_FILES})
+    set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "Examples")
 
     target_link_libraries(${PROJECT_NAME} PRIVATE EOS)
 
