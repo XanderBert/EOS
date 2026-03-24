@@ -72,7 +72,7 @@ public:
     {
         lastTime = glfwGetTime();
 
-        while (!Window.ShouldClose())
+        while (!Window.ShouldClose() && !ShouldExit)
         {
             Window.Poll();
             if (!Window.IsFocused())
@@ -101,6 +101,10 @@ public:
         }
     }
 
+    void Exit()
+    {
+        ShouldExit = true;
+    }
 private:
 
     void SetMouseLookMode(bool enabled)
@@ -194,4 +198,6 @@ private:
 
     glm::vec3 StartingCameraPosition;
     glm::vec2 StartingCameraRotation;
+
+    bool ShouldExit = false;
 };

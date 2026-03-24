@@ -118,6 +118,39 @@ void cmdBindScissorRect(const EOS::ICommandBuffer& commandBuffer, const EOS::Sci
     vkCmdSetScissor(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, 0, 1, &scissorRect2D);
 }
 
+void cmdBindComputePipeline(EOS::ICommandBuffer& commandBuffer, EOS::ComputePipelineHandle handle)
+{
+    CHECK(!handle.Empty(), "Please pass a valid compute handle");
+    CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+
+    vulkanCommandBuffer->CurrentGraphicsPipeline = {};
+    vulkanCommandBuffer->CurrentComputePipeline = std::move(handle);
+    vulkanCommandBuffer->CurrentRayTracingPipeline = {};
+
+    //Create Pipeline if needed
+    //TODO: Can we somehow fetch all needed pipelines beforehand and create them in advance?
+    VkPipeline pipeline = vulkanCommandBuffer->VkContext->GetComputePipeline(vulkanCommandBuffer->CurrentComputePipeline);
+    CHECK(pipeline != VK_NULL_HANDLE, "Failed to create or fetch the compute pipeline");
+
+    const ComputePipelineState* cps = vulkanCommandBuffer->VkContext->ComputePipelinePool.Get(vulkanCommandBuffer->CurrentComputePipeline);
+
+    if (vulkanCommandBuffer->LastPipelineBound != pipeline)
+    {
+        vulkanCommandBuffer->LastPipelineBound = pipeline;
+        vkCmdBindPipeline(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        vulkanCommandBuffer->VkContext->UpdateDescriptorSet();
+        vulkanCommandBuffer->VkContext->BindDefaultDescriptorSet(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, cps->PipelineLayout);
+    }
+}
+
+void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount, const EOS::Dependencies& dependencies)
+{
+    CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+    CHECK(!vulkanCommandBuffer->IsRendering, "Make sure you call cmdEndRendering before calling cmdDispatchThreadGroups");
+
+    vkCmdDispatch(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, threadGroupCount.Width, threadGroupCount.Height, threadGroupCount.Depth);
+}
+
 void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description, const EOS::Dependencies &dependencies)
 {
     //TODO: Implement dependencies
@@ -331,8 +364,6 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipeli
     CHECK(hasDepthAttachmentPipeline == hasDepthAttachmentPass, "Make sure your render pass and render pipeline both have matching depth attachments");
     CHECK(rps->Pipeline != VK_NULL_HANDLE, "The Vulkan Pipeline is a NULL Handle, It did not got created");
 
-    //TODO: make sure this this is if is not needed,
-    //We can sort the render loop based on pipelines...
     if (vulkanCommandBuffer->LastPipelineBound != rps->Pipeline)
     {
         vulkanCommandBuffer->LastPipelineBound = rps->Pipeline;
@@ -409,15 +440,32 @@ void cmdPushConstants(const EOS::ICommandBuffer &commandBuffer, const void *data
     CHECK(!vulkanCommandBuffer->CurrentGraphicsPipeline.Empty() || !vulkanCommandBuffer->CurrentComputePipeline.Empty() || !vulkanCommandBuffer->CurrentRayTracingPipeline.Empty(), "No pipeline bound, cannot set pushconstants");
 
 
-    const VulkanRenderPipelineState* stateGraphics = vkContext->RenderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
-    //TODO: Add options for compute and ray tracing once these pipelines have been added
-    //const VulkanComputePipelineState* stateCompute = vkContext->ComputePipelinesPool.Get(vulkanCommandBuffer->CurrentComputePipeline);
-    //const VulkanRayTracingPipelineState* stateRayTracing = vkContext->RayTracingPipelinesPool.Get(vulkanCommandBuffer->CurrentRayTracingPipeline);
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkShaderStageFlags shaderStageFlags = 0;
 
-    CHECK(stateGraphics, "Graphics State is not valid");
+    if (!vulkanCommandBuffer->CurrentGraphicsPipeline.Empty())
+    {
+        const VulkanRenderPipelineState* stateGraphics = vkContext->RenderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
+        CHECK(stateGraphics, "Graphics State is not valid");
 
+        pipelineLayout = stateGraphics->PipelineLayout;
+        shaderStageFlags = stateGraphics->ShaderStageFlags;
+    }
+    else if (!vulkanCommandBuffer->CurrentComputePipeline.Empty())
+    {
+        const ComputePipelineState* stateCompute = vkContext->ComputePipelinePool.Get(vulkanCommandBuffer->CurrentComputePipeline);
+        CHECK(stateCompute, "Compute State is not valid");
 
-    vkCmdPushConstants(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, stateGraphics->PipelineLayout, stateGraphics->ShaderStageFlags, static_cast<uint32_t>(offset), static_cast<uint32_t>(size), data);
+        pipelineLayout = stateCompute->PipelineLayout;
+        shaderStageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    else
+    {
+        CHECK(false, "Ray tracing push constants are not implemented yet");
+    }
+
+    CHECK(pipelineLayout != VK_NULL_HANDLE, "Pipeline layout is not valid");
+    vkCmdPushConstants(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, pipelineLayout, shaderStageFlags, static_cast<uint32_t>(offset), static_cast<uint32_t>(size), data);
 }
 
 void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
@@ -2639,6 +2687,23 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
     return {this, handle};
 }
 
+EOS::Holder<EOS::ComputePipelineHandle> VulkanContext::CreateComputePipeline(const EOS::ComputePipelineDescription& description)
+{
+    CHECK(description.ComputeShader.Valid(), "The Compute Shader Handle is not valid!");
+    ComputePipelineState state{description};
+    state.LastVkDescriptorSetLayout = DescriptorSetLayout;
+
+    if (description.SpecInfo.Data && description.SpecInfo.DataSize)
+    {
+        //Copy spec info in to a local storage
+        state.SpecConstantDataStorage = malloc(description.SpecInfo.DataSize);
+        memcpy(state.SpecConstantDataStorage, description.SpecInfo.Data, description.SpecInfo.DataSize);
+        state.Description.SpecInfo.Data = state.SpecConstantDataStorage;
+    }
+
+    return {this, ComputePipelinePool.Create(std::move(state))};
+}
+
 EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription& bufferDescription)
 {
     CHECK(bufferDescription.Usage != EOS::BufferUsageFlags::None, "Invalid Buffer Usage");
@@ -2939,6 +3004,18 @@ void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
     Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
 
     RenderPipelinePool.Destroy(handle);
+}
+
+void VulkanContext::Destroy(EOS::ComputePipelineHandle handle)
+{
+    ComputePipelineState* cps = ComputePipelinePool.Get(handle);
+    CHECK(cps, "The specified handle is not valid!");
+    free(cps->SpecConstantDataStorage);
+
+    Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = cps->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
+    Defer(std::packaged_task<void()>([device = VulkanDevice, layout = cps->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
+
+    ComputePipelinePool.Destroy(handle);
 }
 
 void VulkanContext::Destroy(EOS::BufferHandle handle)
@@ -3770,6 +3847,82 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
 
   return BufferPool.Create(std::move(buffer));
 }
+
+VkPipeline VulkanContext::GetComputePipeline(EOS::ComputePipelineHandle handle)
+{
+    ComputePipelineState* cps = ComputePipelinePool.Get(handle);
+    CHECK(cps, "Could not fetch a pipelineState from the given handle");
+
+    UpdateDescriptorSet();
+
+    VkDescriptorSetLayout currentDescriptorSetLayout = DescriptorSetLayout;
+    if (cps->LastVkDescriptorSetLayout != currentDescriptorSetLayout)
+    {
+        if (cps->Pipeline != VK_NULL_HANDLE)
+        {
+            Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = cps->Pipeline](){vkDestroyPipeline(device, pipeline, nullptr); }));
+            Defer(std::packaged_task<void()>([device = VulkanDevice, layout = cps->PipelineLayout](){vkDestroyPipelineLayout(device, layout, nullptr); }));
+        }
+
+        cps->Pipeline = VK_NULL_HANDLE;
+        cps->PipelineLayout = VK_NULL_HANDLE;
+        cps->LastVkDescriptorSetLayout = currentDescriptorSetLayout;
+    }
+
+
+    if (cps->Pipeline == VK_NULL_HANDLE)
+    {
+        const VulkanShaderModuleState* sm = ShaderModulePool.Get(cps->Description.ComputeShader);
+        CHECK(sm, "The given Compute Shader is not valid");
+
+        //Handle Specialization Constants
+        VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants] = {};
+        const VkSpecializationInfo siComp = VkContext::GetPipelineShaderStageSpecializationInfo(cps->Description.SpecInfo, entries);
+
+        // create pipeline layout
+        {
+            const VkDescriptorSetLayout dsls[] = {DescriptorSetLayout, DescriptorSetLayout, DescriptorSetLayout, DescriptorSetLayout};
+            const VkPushConstantRange range
+            {
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                .offset = 0,
+                .size = EOS::GetSizeAligned(sm->PushConstantsSize, 16),
+            };
+
+            const VkPipelineLayoutCreateInfo ci
+            {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .setLayoutCount = static_cast<uint32_t>(ARRAY_COUNT(dsls)),
+                .pSetLayouts = dsls,
+                .pushConstantRangeCount = 1,
+                .pPushConstantRanges = &range,
+            };
+
+            VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &ci, nullptr, &cps->PipelineLayout));
+
+            char pipelineLayoutName[256] = {0};
+            if (cps->Description.DebugName) snprintf(pipelineLayoutName, sizeof(pipelineLayoutName) - 1, "Pipeline Layout: %s", cps->Description.DebugName);
+            VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(cps->PipelineLayout), pipelineLayoutName));
+        }
+
+        const VkComputePipelineCreateInfo ci
+        {
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .flags = 0,
+            .stage = VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, sm->ShaderModule, cps->Description.EntryPoint, &siComp),
+            .layout = cps->PipelineLayout,
+            .basePipelineHandle = VK_NULL_HANDLE,
+            .basePipelineIndex = -1,
+        };
+
+        //TODO: Add PipelineCache
+        VK_ASSERT(vkCreateComputePipelines(VulkanDevice, nullptr, 1, &ci, nullptr, &cps->Pipeline));
+        VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(cps->Pipeline), cps->Description.DebugName));
+  }
+
+  return cps->Pipeline;
+}
+
 
 void VulkanContext::InitializeSwapChain(const VulkanSwapChainCreationDescription &description)
 {

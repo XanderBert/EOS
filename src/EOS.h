@@ -45,7 +45,7 @@ namespace EOS
     using QueryPoolHandle           = Handle<struct QueryPool>;
     using AccelStructHandle         = Handle<struct AccelerationStructure>;
 
-    using ComputePipelineHolder     = Holder<ShaderModuleHandle>;
+    using ComputePipelineHolder     = Holder<ComputePipelineHandle>;
     using RenderPipelineHolder      = Holder<RenderPipelineHandle>;
     using RayTracingPipelineHolder  = Holder<RayTracingPipelineHandle>;
     using ShaderModuleHolder        = Holder<ShaderModuleHandle>;
@@ -268,6 +268,17 @@ namespace EOS
         const char* DebugName = "";
 
         uint32_t GetNumColorAttachments() const;
+    };
+
+    /**
+   * @brief Compute pipeline creation description.
+   */
+    struct ComputePipelineDescription final
+    {
+        ShaderModuleHandle ComputeShader;
+        SpecializationConstantDescription SpecInfo{};
+        const char* EntryPoint = "main";
+        const char* DebugName = "";
     };
 
     /**
@@ -593,6 +604,13 @@ namespace EOS
         virtual EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const RenderPipelineDescription& renderPipelineDescription) = 0;
 
         /**
+        * @brief Creates a ComputePipeline and returns a handle to it.
+        * @param computePipelineDescription The description about the pipeline we want to create.
+        * @return A Holder Handle to a Compute Pipeline.
+        */
+        virtual EOS::Holder<EOS::ComputePipelineHandle> CreateComputePipeline(const ComputePipelineDescription& computePipelineDescription) = 0;
+
+        /**
         * @brief Reloads changed shader files and rebuilds affected pipelines.
         * @return Number of pipelines rebuilt.
         */
@@ -639,6 +657,12 @@ namespace EOS
         * @param handle The handle to the Renderpipeline you want to destroy.
         */
         virtual void Destroy(RenderPipelineHandle handle) = 0;
+
+        /**
+        * @brief Handles the destruction of a ComputePipeline and what it holds.
+        * @param handle The handle to the ComputePipeline you want to destroy.
+        */
+        virtual void Destroy(ComputePipelineHandle handle) = 0;
 
         /**
         * @brief Handles the destruction of a BufferHandle and what it holds.
@@ -869,6 +893,23 @@ void cmdBindViewport(const EOS::ICommandBuffer& commandBuffer, const EOS::Viewpo
  * @param scissor The scissor rectangle to bind.
  */
 void cmdBindScissorRect(const EOS::ICommandBuffer& commandBuffer, const EOS::ScissorRect& scissor);
+
+
+/**
+ *
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param handle The handle to the ComputePipeline you want to bind.
+ */
+void cmdBindComputePipeline(EOS::ICommandBuffer& commandBuffer, EOS::ComputePipelineHandle handle);
+
+
+/**
+ *
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param threadGroupCount The 3D threadGroup Count to execute the compute pipeline.
+ * @param dependencies The Input/Output dependencies of this pipeline
+ */
+void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount, const EOS::Dependencies& dependencies = {});
 
 /**
  * @brief Add a command to the commandbuffer that we will now start rendering, defining what should be rendered and what dependencies we have.

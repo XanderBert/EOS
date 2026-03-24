@@ -10,6 +10,7 @@
 #include "vkTools.h"
 #include "pool.h"
 
+struct ComputePipelineState;
 struct VulkanRenderPipelineState;
 struct VulkanShaderModuleState;
 struct VulkanImage;
@@ -20,6 +21,7 @@ class ShaderReloader;
 static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 
 using VulkanRenderPipelinePool = EOS::Pool<EOS::RenderPipeline, VulkanRenderPipelineState>;
+using VulkanComputePipelinePool = EOS::Pool<EOS::ComputePipeline, ComputePipelineState>;
 using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleState>;
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
 using VulkanBufferPool = EOS::Pool<EOS::Buffer, VulkanBuffer>;
@@ -360,6 +362,17 @@ private:
     static inline uint32_t NumberOfCreatedPipelines = 0;
 };
 
+
+struct ComputePipelineState final
+{
+    EOS::ComputePipelineDescription Description;
+
+    VkDescriptorSetLayout LastVkDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    void* SpecConstantDataStorage = nullptr;
+};
+
 class VulkanStagingDevice final
 {
     struct MemoryRegionDescription
@@ -413,6 +426,7 @@ public:
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::ComputePipelineHandle> CreateComputePipeline(const EOS::ComputePipelineDescription& description) override;
     [[nodiscard]] uint32_t ReloadShaders() override;
     [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
@@ -421,6 +435,7 @@ public:
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderModuleHandle handle) override;
     void Destroy(EOS::RenderPipelineHandle handle) override;
+    void Destroy(EOS::ComputePipelineHandle handle) override;
     void Destroy(EOS::BufferHandle handle) override;
     void Destroy(EOS::SamplerHandle handle) override;
 
@@ -443,10 +458,13 @@ public:
     [[nodiscard]] VkDevice GetDevice() const;
     [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
+    VkPipeline GetComputePipeline(EOS::ComputePipelineHandle handle);
+
     void InitializeSwapChain(const VulkanSwapChainCreationDescription& description);
 
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
     VulkanRenderPipelinePool RenderPipelinePool{};
+    VulkanComputePipelinePool ComputePipelinePool;
     VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
     VulkanBufferPool BufferPool{};
