@@ -2595,6 +2595,30 @@ bool VulkanContext::RebuildRenderPipeline(EOS::RenderPipelineHandle handle)
     return BuildRenderPipeline(*renderPipelineState);
 }
 
+bool VulkanContext::RebuildComputePipeline(EOS::ComputePipelineHandle handle)
+{
+    ComputePipelineState* cps = ComputePipelinePool.Get(handle);
+    if (!cps) return false;
+
+    // Invalidate the current pipeline so it will be rebuilt on next access
+    if (cps->Pipeline != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = cps->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
+    }
+
+    if (cps->PipelineLayout != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, layout = cps->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
+    }
+
+    cps->Pipeline = VK_NULL_HANDLE;
+    cps->PipelineLayout = VK_NULL_HANDLE;
+    // Force rebuild by invalidating descriptor set layout
+    cps->LastVkDescriptorSetLayout = VK_NULL_HANDLE;
+
+    return true;
+}
+
 uint32_t VulkanContext::ReloadShaders()
 {
     if (!ShaderReloaderImpl)
@@ -2610,6 +2634,10 @@ uint32_t VulkanContext::ReloadShaders()
         [this](EOS::RenderPipelineHandle handle)
         {
             return RebuildRenderPipeline(handle);
+        },
+        [this](EOS::ComputePipelineHandle handle)
+        {
+            return RebuildComputePipeline(handle);
         });
 }
 
@@ -2745,7 +2773,14 @@ EOS::Holder<EOS::ComputePipelineHandle> VulkanContext::CreateComputePipeline(con
         state.Description.SpecInfo.Data = state.SpecConstantDataStorage;
     }
 
-    return {this, ComputePipelinePool.Create(std::move(state))};
+    const EOS::ComputePipelineHandle computeHandle = ComputePipelinePool.Create(std::move(state));
+    
+    if (ShaderReloaderImpl)
+    {
+        ShaderReloaderImpl->RegisterComputePipelineDependencies(computeHandle, description);
+    }
+
+    return {this, computeHandle};
 }
 
 EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription& bufferDescription)
@@ -3058,6 +3093,11 @@ void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
 
 void VulkanContext::Destroy(EOS::ComputePipelineHandle handle)
 {
+    if (ShaderReloaderImpl)
+    {
+        ShaderReloaderImpl->UnregisterComputePipelineDependencies(handle);
+    }
+
     ComputePipelineState* cps = ComputePipelinePool.Get(handle);
     CHECK(cps, "The specified handle is not valid!");
     free(cps->SpecConstantDataStorage);

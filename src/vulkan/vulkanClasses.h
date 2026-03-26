@@ -486,6 +486,7 @@ private:
     bool BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState);
     bool ReloadShaderModule(EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage);
     bool RebuildRenderPipeline(EOS::RenderPipelineHandle handle);
+    bool RebuildComputePipeline(EOS::ComputePipelineHandle handle);
 
 
 private:

@@ -13,6 +13,7 @@ class ShaderReloader final
 public:
     using ReloadShaderModuleCallback = std::function<bool(EOS::ShaderModuleHandle, const char*, EOS::ShaderStage)>;
     using RebuildRenderPipelineCallback = std::function<bool(EOS::RenderPipelineHandle)>;
+    using RebuildComputePipelineCallback = std::function<bool(EOS::ComputePipelineHandle)>;
 
     explicit ShaderReloader(std::filesystem::path shaderSourcePath);
 
@@ -22,7 +23,10 @@ public:
     void RegisterRenderPipelineDependencies(const EOS::RenderPipelineHandle& pipelineHandle, const EOS::RenderPipelineDescription& renderPipelineDescription);
     void UnregisterRenderPipelineDependencies(const EOS::RenderPipelineHandle& pipelineHandle);
 
-    [[nodiscard]] uint32_t ReloadChangedShaders(const ReloadShaderModuleCallback& reloadShaderModuleCallback, const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback);
+    void RegisterComputePipelineDependencies(const EOS::ComputePipelineHandle& pipelineHandle, const EOS::ComputePipelineDescription& computePipelineDescription);
+    void UnregisterComputePipelineDependencies(const EOS::ComputePipelineHandle& pipelineHandle);
+
+    [[nodiscard]] uint32_t ReloadChangedShaders(const ReloadShaderModuleCallback& reloadShaderModuleCallback, const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback, const RebuildComputePipelineCallback& rebuildComputePipelineCallback = nullptr);
 
 private:
 #if defined(EOS_SHADER_COMPILER)
@@ -46,10 +50,13 @@ private:
         std::filesystem::file_time_type LastWriteTime{};
         bool MissingTimestampWarningLogged = false;
         std::vector<EOS::RenderPipelineHandle> DependentRenderPipelines{};
+        std::vector<EOS::ComputePipelineHandle> DependentComputePipelines{};
     };
 
     static void AddUniqueRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle);
     static void RemoveRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle);
+    static void AddUniqueComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle);
+    static void RemoveComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle);
 
     std::map<EOS::ShaderModuleHandle, TrackedShader, ShaderHandleLess> ShaderMap{};
 #endif

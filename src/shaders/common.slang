@@ -12,6 +12,16 @@ public float4 TextureBindless2D(uint textureId, uint samplerId, float2 uv)
     return kTextures2D[NonUniformResourceIndex(textureId)].Sample(kSamplers[NonUniformResourceIndex(samplerId)], uv);
 }
 
+public float4 TextureBindless2DLod(uint textureId, uint samplerId, float2 uv, float lod)
+{
+    return kTextures2D[NonUniformResourceIndex(textureId)].SampleLevel(kSamplers[NonUniformResourceIndex(samplerId)], uv, lod);
+}
+
+public float4 TextureBindless2DLoad(uint textureId, int2 pixel)
+{
+    return kTextures2D[NonUniformResourceIndex(textureId)].Load(int3(pixel, 0));
+}
+
 public float4 TextureBindless2DArray(uint textureId, uint samplerId, float3 uvw)
 {
     return kTextures2DArray[NonUniformResourceIndex(textureId)].Sample(kSamplers[NonUniformResourceIndex(samplerId)], uvw);

@@ -70,12 +70,40 @@ void ShaderReloader::UnregisterRenderPipelineDependencies([[maybe_unused]] const
 #endif
 }
 
-uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShaderModuleCallback& reloadShaderModuleCallback,[[maybe_unused]] const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback)
+void ShaderReloader::RegisterComputePipelineDependencies([[maybe_unused]] const EOS::ComputePipelineHandle& pipelineHandle, [[maybe_unused]] const EOS::ComputePipelineDescription& computePipelineDescription)
+{
+#if defined(EOS_SHADER_COMPILER)
+    CHECK_RETURN(pipelineHandle.Valid(), "ComputePipeline is not valid!");
+
+    const EOS::ShaderModuleHandle computeShaderHandle = computePipelineDescription.ComputeShader;
+
+    if (!computeShaderHandle.Valid()) return;
+
+    TrackedShader& trackedShader = ShaderMap[computeShaderHandle];
+    AddUniqueComputePipelineHandle(trackedShader.DependentComputePipelines, pipelineHandle);
+#endif
+}
+
+void ShaderReloader::UnregisterComputePipelineDependencies([[maybe_unused]] const EOS::ComputePipelineHandle& pipelineHandle)
+{
+#if defined(EOS_SHADER_COMPILER)
+    CHECK_RETURN(pipelineHandle.Valid(), "ComputePipeline is not valid!");
+
+    for (auto& [shaderHandle, trackedShader] : ShaderMap)
+    {
+        static_cast<void>(shaderHandle);
+        RemoveComputePipelineHandle(trackedShader.DependentComputePipelines, pipelineHandle);
+    }
+#endif
+}
+
+uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShaderModuleCallback& reloadShaderModuleCallback,[[maybe_unused]] const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback, [[maybe_unused]] const RebuildComputePipelineCallback& rebuildComputePipelineCallback)
 {
 #if defined(EOS_SHADER_COMPILER)
     if (!reloadShaderModuleCallback || !rebuildRenderPipelineCallback) return 0;
 
     std::vector<EOS::RenderPipelineHandle> pipelinesToRebuild;
+    std::vector<EOS::ComputePipelineHandle> computePipelinesToRebuild;
     for (auto& [shaderHandle, trackedShader] : ShaderMap)
     {
         if (!shaderHandle.Valid() || trackedShader.FileName.empty())
@@ -117,23 +145,34 @@ uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShade
         {
             AddUniqueRenderPipelineHandle(pipelinesToRebuild, pipelineHandle);
         }
-    }
 
-    uint32_t numberOfRebuiltPipelines = 0;
-    for (const EOS::RenderPipelineHandle pipelineHandle : pipelinesToRebuild)
-    {
-        if (rebuildRenderPipelineCallback(pipelineHandle))
+        for (const EOS::ComputePipelineHandle computePipelineHandle : trackedShader.DependentComputePipelines)
         {
-            ++numberOfRebuiltPipelines;
+            AddUniqueComputePipelineHandle(computePipelinesToRebuild, computePipelineHandle);
         }
     }
 
-    if (numberOfRebuiltPipelines > 0)
+    uint32_t numberOfRebuiltGraphicsPipelines = 0;
+    for (const EOS::RenderPipelineHandle pipelineHandle : pipelinesToRebuild)
     {
-        EOS::Logger->info("Rebuilt {} render pipelines after shader reload", numberOfRebuiltPipelines);
+        if (rebuildRenderPipelineCallback(pipelineHandle)) ++numberOfRebuiltGraphicsPipelines;
     }
+    if (numberOfRebuiltGraphicsPipelines > 0) EOS::Logger->info("Rebuilt {} Graphics Pipelines after shader reload", numberOfRebuiltGraphicsPipelines);
 
-    return numberOfRebuiltPipelines;
+
+    uint32_t numberOfRebuiltComputePipelines = 0;
+    if (rebuildComputePipelineCallback)
+    {
+        for (const EOS::ComputePipelineHandle computePipelineHandle : computePipelinesToRebuild)
+        {
+            if (rebuildComputePipelineCallback(computePipelineHandle)) ++numberOfRebuiltComputePipelines;
+        }
+    }
+    if (numberOfRebuiltComputePipelines > 0) EOS::Logger->info("Rebuilt {} Compute Pipelines after shader reload", numberOfRebuiltComputePipelines);
+
+
+
+    return numberOfRebuiltGraphicsPipelines;
 #endif
     return 0;
 }
@@ -153,6 +192,34 @@ void ShaderReloader::AddUniqueRenderPipelineHandle(std::vector<EOS::RenderPipeli
 void ShaderReloader::RemoveRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle)
 {
     CHECK_RETURN(handle.Valid(), "The renderPipelineHandle is not valid!");
+    if (handles.empty()) return;
+
+    for (auto iterator = handles.begin(); iterator != handles.end();)
+    {
+        if (*iterator == handle)
+        {
+            iterator = handles.erase(iterator);
+            continue;
+        }
+
+        ++iterator;
+    }
+}
+
+void ShaderReloader::AddUniqueComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle)
+{
+    CHECK_RETURN(handle.Valid(), "The computePipelineHandle is not valid!");
+    for (const EOS::ComputePipelineHandle existingHandle : handles)
+    {
+        if (existingHandle == handle) return;
+    }
+
+    handles.push_back(handle);
+}
+
+void ShaderReloader::RemoveComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle)
+{
+    CHECK_RETURN(handle.Valid(), "The computePipelineHandle is not valid!");
     if (handles.empty()) return;
 
     for (auto iterator = handles.begin(); iterator != handles.end();)
