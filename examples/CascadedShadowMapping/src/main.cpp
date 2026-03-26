@@ -7,6 +7,12 @@
 #include "utils.h"
 #include "glm/gtc/type_ptr.hpp"
 
+//https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
+//https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
+//http://the-witness.net/news/2010/03/graphics-tech-shadow-maps-part-1/
+//https://therealmjp.github.io/posts/shadow-maps/
+//https://mynameismjp.wordpress.com/2013/09/10/shadow-maps/
+
 #define CASCADES 4
 #define SHADOW_SIZE 4096
 struct PerFrameData final
@@ -48,8 +54,6 @@ struct FramePointers final
 {
     uint64_t frameDataPtr;
     uint64_t drawDataPtr;
-    uint32_t cascadeID;
-    uint32_t _pad;
 };
 
 struct Cascade final
@@ -57,6 +61,113 @@ struct Cascade final
     float               splitDepth;
     glm::mat4           viewProjMatrix;
 };
+
+
+void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3& lightForward, std::array<Cascade, CASCADES>& cascades)
+{
+    //Calculate Cascades
+    float cascadeSplits[CASCADES];
+
+    const float nearClip = camera.GetNearPlane();
+    const float farClip = camera.GetFarPlane();
+    const float clipRange = farClip - nearClip;
+
+    const float minZ = nearClip;
+    const float maxZ = nearClip + clipRange;
+
+    const float range = maxZ - minZ;
+    const float ratio = maxZ / minZ;
+
+    //Calculate split distances based on article in GPU Gems 3
+    //Uses logarithmic and uniform split scheme
+    for (uint32_t i = 0; i < CASCADES; ++i)
+    {
+        constexpr float cascadeLambda = 0.25f;
+        float p = (i + 1) / static_cast<float>(CASCADES);
+        float log = minZ * std::pow(ratio, p);
+        float uniform = minZ + range * p;
+        float d = cascadeLambda * (log - uniform) + uniform;
+        cascadeSplits[i] = (d - nearClip) / clipRange;
+    }
+
+    float lastSplitDist = 0.0;
+    for (uint32_t i = 0; i < CASCADES; ++i)
+    {
+        float splitDist = cascadeSplits[i];
+
+        //Get NDC Coordinates
+        //Vulkan Depth is [0 - 1]
+        glm::vec3 frustumCorners[8] =
+        {
+            glm::vec3(-1.0f,  1.0f, 0.0f),
+            glm::vec3( 1.0f,  1.0f, 0.0f),
+            glm::vec3( 1.0f, -1.0f, 0.0f),
+            glm::vec3(-1.0f, -1.0f, 0.0f),
+            glm::vec3(-1.0f,  1.0f,  1.0f),
+            glm::vec3( 1.0f,  1.0f,  1.0f),
+            glm::vec3( 1.0f, -1.0f,  1.0f),
+            glm::vec3(-1.0f, -1.0f,  1.0f),
+        };
+
+        //Project frustum corners into world space
+        glm::mat4 invCam = glm::inverse(camera.GetViewProjectionMatrix(aspectRatio));
+        for (uint32_t j = 0; j < 8; ++j)
+        {
+            glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[j], 1.0f) ;
+            frustumCorners[j] = invCorner / invCorner.w;
+        }
+
+        for (uint32_t j = 0; j < 4; ++j)
+        {
+            glm::vec3 dist = frustumCorners[j + 4] - frustumCorners[j];
+            frustumCorners[j + 4] = frustumCorners[j] + (dist * splitDist);
+            frustumCorners[j] = frustumCorners[j] + (dist * lastSplitDist);
+        }
+
+        // Get frustum center
+        glm::vec3 frustumCenter = glm::vec3(0.0f);
+        for (uint32_t j = 0; j < 8; j++)
+        {
+            frustumCenter += frustumCorners[j];
+        }
+        frustumCenter /= 8.0f;
+
+        //Find the longest radius of the frustum
+        float radius = 0.0f;
+        for (uint32_t j = 0; j < 8; j++)
+        {
+            float distance = glm::length(frustumCorners[j] - frustumCenter);
+            radius = glm::max(radius, distance);
+        }
+        radius = std::ceil(radius * 16.0f) / 16.0f;
+
+        //Create light ortho based on the AABB for this cascade
+        glm::vec3 maxExtents = glm::vec3(radius);
+        glm::vec3 minExtents = -maxExtents;
+        glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightForward * -minExtents.z, frustumCenter, lightUp);
+        glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0f, maxExtents.z - minExtents.z);
+
+        //Texel Grid Stabilization
+        //Avoid light shimmering -> Create rounding matrix so we move in texel sized increments
+        constexpr float shadowMapResolution = 4096.0f;
+        const glm::mat4 shadowMatrix = lightOrthoMatrix * lightViewMatrix;
+        glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        shadowOrigin = shadowOrigin * (shadowMapResolution * 0.5f);
+        const glm::vec4 roundedOrigin = glm::round(shadowOrigin);
+        glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) * (2.0f / shadowMapResolution);
+        roundOffset.z = 0.0f;
+        roundOffset.w = 0.0f;
+        lightOrthoMatrix[3] += roundOffset;
+
+        // Store split distance and matrix in cascade
+        cascades[i].splitDepth = nearClip + splitDist * clipRange;
+        cascades[i].viewProjMatrix = lightOrthoMatrix * lightViewMatrix;
+
+        lastSplitDist = cascadeSplits[i];
+    }
+}
+
 
 int main()
 {
@@ -85,6 +196,7 @@ int main()
     EOS::ShaderModuleHolder shaderHandleVert = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Vertex);
     EOS::ShaderModuleHolder shaderHandleFrag = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Fragment);
     EOS::ShaderModuleHolder shaderHandleShadowVert = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Vertex);
+    EOS::ShaderModuleHolder shaderHandleShadowGeom = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Geometry);
     EOS::ShaderModuleHolder shaderHandleShadowFrag = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Fragment);
 
     constexpr EOS::RenderPass renderPass
@@ -95,7 +207,7 @@ int main()
 
     constexpr EOS::RenderPass shadowRenderPass
     {
-        .Depth{.LoadOpState = EOS::LoadOp::Clear}
+        .Depth{.LoadOpState = EOS::LoadOp::Clear, .Layer = 0, .LayerCount = CASCADES}
     };
 
     constexpr EOS::DepthState depthState
@@ -159,7 +271,6 @@ int main()
     std::vector<Vertex> vertices;
     vertices.reserve(scene.vertices.size());
     for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
-
 
     EOS::Holder<EOS::BufferHandle> vertexBuffer = App.Context->CreateBuffer(
     {
@@ -246,9 +357,11 @@ int main()
     {
         .VertexInput = vertexDescriptionShadow,
         .VertexShader = shaderHandleShadowVert,
+        .GeometryShader = shaderHandleShadowGeom,
         .FragmentShader = shaderHandleShadowFrag,
         .DepthFormat = App.Context->GetFormat(shadowDepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
+        .DepthClamping = true,
         .DebugName = "ShadowMap Render Pipeline",
     };
     EOS::Holder<EOS::RenderPipelineHandle> renderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
@@ -259,7 +372,6 @@ int main()
         .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
         .drawDataPtr = App.Context->GetGPUAddress(perDrawBuffer),
     };
-
 
     //Setup light
     glm::vec3 lightPos          = {0.0f, 100.0f, 20.0f};
@@ -288,114 +400,7 @@ int main()
         const glm::mat4 viewProjection = projection * view;
         const glm::mat4 mvp = viewProjection * m;
 
-        //Calculate Cascades
-        //https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
-        //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
-        //http://the-witness.net/news/2010/03/graphics-tech-shadow-maps-part-1/
-        //https://therealmjp.github.io/posts/shadow-maps/
-        //https://mynameismjp.wordpress.com/2013/09/10/shadow-maps/
-        float cascadeSplits[CASCADES];
-
-        const float nearClip = App.MainCamera.GetNearPlane();
-        const float farClip = App.MainCamera.GetFarPlane();
-        const float clipRange = farClip - nearClip;
-
-        const float minZ = nearClip;
-        const float maxZ = nearClip + clipRange;
-
-        const float range = maxZ - minZ;
-        const float ratio = maxZ / minZ;
-
-        //Calculate split distances based on article in GPU Gems 3
-        //Uses logarithmic and uniform split scheme
-        for (uint32_t i = 0; i < CASCADES; ++i)
-        {
-            constexpr float cascadeLambda = 0.25f;
-            float p = (i + 1) / static_cast<float>(CASCADES);
-            float log = minZ * std::pow(ratio, p);
-            float uniform = minZ + range * p;
-            float d = cascadeLambda * (log - uniform) + uniform;
-            cascadeSplits[i] = (d - nearClip) / clipRange;
-        }
-
-        float lastSplitDist = 0.0;
-        for (uint32_t i = 0; i < CASCADES; ++i)
-        {
-            float splitDist = cascadeSplits[i];
-
-            //Get NDC Coordinates
-            //Vulkan Depth is [0 - 1]
-            glm::vec3 frustumCorners[8] =
-            {
-                glm::vec3(-1.0f,  1.0f, 0.0f),
-                glm::vec3( 1.0f,  1.0f, 0.0f),
-                glm::vec3( 1.0f, -1.0f, 0.0f),
-                glm::vec3(-1.0f, -1.0f, 0.0f),
-                glm::vec3(-1.0f,  1.0f,  1.0f),
-                glm::vec3( 1.0f,  1.0f,  1.0f),
-                glm::vec3( 1.0f, -1.0f,  1.0f),
-                glm::vec3(-1.0f, -1.0f,  1.0f),
-            };
-
-            //Project frustum corners into world space
-            glm::mat4 invCam = glm::inverse(viewProjection);
-            for (uint32_t j = 0; j < 8; ++j)
-            {
-                glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[j], 1.0f) ;
-                frustumCorners[j] = invCorner / invCorner.w;
-            }
-
-            for (uint32_t j = 0; j < 4; ++j)
-            {
-                glm::vec3 dist = frustumCorners[j + 4] - frustumCorners[j];
-                frustumCorners[j + 4] = frustumCorners[j] + (dist * splitDist);
-                frustumCorners[j] = frustumCorners[j] + (dist * lastSplitDist);
-            }
-
-            // Get frustum center
-            glm::vec3 frustumCenter = glm::vec3(0.0f);
-            for (uint32_t j = 0; j < 8; j++)
-            {
-                frustumCenter += frustumCorners[j];
-            }
-            frustumCenter /= 8.0f;
-
-            //Find the longest radius of the frustum
-            float radius = 0.0f;
-            for (uint32_t j = 0; j < 8; j++)
-            {
-                float distance = glm::length(frustumCorners[j] - frustumCenter);
-                radius = glm::max(radius, distance);
-            }
-            radius = std::ceil(radius * 16.0f) / 16.0f;
-
-            //Create light ortho based on the AABB for this cascade
-            glm::vec3 maxExtents = glm::vec3(radius);
-            glm::vec3 minExtents = -maxExtents;
-            glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
-            glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightForward * -minExtents.z, frustumCenter, lightUp);
-            glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0f, maxExtents.z - minExtents.z);
-
-            //Texel Grid Stabilization
-            //Avoid light shimmering -> Create rounding matrix so we move in texel sized increments
-            constexpr float shadowMapResolution = 4096.0f;
-            const glm::mat4 shadowMatrix = lightOrthoMatrix * lightViewMatrix;
-            glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            shadowOrigin = shadowOrigin * (shadowMapResolution * 0.5f);
-            const glm::vec4 roundedOrigin = glm::round(shadowOrigin);
-            glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) * (2.0f / shadowMapResolution);
-            roundOffset.z = 0.0f;
-            roundOffset.w = 0.0f;
-            lightOrthoMatrix[3] += roundOffset;
-
-
-
-            // Store split distance and matrix in cascade
-            cascades[i].splitDepth = App.MainCamera.GetNearPlane() + splitDist * clipRange;
-            cascades[i].viewProjMatrix = lightOrthoMatrix * lightViewMatrix;
-
-            lastSplitDist = cascadeSplits[i];
-        }
+        CalculateCascades(App.MainCamera, aspectRatio, lightForward, cascades);
 
         PerFrameData perFrameData
         {
@@ -425,32 +430,23 @@ int main()
             });
 
         cmdPushMarker(cmdBuffer, "Shadow Pass", 0xff0000ff);
-        for (uint32_t cascadeLayer = 0; cascadeLayer < CASCADES; ++cascadeLayer)
+        EOS::Framebuffer framebufferShadow
         {
-            EOS::RenderPass shadowRenderPassForCascade = shadowRenderPass;
-            shadowRenderPassForCascade.Depth.Layer = static_cast<uint8_t>(cascadeLayer);
+            .DepthStencil = { .Texture = shadowDepthTexture },
+            .DebugName = "ShadowMap framebuffer"
+        };
 
-            EOS::Framebuffer framebufferShadow
-            {
-                .DepthStencil = { .Texture = shadowDepthTexture },
-                .DebugName = "ShadowMap framebuffer"
-            };
-
-            cmdBeginRendering(cmdBuffer, shadowRenderPassForCascade, framebufferShadow);
-            {
-                cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-                cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
-                cmdBindRenderPipeline(cmdBuffer, renderPipelineShadowHandle);
-                framePointers.cascadeID = cascadeLayer;
-                cmdPushConstants(cmdBuffer, framePointers);
-                cmdSetDepthState(cmdBuffer, depthState);
-                cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
-            }
-            cmdEndRendering(cmdBuffer);
+        cmdBeginRendering(cmdBuffer, shadowRenderPass, framebufferShadow);
+        {
+            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
+            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(cmdBuffer, renderPipelineShadowHandle);
+            cmdPushConstants(cmdBuffer, framePointers);
+            cmdSetDepthState(cmdBuffer, depthState);
+            cmdDrawIndexedIndirect(cmdBuffer, indirectBuffer, 0, scene.meshes.size());
         }
+        cmdEndRendering(cmdBuffer);
         cmdPopMarker(cmdBuffer);
-
-        framePointers.cascadeID = 0;
 
         cmdPipelineBarrier(cmdBuffer, {},{{ shadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },});
 

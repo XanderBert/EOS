@@ -513,6 +513,7 @@ namespace VkContext
             .sampleRateShading              = VK_TRUE,
             .multiDrawIndirect              = VK_TRUE,
             .drawIndirectFirstInstance      = VK_TRUE,
+            .depthClamp                     = VK_TRUE,
             .depthBiasClamp                 = VK_TRUE,
             .fillModeNonSolid               = startOfDeviceFeaturespNextChain.features.fillModeNonSolid,
             .samplerAnisotropy              = VK_TRUE,
@@ -557,6 +558,7 @@ namespace VkContext
             .bufferDeviceAddress                            = VK_TRUE,
             .vulkanMemoryModel                              = vkFeatures12.vulkanMemoryModel,
             .vulkanMemoryModelDeviceScope                   = vkFeatures12.vulkanMemoryModelDeviceScope,
+            .shaderOutputLayer                              = VK_TRUE,
         };
 
         VkPhysicalDeviceVulkan13Features deviceFeatures13 =

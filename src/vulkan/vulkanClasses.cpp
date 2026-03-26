@@ -173,6 +173,14 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
     uint32_t mipLevel = 0;
     uint32_t frameBufferWidth = 0;
     uint32_t frameBufferHeight = 0;
+    uint32_t renderingLayerCount = 1;
+    auto updateRenderingLayerCount = [&renderingLayerCount](uint32_t attachmentLayerCount)
+    {
+        CHECK(attachmentLayerCount > 0, "Attachment LayerCount must be greater than 0");
+        CHECK(renderingLayerCount == 1 || attachmentLayerCount == renderingLayerCount, "All render pass attachments must use the same LayerCount when layered rendering is enabled");
+        renderingLayerCount = std::max(renderingLayerCount, attachmentLayerCount);
+    };
+
     VkRenderingAttachmentInfo colorAttachments[EOS_MAX_COLOR_ATTACHMENTS];
     for (uint32_t i{}; i != numberOfPassColorAttachments; ++i)
     {
@@ -210,7 +218,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
         {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
-            .imageView = colorTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descColor.Level, descColor.Layer),
+            .imageView = colorTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descColor.Level, descColor.Layer, descColor.LayerCount),
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .resolveMode = (samples > 1) ? VK_RESOLVE_MODE_AVERAGE_BIT : VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
@@ -219,6 +227,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             .storeOp = VkContext::StoreOpToVkAttachmentStoreOp(descColor.StoreOpState),
             .clearValue = {.color = {.float32 = {descColor.ClearColor[0], descColor.ClearColor[1], descColor.ClearColor[2], descColor.ClearColor[3]}}},
         };
+        updateRenderingLayerCount(descColor.LayerCount);
 
         // handle MSAA
         if (descColor.StoreOpState == EOS::StoreOp::MsaaResolve)
@@ -226,7 +235,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             CHECK(samples > 1, "A MSAA Resolve should have more then 1 sample");
             CHECK(!attachment.ResolveTexture.Empty(), "Framebuffer attachment should contain a resolve texture");
             VulkanImage& colorResolveTexture = *texturePool.Get(attachment.ResolveTexture);
-            colorAttachments[i].resolveImageView = colorResolveTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descColor.Level, descColor.Layer);
+            colorAttachments[i].resolveImageView = colorResolveTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descColor.Level, descColor.Layer, descColor.LayerCount);
             colorAttachments[i].resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
     }
@@ -244,7 +253,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
         {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
-            .imageView = depthTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer),
+            .imageView = depthTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer, descDepth.LayerCount),
             .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
@@ -253,6 +262,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             .storeOp = VkContext::StoreOpToVkAttachmentStoreOp(descDepth.StoreOpState),
             .clearValue = {.depthStencil = {.depth = descDepth.ClearDepth, .stencil = descDepth.ClearStencil}},
         };
+        updateRenderingLayerCount(descDepth.LayerCount);
 
         // handle depth MSAA
         if (descDepth.StoreOpState == EOS::StoreOp::MsaaResolve)
@@ -262,7 +272,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             CHECK(!attachment.ResolveTexture.Empty(), "Framebuffer depth attachment should contain a resolve texture");
 
             VulkanImage& depthResolveTexture = *texturePool.Get(attachment.ResolveTexture);
-            depthAttachment.resolveImageView = depthResolveTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer);
+            depthAttachment.resolveImageView = depthResolveTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer, descDepth.LayerCount);
             depthAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             depthAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
         }
@@ -296,7 +306,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
         .pNext = nullptr,
         .flags = 0,
         .renderArea = {VkOffset2D{0u, 0u}, VkExtent2D{width, height}},
-        .layerCount = 1,
+        .layerCount = renderingLayerCount,
         .viewMask = 0,
         .colorAttachmentCount = numberOfPassColorAttachments,
         .pColorAttachments = colorAttachments,
@@ -733,27 +743,54 @@ void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkIma
     VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_IMAGE_VIEW, reinterpret_cast<uint64_t>(imageView), debugName));
 }
 
-VkImageView VulkanImage::GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer)
+VkImageView VulkanImage::GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer, uint32_t layerCount)
 {
     CHECK(level < EOS_MAX_MIP_LEVELS, "Specified level is bigger then the maximum supported mip levels");
-    CHECK(layer < ARRAY_COUNT(ImageViewForFramebuffer[0]), "You can have no more then the set layers");
+    CHECK(layerCount > 0, "Layer count for framebuffer image view must be greater than 0");
+    CHECK(layer + layerCount <= Layers, "Requested framebuffer view layer range is out of bounds");
+    CHECK(layer < ARRAY_COUNT(ImageViewForFramebuffer[0]) || layerCount > 1, "You can have no more then the set layers");
 
-    if (level >= EOS_MAX_MIP_LEVELS || layer >= ARRAY_COUNT(ImageViewForFramebuffer[0]))
+    if (level >= EOS_MAX_MIP_LEVELS || layer + layerCount > Layers)
     {
         return VK_NULL_HANDLE;
     }
 
-    if (ImageViewForFramebuffer[level][layer] != VK_NULL_HANDLE)
+    if (layerCount == 1)
     {
+        CHECK(layer < ARRAY_COUNT(ImageViewForFramebuffer[0]), "You can have no more then the set layers");
+        if (layer >= ARRAY_COUNT(ImageViewForFramebuffer[0]))
+        {
+            return VK_NULL_HANDLE;
+        }
+
+        if (ImageViewForFramebuffer[level][layer] != VK_NULL_HANDLE)
+        {
+            return ImageViewForFramebuffer[level][layer];
+        }
+
+        if (!DebugName){ DebugName = "ImageView"; }
+        const std::string imageViewDebugName = fmt::format("{} - Framebuffer Image View [{}][{}]", DebugName , level, layer);
+        CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, imageViewDebugName.c_str(), {}, level, layer);
+
         return ImageViewForFramebuffer[level][layer];
     }
 
+    // Layered rendering currently uses one cached "all layers" view per mip level.
+    CHECK(layer == 0 && layerCount == Layers, "Layered framebuffer views currently require base layer 0 and full texture layer count");
+    if (layer != 0 || layerCount != Layers)
+    {
+        return VK_NULL_HANDLE;
+    }
+
+    if (ImageViewForFramebufferAllLayers[level] != VK_NULL_HANDLE)
+    {
+        return ImageViewForFramebufferAllLayers[level];
+    }
 
     if (!DebugName){ DebugName = "ImageView"; }
-    const std::string imageViewDebugName = fmt::format("{} - Framebuffer Image View [{}][{}]", DebugName , level, layer);
-    CreateImageView(ImageViewForFramebuffer[level][layer] , vulkanDevice, Image, ImageType, ImageFormat, 1, 1, imageViewDebugName.c_str(), {}, level, layer);
-
-    return ImageViewForFramebuffer[level][layer];
+    const std::string layeredImageViewDebugName = fmt::format("{} - Framebuffer Layered Image View [{}]", DebugName, level);
+    CreateImageView(ImageViewForFramebufferAllLayers[level], vulkanDevice, Image, ImageType, ImageFormat, 1, layerCount, layeredImageViewDebugName.c_str(), {}, level, layer);
+    return ImageViewForFramebufferAllLayers[level];
 }
 
 void VulkanImage::GenerateMipmaps(VkCommandBuffer commandBuffer) const
@@ -1689,6 +1726,12 @@ VulkanPipelineBuilder & VulkanPipelineBuilder::PatchControlPoints(uint32_t numPo
     return *this;
 }
 
+VulkanPipelineBuilder& VulkanPipelineBuilder::DepthClamping(bool enabled)
+{
+    RasterizationState.depthClampEnable = enabled ? VK_TRUE : VK_FALSE;
+    return *this;
+}
+
 VkResult VulkanPipelineBuilder::Build(VkDevice device, VkPipelineCache pipelineCache, VkPipelineLayout pipelineLayout, VkPipeline*outPipeline, const char *debugName) noexcept
 {
     const VkPipelineDynamicStateCreateInfo dynamicState
@@ -2525,6 +2568,7 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
       .DepthAttachmentFormat(VkContext::FormatTovkFormat(description.DepthFormat))
       .StencilAttachmentFormat(VkContext::FormatTovkFormat(description.StencilFormat))
       .PatchControlPoints(description.PatchControlPoints)
+      .DepthClamping(renderPipelineState.Description.DepthClamping)
       .Build(VulkanDevice, nullptr, newPipelineLayout, &newPipeline, description.DebugName));
 
     if (renderPipelineState.Pipeline != VK_NULL_HANDLE)
@@ -2941,6 +2985,12 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
             {
                 Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = v]() { vkDestroyImageView(device, imageView, nullptr); }));
             }
+        }
+
+        VkImageView layeredView = image->ImageViewForFramebufferAllLayers[i];
+        if (layeredView != VK_NULL_HANDLE)
+        {
+            Defer(std::packaged_task<void()>([device = VulkanDevice, imageView = layeredView]() { vkDestroyImageView(device, imageView, nullptr); }));
         }
     }
 

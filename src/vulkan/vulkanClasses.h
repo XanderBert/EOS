@@ -110,7 +110,7 @@ struct VulkanImage final
     [[nodiscard]] static VkImageViewType ToImageViewType(EOS::ImageType imageType);
     static void CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, EOS::ImageType imageType, const VkFormat& imageFormat, uint32_t levels, uint32_t layers ,const char* debugName, const EOS::ComponentMapping& componentMapping = {}, uint32_t baseMipLevel = 0, uint32_t baseArrayLayer = 0);
 
-    [[nodiscard]] VkImageView GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer);
+    [[nodiscard]] VkImageView GetImageViewForFramebuffer(VkDevice vulkanDevice, uint32_t level, uint32_t layer, uint32_t layerCount = 1);
     [[nodiscard]] VkImageAspectFlags GetImageAspectFlags() const;
     void GenerateMipmaps(VkCommandBuffer commandBuffer) const;
 
@@ -135,7 +135,8 @@ public:
     // precached image views
     VkImageView ImageView                                   = VK_NULL_HANDLE;       // default view with all mip-levels
     VkImageView ImageViewStorage                            = VK_NULL_HANDLE;       // default view with identity swizzle (all mip-levels)
-    VkImageView ImageViewForFramebuffer[EOS_MAX_MIP_LEVELS][6]  = {};                   // max 6 faces for cubemap rendering
+    VkImageView ImageViewForFramebuffer[EOS_MAX_MIP_LEVELS][6]  = {};               // single-layer views (max 6 faces for cubemap rendering)
+    VkImageView ImageViewForFramebufferAllLayers[EOS_MAX_MIP_LEVELS] = {};          // layered view over all array layers
 };
 
 struct VulkanSwapChainCreationDescription final
@@ -335,6 +336,8 @@ public:
     VulkanPipelineBuilder& StencilAttachmentFormat(VkFormat format);
 
     VulkanPipelineBuilder& PatchControlPoints(uint32_t numPoints);
+    VulkanPipelineBuilder& DepthClamping(bool enabled);
+
 
     [[nodiscard]] VkResult Build(VkDevice device, VkPipelineCache pipelineCache, VkPipelineLayout pipelineLayout, VkPipeline* outPipeline, const char* debugName = nullptr) noexcept;
 

@@ -26,6 +26,4 @@ public struct PushConstants
 {
     public uint64_t PerFramePointer;
     public uint64_t PerDrawPointer;
-    public uint     cascadeID;
-    public uint     _pad;
 };

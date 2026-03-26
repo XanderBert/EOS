@@ -265,6 +265,8 @@ namespace EOS
         uint32_t PatchControlPoints = 0;
         float MinSampleShading = 0.0f;
 
+        bool DepthClamping = false;
+
         const char* DebugName = "";
 
         uint32_t GetNumColorAttachments() const;
@@ -294,6 +296,7 @@ namespace EOS
             LoadOp LoadOpState = LoadOp::Invalid;
             StoreOp StoreOpState = StoreOp::Store;
             uint8_t Layer = 0;
+            uint8_t LayerCount = 1;
             uint8_t Level = 0;
             float ClearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
             float ClearDepth = 1.0f;
