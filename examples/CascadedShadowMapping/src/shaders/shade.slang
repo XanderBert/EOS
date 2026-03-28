@@ -37,6 +37,23 @@ uint SelectCascade(float viewDepth, float4 cascadeSplits)
     return 3;
 }
 
+// Runtime debug modes from PerFrameData.shadowDebugMode:
+// 0 = normal shading
+// 1 = cascade index color
+// 2 = shadow UV visualization
+// 3 = receiver shadow depth (proj z)
+// 4 = sampled shadow-map depth
+// 5 = depth delta heatmap (receiver - map)
+// 6 = validity mask (inside light frustum)
+
+float3 CascadeDebugColor(uint cascadeIndex)
+{
+    if (cascadeIndex == 0) return float3(1.0, 0.0, 0.0);
+    if (cascadeIndex == 1) return float3(0.0, 1.0, 0.0);
+    if (cascadeIndex == 2) return float3(0.0, 0.0, 1.0);
+    return float3(1.0, 0.0, 1.0);
+}
+
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
@@ -90,29 +107,56 @@ float4 fragmentMain(VSOutput input)
     float4 viewPos = mul(float4(input.WorldPos, 1.0), frameData.View);
     float viewDepth = -viewPos.z;
     uint cascadeIndex = SelectCascade(viewDepth, frameData.cascadeSplits);
+    int debugMode = frameData.shadowDebugMode;
 
-    if(frameData.showCascades)
+    if (frameData.shadowForceCascade >= 0 && frameData.shadowForceCascade < 4)
     {
-        float4 color4 = float4(color, 1);
-        if(cascadeIndex == 0) return color4 * float4(1, 0 ,0 ,1);
-        if(cascadeIndex == 1) return color4 * float4(0, 1 ,0 ,1);
-        if(cascadeIndex == 2) return color4 * float4(0, 0 ,1 ,1);
-        if(cascadeIndex == 3) return color4 * float4(1, 0 ,1 ,1);
+        cascadeIndex = (uint)frameData.shadowForceCascade;
+    }
+
+    if (frameData.showCascades != 0 || debugMode == 1)
+    {
+        return float4(color * CascadeDebugColor(cascadeIndex), 1.0);
     }
 
     float4 shadowCoord = mul(float4(input.WorldPos, 1.0), frameData.cascadeViewProj[cascadeIndex]);
     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
-    //If the coord is outside the light frustum don't shadow it.
-    if(projCoords.z <= 0.0 || projCoords.z >= 1.0) return float4(color, 1.0);
-    
-    // Only remap XY -> Vulkan depth already stays in [0, 1].
-    projCoords.xy = projCoords.xy * 0.5 + 0.5;
-
+    float2 shadowUV = projCoords.xy * 0.5 + 0.5;
     // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
-    projCoords.y = 1.0 - projCoords.y;
+    shadowUV.y = 1.0 - shadowUV.y;
 
-    if (projCoords.x <= 0.0 || projCoords.x >= 1.0 || projCoords.y <= 0.0 || projCoords.y >= 1.0)
+    bool inDepthRange = projCoords.z > 0.0 && projCoords.z < 1.0;
+    bool inUVRange = shadowUV.x > 0.0 && shadowUV.x < 1.0 && shadowUV.y > 0.0 && shadowUV.y < 1.0;
+    bool isValidShadowCoord = inDepthRange && inUVRange;
+
+    float sampledDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(shadowUV, cascadeIndex)).r;
+    float depthDelta = projCoords.z - sampledDepth;
+
+    if (debugMode == 2)
+    {
+        return float4(saturate(shadowUV), saturate(projCoords.z), 1.0);
+    }
+    if (debugMode == 3)
+    {
+        return float4(projCoords.zzz, 1.0);
+    }
+    if (debugMode == 4)
+    {
+        return float4(sampledDepth.xxx, 1.0);
+    }
+    if (debugMode == 5)
+    {
+        float d = saturate(depthDelta * 80.0 + 0.5);
+        return float4(d, 1.0 - d, 0.0, 1.0);
+    }
+    if (debugMode == 6)
+    {
+        return isValidShadowCoord ? float4(0.0, 1.0, 0.0, 1.0) : float4(1.0, 0.0, 0.0, 1.0);
+    }
+
+    //If the coord is outside the light frustum don't shadow it.
+    if (!isValidShadowCoord)
     {
         return float4(color, 1.0);
     }
@@ -131,7 +175,7 @@ float4 fragmentMain(VSOutput input)
         for(int y = -1; y <= 1; ++y)
         {
             float2 offset = float2(x,y) * texelSize;
-            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(projCoords.xy + offset, cascadeIndex)).r;
+            float pcfDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(shadowUV + offset, cascadeIndex)).r;
             shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
         }
     }

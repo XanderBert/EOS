@@ -55,6 +55,27 @@ struct VertexInformation final
 
 struct Scene final
 {
+    Scene() = default;
+    Scene(const Scene&) = delete;
+    Scene& operator=(const Scene&) = delete;
+    Scene(Scene&&) noexcept = default;
+    Scene& operator=(Scene&&) noexcept = default;
+
+    ~Scene()
+    {
+        Cleanup();
+    }
+
+    void Cleanup()
+    {
+        for (auto& texture : textureHandles)
+        {
+            if (texture.albedo.Valid()) texture.albedo.Reset();
+            if (texture.metallicRoughness.Valid()) texture.metallicRoughness.Reset();
+            if (texture.normal.Valid()) texture.normal.Reset();
+        }
+    }
+
     std::vector<VertexInformation> vertices;
     std::vector<uint32_t>          indices;
     std::vector<MeshEntry>         meshes;
