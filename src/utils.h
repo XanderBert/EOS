@@ -38,6 +38,8 @@ namespace EOS
      * @return
      */
     [[nodiscard]] uint32_t GetSizeAligned(uint32_t value, uint32_t alignment);
+
+    [[nodiscard]] uint64_t GetAddressAligned(uint64_t address, uint64_t alignment);
     
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription);
 

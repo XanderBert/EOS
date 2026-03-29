@@ -495,6 +495,42 @@ namespace EOS
         const char* debugName = "";
     };
 
+    struct AccelerationStructBuildRange final
+    {
+        uint32_t PrimitiveCount = 0;
+        uint32_t PrimitiveOffset = 0;
+        uint32_t FirstVertex = 0;
+        uint32_t TransformOffset = 0;
+    };
+
+    struct AccelStructInstance final
+    {
+        float Transform[3][4];
+        uint32_t InstanceCustomIndex : 24 = 0;
+        uint32_t Mask : 8 = 0xff;
+        uint32_t InstanceShaderBindingTableRecordOffset : 24 = 0;
+        uint32_t Flags : 8 = TriangleFacingCullDisable;
+        uint64_t AccelerationStructureReference = 0;
+    };
+
+    struct AccelerationStructDescription final
+    {
+        AccelerationStructureType Type                  = InvalidAccelerationStructure;
+        AccelerationStructureGeometryType GeometryType  = Triangles;
+        uint8_t GeometryFlags                           = Opaque;
+
+        VertexFormat VertexFormatStructure              = EOS::VertexFormat::Invalid;
+        BufferHandle VertexBuffer;
+        uint32_t VertexStride                           = 0; // zero means the size of `vertexFormat`
+        uint32_t NumberOfVertices                       = 0;
+        BufferHandle IndexBuffer;
+        BufferHandle TransformBuffer;
+        BufferHandle InstancesBuffer;
+        AccelerationStructBuildRange BuildRange        = {};
+        uint8_t BuildFlags                              = PreferFastTrace;
+        const char* DebugName                           = "";
+    };
+
     /**
      * @brief Indirect indexed draw command layout.
      */
@@ -643,6 +679,14 @@ namespace EOS
         virtual EOS::Holder<EOS::SamplerHandle> CreateSampler(const EOS::SamplerDescription& samplerDescription) = 0;
 
         /**
+         * @brief Creates a Acceleration Structure.
+         * @param desc description of the Acceleration Structure
+         * @return A holder to the Acceleration Structure
+         */
+        virtual EOS::Holder<AccelStructHandle> CreateAccelerationStructure(const AccelerationStructDescription& desc) = 0;
+
+
+        /**
         * @brief Handles the destruction of a TextureHandle and what it holds.
         * @param handle The handle to the texture you want to destroy.
         */
@@ -680,6 +724,12 @@ namespace EOS
         virtual void Destroy(EOS::SamplerHandle handle) = 0;
 
         /**
+        * @brief Handles the destruction of a AccelStructHandle and what it holds.
+        * @param handle The handle to the AccelStructure you want to destroy
+        */
+        virtual void Destroy(EOS::AccelStructHandle handle) = 0;
+
+        /**
         * @brief Handles the uploading of buffers to the GPU.
         * @param handle The handle of the buffer we want to upload to.
         * @param data The data we want to upload.
@@ -701,6 +751,13 @@ namespace EOS
          * @return GPU virtual address for the requested buffer location.
          */
         virtual uint64_t GetGPUAddress(BufferHandle handle, size_t offset = 0) const = 0;
+
+        /**
+         * @brief Gets the GPU virtual address of an acceleration structure.
+         * @param handle The handle of the acceleration structure.
+         * @return GPU virtual address for the acceleration structure.
+         */
+        virtual uint64_t GetGPUAddress(AccelStructHandle handle) const = 0;
 
         /**
          * @brief Gets the mapped CPU pointer for a host-visible buffer.

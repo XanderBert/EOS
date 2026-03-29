@@ -15,6 +15,7 @@ struct VulkanRenderPipelineState;
 struct VulkanShaderModuleState;
 struct VulkanImage;
 struct VulkanBuffer;
+struct VulkanAccelerationStructure;
 class VulkanContext;
 class ShaderReloader;
 
@@ -26,6 +27,7 @@ using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleSt
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
 using VulkanBufferPool = EOS::Pool<EOS::Buffer, VulkanBuffer>;
 using VulkanSamplerPool = EOS::Pool<EOS::Sampler, VkSampler>;
+using VulkanAccelerationStructurePool = EOS::Pool<EOS::AccelerationStructure, VulkanAccelerationStructure>;
 
 //TODO: Split up in hot and cold data
 struct VulkanBuffer final
@@ -137,6 +139,17 @@ public:
     VkImageView ImageViewStorage                            = VK_NULL_HANDLE;       // default view with identity swizzle (all mip-levels)
     VkImageView ImageViewForFramebuffer[EOS_MAX_MIP_LEVELS][6]  = {};               // single-layer views (max 6 faces for cubemap rendering)
     VkImageView ImageViewForFramebufferAllLayers[EOS_MAX_MIP_LEVELS] = {};          // layered view over all array layers
+};
+
+//TODO: split up in hot and cold data for the pool
+struct VulkanAccelerationStructure final
+{
+    bool IsTLAS = false;
+    VkAccelerationStructureBuildRangeInfoKHR BuildRangeInfo = {};
+    VkAccelerationStructureKHR Handle = VK_NULL_HANDLE;
+    uint64_t DeviceAddress = 0;
+    EOS::BufferHolder Buffer;
+    EOS::BufferHolder ScratchBuffer; // Only for TLAS
 };
 
 struct VulkanSwapChainCreationDescription final
@@ -434,6 +447,7 @@ public:
     [[nodiscard]] EOS::Holder<EOS::BufferHandle> CreateBuffer(const EOS::BufferDescription& bufferDescription) override;
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
     [[nodiscard]] EOS::Holder<EOS::SamplerHandle> CreateSampler(const EOS::SamplerDescription& samplerDescription) override;
+    [[nodiscard]] EOS::Holder<EOS::AccelStructHandle> CreateAccelerationStructure(const EOS::AccelerationStructDescription& desc) override;
 
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderModuleHandle handle) override;
@@ -441,9 +455,11 @@ public:
     void Destroy(EOS::ComputePipelineHandle handle) override;
     void Destroy(EOS::BufferHandle handle) override;
     void Destroy(EOS::SamplerHandle handle) override;
+    void Destroy(EOS::AccelStructHandle handle) override;
 
     void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
     [[nodiscard]] uint64_t GetGPUAddress(EOS::BufferHandle handle, size_t offset = 0) const override;
+    [[nodiscard]] uint64_t GetGPUAddress(EOS::AccelStructHandle handle) const override;
     [[nodiscard]] uint8_t* GetMappedPtr(EOS::BufferHandle handle) const override;
     void FlushMappedMemory(EOS::BufferHandle handle, size_t size, size_t offset = 0) override;
 
@@ -458,36 +474,66 @@ public:
     void GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
     void BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const;
     void UpdateDescriptorSet();
+    [[nodiscard]] VkDescriptorSetLayout GetActiveDescriptorSetLayout() const;
     [[nodiscard]] VkDevice GetDevice() const;
     [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
+    bool RebuildRenderPipeline(EOS::RenderPipelineHandle handle);
     VkPipeline GetComputePipeline(EOS::ComputePipelineHandle handle);
 
     void InitializeSwapChain(const VulkanSwapChainCreationDescription& description);
 
+    [[nodiscard]] static bool SupportsRaytracingPipeline() { return HasRaytracingPipeline; }
+    [[nodiscard]] static bool SupportsGeometryShader() { return HasGeometryShader; }
+    [[nodiscard]] static bool SupportsTessellationShader() { return HasTessellationShader; }
+
     std::unique_ptr<CommandPool> VulkanCommandPool = nullptr;
+
     VulkanRenderPipelinePool RenderPipelinePool{};
     VulkanComputePipelinePool ComputePipelinePool;
     VulkanShaderModulePool ShaderModulePool{};
     VulkanTexturePool TexturePool{};
     VulkanBufferPool BufferPool{};
     VulkanSamplerPool SamplerPool{};
+    VulkanAccelerationStructurePool AccelerationStructurePool{};
+
     VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
 
 private:
+    struct DescriptorSetState final
+    {
+        VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
+        VkDescriptorPool Pool = VK_NULL_HANDLE;
+        VkDescriptorSet Set = VK_NULL_HANDLE;
+        EOS::SubmitHandle SubmitHandle{};
+
+        uint32_t MaxTextures = 0;
+        uint32_t MaxSamplers = 0;
+        uint32_t MaxAccelStructs = 0;
+        bool HasAccelerationStructureBinding = false;
+    };
+
     [[nodiscard]] bool HasSwapChain() const noexcept;
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window, void* display);
     void CreateAllocator();
+    void StorePhysicalDeviceProperties();
     void GenerateMipmaps(const EOS::TextureHandle& handle);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
     bool BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState);
     bool ReloadShaderModule(EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage);
-    bool RebuildRenderPipeline(EOS::RenderPipelineHandle handle);
     bool RebuildComputePipeline(EOS::ComputePipelineHandle handle);
 
+    EOS::Handle<EOS::AccelerationStructure> CreateBLAS(const EOS::AccelerationStructDescription& desc);
+    EOS::Handle<EOS::AccelerationStructure> CreateTLAS(const EOS::AccelerationStructDescription& desc);
+
+    void GetBLASBuildInfo(const EOS::AccelerationStructDescription& desc, VkAccelerationStructureGeometryKHR& outGeom, VkAccelerationStructureBuildSizesInfoKHR& outSizeInfo);
+    void GetTLASBuildInfo(const EOS::AccelerationStructDescription& desc, VkAccelerationStructureGeometryKHR& outGeom, VkAccelerationStructureBuildSizesInfoKHR& outSizeInfo);
+    void GrowDescriptorPool(DescriptorSetState& descriptorSetState, uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
+    [[nodiscard]] DescriptorSetState& GetActiveDescriptorSetState();
+    [[nodiscard]] const DescriptorSetState& GetActiveDescriptorSetState() const;
 
 private:
     VkInstance VulkanInstance                       = VK_NULL_HANDLE;
@@ -500,19 +546,19 @@ private:
     std::unique_ptr<VulkanStagingDevice> VulkanStagingBuffer = nullptr;
     mutable std::deque<DeferredTask> DeferredTasks;
         
-    VkDescriptorSetLayout DescriptorSetLayout       = VK_NULL_HANDLE;
-    VkDescriptorPool DescriptorPool                 = VK_NULL_HANDLE;
-    VkDescriptorSet DescriptorSet                   = VK_NULL_HANDLE;
+    std::vector<DescriptorSetState> DescriptorSets{};
+    size_t LastUpdatedDescriptorSet = 0;
     bool ShouldDescriptorSetBeUpdated               = false;
     EOS::Holder<EOS::TextureHandle> DummyTexture    = {};
 
-    uint32_t CurrentMaxTextures{};
-    uint32_t CurrentMaxSamplers{};
-    uint32_t CurrentMaxAccelStructs{};
-
-    bool HasAccelerationStructure                   = false; //TODO: Just check size of the pipeline pool for raytracing
-    bool HasRaytracingPipeline                      = false; //TODO: Just check size of the pipeline pool for raytracing
+    inline static bool HasAccelerationStructure                   = false;
+    inline static bool HasRaytracingPipeline                      = false;
+    inline static bool HasGeometryShader                          = false;
+    inline static bool HasTessellationShader                      = false;
     bool UseStagingDevice                           = false;
+    uint32_t MaxPushConstantsSize                   = 0;
+    uint32_t MaxTessellationPatchSize               = 0;
+    uint32_t MinAccelerationStructureScratchOffsetAlignment = 1;
 
 
     CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.

@@ -89,7 +89,6 @@ namespace VkDebug
     }
 }
 
-//TODO: Move most of them back to VulkanContext -> private
 namespace VkContext
 {
     struct TextureFormatProperties
@@ -190,7 +189,8 @@ namespace VkContext
     void GetDeviceExtensions(std::vector<VkExtensionProperties>& deviceExtensions,const VkPhysicalDevice& vulkanPhysicalDevice, const char* forValidationLayer = nullptr);
     void GetDeviceExtensions(const VkPhysicalDevice& vulkanPhysicalDevice, std::vector<VkExtensionProperties>& allDeviceExtensions);
     void GetPhysicalDeviceProperties(VkPhysicalDeviceProperties2& physicalDeviceProperties, VkPhysicalDeviceDriverProperties& physicalDeviceDriverProperties, VkPhysicalDevice physicalDevice, uint32_t SDKMinorVersion);
-    void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues);
+    void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues,
+                            bool* outHasAccelerationStructure = nullptr, bool* outHasRaytracingPipeline = nullptr);
 
     [[nodiscard]] EOS::Format vkFormatToFormat(VkFormat format);
     [[nodiscard]] VkFormat FormatTovkFormat(EOS::Format format);
@@ -227,6 +227,8 @@ namespace VkContext
     [[nodiscard]] VkMemoryPropertyFlags StorageTypeToVkMemoryPropertyFlags(EOS::StorageType storage);
 
     [[nodiscard]] VkIndexType IndexFormatToVkIndexType(EOS::IndexFormat indexFormat);
+
+    [[nodiscard]] VkBuildAccelerationStructureFlagsKHR BuildFlagsToVkBuildAccelerationStructureFlags(uint8_t buildFlags);
 }
 
 namespace VkSynchronization

@@ -369,6 +369,19 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipeli
     const VulkanRenderPipelineState* rps = renderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
     CHECK(rps, "The resolved RenderPipeline State is not valid");
 
+    const VkDescriptorSetLayout currentDescriptorSetLayout = vulkanCommandBuffer->VkContext->GetActiveDescriptorSetLayout();
+
+    if (rps->Pipeline == VK_NULL_HANDLE ||
+        rps->PipelineLayout == VK_NULL_HANDLE ||
+        rps->LastDescriptorSetLayout == VK_NULL_HANDLE ||
+        rps->LastDescriptorSetLayout != currentDescriptorSetLayout)
+    {
+        EOS::Logger->warn("Rebuilding Render Pipeline because of invalid pipeline state or incompatible descriptor set layout");
+        CHECK(vulkanCommandBuffer->VkContext->RebuildRenderPipeline(vulkanCommandBuffer->CurrentGraphicsPipeline), "Failed to rebuild render pipeline for descriptor set compatibility");
+        rps = renderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
+        CHECK(rps, "The resolved RenderPipeline State is not valid after rebuild");
+    }
+
     const bool hasDepthAttachmentPipeline = rps->Description.DepthFormat != EOS::Format::Invalid;
     const bool hasDepthAttachmentPass = !vulkanCommandBuffer->VulkanFrameBuffer.DepthStencil.Texture.Empty();
     CHECK(hasDepthAttachmentPipeline == hasDepthAttachmentPass, "Make sure your render pass and render pipeline both have matching depth attachments");
@@ -402,7 +415,7 @@ void cmdBindIndexBuffer(const EOS::ICommandBuffer &commandBuffer, const EOS::Buf
 
     const VulkanBuffer* vkbuffer = vkContext->BufferPool.Get(indexBuffer);
     CHECK(vkbuffer->VkUsageFlags & VK_BUFFER_USAGE_INDEX_BUFFER_BIT, "The buffer usage flags do not indicate this is a Index buffer.");
-    
+
     vkCmdBindIndexBuffer(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, vkbuffer->VulkanVkBuffer, indexBufferOffset, VkContext::IndexFormatToVkIndexType(indexFormat));
 }
 
@@ -2123,9 +2136,11 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
     std::vector<EOS::HardwareDeviceDescription> hardwareDevices;
     GetHardwareDevice(contextDescription.PreferredHardwareType, hardwareDevices);
     VkContext::SelectHardwareDevice(hardwareDevices, VulkanPhysicalDevice);
+    StorePhysicalDeviceProperties();
 
     //Create our Vulkan Device
-    VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues);
+    VkContext::CreateVulkanDevice(VulkanDevice, VulkanPhysicalDevice, VulkanDeviceQueues,
+                                  &HasAccelerationStructure, &HasRaytracingPipeline);
 
     //Create SwapChain
     VulkanSwapChainCreationDescription desc
@@ -2147,7 +2162,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     VulkanStagingBuffer = std::make_unique<VulkanStagingDevice>(this);
 
-    GrowDescriptorPool(512, 16, 1);
+    DescriptorSets.emplace_back();
+    LastUpdatedDescriptorSet = 0;
+    GrowDescriptorPool(512, 16, 128); //TODO: Query max from beginning and assign that
 
     // Create Dummy Texture
     constexpr uint32_t pixel = 0xFF000000;
@@ -2210,13 +2227,57 @@ VulkanContext::~VulkanContext()
     VulkanCommandPool.reset(nullptr);
 
     vkDestroySurfaceKHR(VulkanInstance, VulkanSurface, nullptr);
-    vkDestroyDescriptorSetLayout(VulkanDevice, DescriptorSetLayout, nullptr);
-    vkDestroyDescriptorPool(VulkanDevice, DescriptorPool, nullptr);
+
+    for (DescriptorSetState& descriptorSetState : DescriptorSets)
+    {
+        if (descriptorSetState.Layout != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorSetLayout(VulkanDevice, descriptorSetState.Layout, nullptr);
+        }
+
+        if (descriptorSetState.Pool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(VulkanDevice, descriptorSetState.Pool, nullptr);
+        }
+    }
+
+    DescriptorSets.clear();
+
     vmaDestroyAllocator(vmaAllocator);
 
     vkDestroyDevice(VulkanDevice, nullptr);
     vkDestroyDebugUtilsMessengerEXT(VulkanInstance, VulkanDebugMessenger, nullptr);
     vkDestroyInstance(VulkanInstance, nullptr);
+}
+
+void VulkanContext::StorePhysicalDeviceProperties()
+{
+    VkPhysicalDeviceFeatures2 deviceFeatures
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = nullptr,
+    };
+
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
+        .pNext = nullptr,
+    };
+
+    VkPhysicalDeviceProperties2 physicalDeviceProperties
+    {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &accelerationStructureProperties,
+    };
+
+    vkGetPhysicalDeviceFeatures2(VulkanPhysicalDevice, &deviceFeatures);
+    vkGetPhysicalDeviceProperties2(VulkanPhysicalDevice, &physicalDeviceProperties);
+
+    MaxPushConstantsSize = physicalDeviceProperties.properties.limits.maxPushConstantsSize;
+    MaxTessellationPatchSize = physicalDeviceProperties.properties.limits.maxTessellationPatchSize;
+    MinAccelerationStructureScratchOffsetAlignment = std::max(1u, accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+    HasGeometryShader = deviceFeatures.features.geometryShader == VK_TRUE;
+    HasTessellationShader = deviceFeatures.features.tessellationShader == VK_TRUE;
 }
 
 EOS::ICommandBuffer& VulkanContext::AcquireCommandBuffer()
@@ -2262,6 +2323,19 @@ EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS:
     ProcessDeferredTasks();
 
     const EOS::SubmitHandle handle = vkCmdBuffer->LastSubmitHandle;
+
+    // Assign the submit handle to all most-recent descriptor sets that were updated but not yet tagged.
+    const size_t numDescriptorSets = DescriptorSets.size();
+    for (size_t count = 0; count != numDescriptorSets; ++count)
+    {
+        const size_t index = (LastUpdatedDescriptorSet + numDescriptorSets - 1 - count) % numDescriptorSets;
+        if (!DescriptorSets[index].SubmitHandle.Empty())
+        {
+            break;
+        }
+
+        DescriptorSets[index].SubmitHandle = handle;
+    }
 
     //Reset the Command Buffer
     CurrentCommandBuffer = {};
@@ -2501,11 +2575,12 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
 
     #undef UPDATE_PUSH_CONSTANT_SIZE
 
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(VulkanPhysicalDevice, &props);
-    CHECK(pushConstantsSize <= props.limits.maxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, props.limits.maxPushConstantsSize);
+    CHECK(pushConstantsSize <= MaxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, MaxPushConstantsSize);
 
-    const VkDescriptorSetLayout dsls[] = {DescriptorSetLayout};
+    const VkDescriptorSetLayout descriptorSetLayout = GetActiveDescriptorSetLayout();
+    CHECK(descriptorSetLayout != VK_NULL_HANDLE, "No active descriptor set layout was found while building render pipeline");
+
+    const VkDescriptorSetLayout dsls[] = {descriptorSetLayout};
     const VkPushConstantRange range
     {
         .stageFlags = shaderStageFlags,
@@ -2582,7 +2657,7 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
     }
 
     renderPipelineState.ShaderStageFlags = shaderStageFlags;
-    renderPipelineState.LastDescriptorSetLayout = DescriptorSetLayout;
+    renderPipelineState.LastDescriptorSetLayout = descriptorSetLayout;
     renderPipelineState.PipelineLayout = newPipelineLayout;
     renderPipelineState.Pipeline = newPipeline;
     return true;
@@ -2617,6 +2692,261 @@ bool VulkanContext::RebuildComputePipeline(EOS::ComputePipelineHandle handle)
     cps->LastVkDescriptorSetLayout = VK_NULL_HANDLE;
 
     return true;
+}
+
+EOS::Handle<EOS::AccelerationStructure> VulkanContext::CreateBLAS(const EOS::AccelerationStructDescription& desc)
+{
+    VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
+    VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+    GetBLASBuildInfo(desc, accelerationStructureGeometry, accelerationStructureBuildSizesInfo);
+
+    char debugNameBuffer[256] = {0};
+    if (desc.DebugName) snprintf(debugNameBuffer, sizeof(debugNameBuffer) - 1, "Buffer: %s", desc.DebugName);
+
+    VulkanAccelerationStructure accelStruct
+    {
+        .BuildRangeInfo
+        {
+              .primitiveCount = desc.BuildRange.PrimitiveCount,
+              .primitiveOffset = desc.BuildRange.PrimitiveOffset,
+              .firstVertex = desc.BuildRange.FirstVertex,
+              .transformOffset = desc.BuildRange.TransformOffset,
+        },
+
+        .Buffer = CreateBuffer({
+            .Usage = EOS::AccelStructStorage,
+            .Storage = EOS::StorageType::Device,
+            .Size = accelerationStructureBuildSizesInfo.accelerationStructureSize,
+            .DebugName = debugNameBuffer,
+        })
+    };
+
+    const VkAccelerationStructureCreateInfoKHR ciAccelerationStructure
+    {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = BufferPool.Get(accelStruct.Buffer)->VulkanVkBuffer,
+        .size = accelerationStructureBuildSizesInfo.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+    };
+
+    VK_ASSERT(vkCreateAccelerationStructureKHR(VulkanDevice, &ciAccelerationStructure, nullptr, &accelStruct.Handle));
+
+    EOS::BufferHolder scratchBuffer = CreateBuffer(
+    {
+        .Usage = EOS::BufferUsageFlags::StorageFlag,
+        .Storage = EOS::StorageType::Device,
+        .Size = accelerationStructureBuildSizesInfo.buildScratchSize,
+        .DebugName = "Buffer: BLAS scratch",
+    });
+
+    const VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+        .flags = VkContext::BuildFlagsToVkBuildAccelerationStructureFlags(desc.BuildFlags),
+        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .dstAccelerationStructure = accelStruct.Handle,
+        .geometryCount = 1,
+        .pGeometries = &accelerationStructureGeometry,
+        .scratchData = {.deviceAddress = EOS::GetAddressAligned(GetGPUAddress(scratchBuffer), MinAccelerationStructureScratchOffsetAlignment)},
+    };
+
+    const VkAccelerationStructureBuildRangeInfoKHR* accelerationBuildStructureRangeInfos[] = {&accelStruct.BuildRangeInfo};
+
+    EOS::ICommandBuffer& cmdIBuffer = AcquireCommandBuffer();
+    CommandBuffer* cmdBuffer = static_cast<CommandBuffer*>(&cmdIBuffer);
+    vkCmdBuildAccelerationStructuresKHR(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, 1, &accelerationBuildGeometryInfo, accelerationBuildStructureRangeInfos);
+
+
+    VulkanCommandPool->Wait(Submit(cmdIBuffer, {}));
+
+    const VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .accelerationStructure = accelStruct.Handle,
+    };
+
+    accelStruct.DeviceAddress = vkGetAccelerationStructureDeviceAddressKHR(VulkanDevice, &accelerationDeviceAddressInfo);
+
+    return AccelerationStructurePool.Create(std::move(accelStruct));
+}
+
+EOS::Handle<EOS::AccelerationStructure> VulkanContext::CreateTLAS(const EOS::AccelerationStructDescription& desc)
+{
+    VkAccelerationStructureGeometryKHR accelerationStructureGeometry{};
+    VkAccelerationStructureBuildSizesInfoKHR accelerationStructureBuildSizesInfo{};
+    GetTLASBuildInfo(desc, accelerationStructureGeometry, accelerationStructureBuildSizesInfo);
+
+    char debugNameBuffer[256] = {0};
+    if (desc.DebugName) snprintf(debugNameBuffer, sizeof(debugNameBuffer) - 1, "Buffer: %s", desc.DebugName);
+
+    VulkanAccelerationStructure accelStruct
+    {
+        .IsTLAS = true,
+        .BuildRangeInfo {
+            .primitiveCount = desc.BuildRange.PrimitiveCount,
+            .primitiveOffset = desc.BuildRange.PrimitiveOffset,
+            .firstVertex = desc.BuildRange.FirstVertex,
+            .transformOffset = desc.BuildRange.TransformOffset,
+        },
+
+        .Buffer = CreateBuffer(
+        {
+            .Usage = EOS::AccelStructStorage,
+            .Storage = EOS::StorageType::Device,
+            .Size = accelerationStructureBuildSizesInfo.accelerationStructureSize,
+            .DebugName = debugNameBuffer,
+        }),
+    };
+
+    const VkAccelerationStructureCreateInfoKHR ciAccelerationStructure{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = BufferPool.Get(accelStruct.Buffer)->VulkanVkBuffer,
+        .size = accelerationStructureBuildSizesInfo.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+    };
+
+    vkCreateAccelerationStructureKHR(VulkanDevice, &ciAccelerationStructure, nullptr, &accelStruct.Handle);
+
+    EOS::BufferHolder scratchBuffer = CreateBuffer(
+    {
+          .Usage = EOS::BufferUsageFlags::StorageFlag,
+          .Storage = EOS::StorageType::Device,
+          .Size = accelerationStructureBuildSizesInfo.buildScratchSize,
+          .DebugName = "Buffer: TLAS scratch",
+    });
+
+    const VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        .flags = VkContext::BuildFlagsToVkBuildAccelerationStructureFlags(desc.BuildFlags),
+        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .dstAccelerationStructure = accelStruct.Handle,
+        .geometryCount = 1,
+        .pGeometries = &accelerationStructureGeometry,
+        .scratchData = {.deviceAddress = EOS::GetAddressAligned(GetGPUAddress(scratchBuffer), MinAccelerationStructureScratchOffsetAlignment)},
+    };
+
+    // Store scratch buffer for future updates
+    if (desc.BuildFlags & EOS::AllowUpdate) accelStruct.ScratchBuffer = std::move(scratchBuffer);
+
+    const VkAccelerationStructureBuildRangeInfoKHR* accelerationBuildStructureRangeInfos[] = {&accelStruct.BuildRangeInfo};
+
+
+    EOS::ICommandBuffer& cmdIBuffer = AcquireCommandBuffer();
+    CommandBuffer* cmdBuffer = static_cast<CommandBuffer*>(&cmdIBuffer);
+    vkCmdBuildAccelerationStructuresKHR(cmdBuffer->CommandBufferImpl->VulkanCommandBuffer, 1, &accelerationBuildGeometryInfo, accelerationBuildStructureRangeInfos);
+
+    VulkanCommandPool->Wait(Submit(cmdIBuffer, {}));
+
+
+    const VkAccelerationStructureDeviceAddressInfoKHR accelerationDeviceAddressInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+        .accelerationStructure = accelStruct.Handle,
+    };
+
+    accelStruct.DeviceAddress = vkGetAccelerationStructureDeviceAddressKHR(VulkanDevice, &accelerationDeviceAddressInfo);
+
+    return AccelerationStructurePool.Create(std::move(accelStruct));
+}
+
+void VulkanContext::GetBLASBuildInfo(const EOS::AccelerationStructDescription& desc, VkAccelerationStructureGeometryKHR& outGeom, VkAccelerationStructureBuildSizesInfoKHR& outSizeInfo)
+{
+    CHECK(desc.Type == EOS::BLAS, "The acceleration structure type is not BLAS");
+    CHECK(desc.GeometryType == EOS::Triangles, "The Geometry type is not triangles");
+    CHECK(desc.NumberOfVertices, "There must be at least 1 vertex");
+    CHECK(desc.IndexBuffer.Valid(), "There must be a valid IndexBuffer");
+    CHECK(desc.VertexBuffer.Valid(), "There must be a valid VertexBuffer");
+    CHECK(desc.TransformBuffer.Valid(), "There must be a valid TransformBuffer");
+    CHECK(desc.BuildRange.PrimitiveCount, "There must be at least 1 primitive");
+
+    CHECK(BufferPool.Get(desc.IndexBuffer)->VkUsageFlags & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, "The Indexbuffer must have Acceleration support");
+    CHECK(BufferPool.Get(desc.VertexBuffer)->VkUsageFlags & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, "The VertexBuffer must have Acceleration support");
+    CHECK(BufferPool.Get(desc.TransformBuffer)->VkUsageFlags & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, "The TransformBuffer must have Acceleration support");
+
+    VkGeometryFlagsKHR geometryFlags = 0;
+
+    if (desc.GeometryFlags & EOS::Opaque) geometryFlags |= VK_GEOMETRY_OPAQUE_BIT_KHR;
+    if (desc.GeometryFlags & EOS::NoDuplicateAnyHit) geometryFlags |= VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+
+    outGeom = VkAccelerationStructureGeometryKHR
+    {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+        .geometry{
+            .triangles{
+                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                .vertexFormat = VkContext::VertexFormatToVkFormat(desc.VertexFormatStructure),
+                .vertexData = {.deviceAddress = GetGPUAddress(desc.VertexBuffer)},
+                .vertexStride = desc.VertexStride ? desc.VertexStride : EOS::GetVertexFormatSize(desc.VertexFormatStructure),
+                .maxVertex = desc.NumberOfVertices - 1,
+                .indexType = VK_INDEX_TYPE_UINT32,
+                .indexData = {.deviceAddress = GetGPUAddress(desc.IndexBuffer)},
+                .transformData = {.deviceAddress = GetGPUAddress(desc.TransformBuffer)},
+            },
+        },
+        .flags = geometryFlags,
+    };
+
+    const VkAccelerationStructureBuildGeometryInfoKHR accelerationBuildGeometryInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .geometryCount = 1,
+        .pGeometries = &outGeom,
+    };
+
+    outSizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    vkGetAccelerationStructureBuildSizesKHR(VulkanDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &accelerationBuildGeometryInfo, &desc.BuildRange.PrimitiveCount, &outSizeInfo);
+    const uint32_t alignment = MinAccelerationStructureScratchOffsetAlignment;
+
+    outSizeInfo.accelerationStructureSize += alignment;
+    outSizeInfo.updateScratchSize += alignment;
+    outSizeInfo.buildScratchSize += alignment;
+}
+
+void VulkanContext::GetTLASBuildInfo(const EOS::AccelerationStructDescription& desc, VkAccelerationStructureGeometryKHR& outGeom, VkAccelerationStructureBuildSizesInfoKHR& outSizeInfo)
+{
+    CHECK(desc.Type == EOS::TLAS, "The acceleration structure type is not BLAS");
+    CHECK(desc.GeometryType == EOS::Instances, "The Geometry type is not Instances");
+    CHECK(desc.NumberOfVertices == 0, "There must be no vertices");
+    CHECK(desc.InstancesBuffer.Valid(), "There must be a valid InstancesBuffer");
+    CHECK(desc.BuildRange.PrimitiveCount, "There must be at least 1 primitive");
+    CHECK(BufferPool.Get(desc.InstancesBuffer)->VkUsageFlags & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, "The InstancesBuffer must have Acceleration support");
+
+    VkGeometryFlagsKHR geometryFlags = 0;
+    if (desc.GeometryFlags & EOS::Opaque) geometryFlags |= VK_GEOMETRY_OPAQUE_BIT_KHR;
+    if (desc.GeometryFlags & EOS::NoDuplicateAnyHit) geometryFlags |= VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+
+
+    outGeom = VkAccelerationStructureGeometryKHR
+    {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry{
+            .instances{
+                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+                .arrayOfPointers = VK_FALSE,
+                .data = {.deviceAddress = GetGPUAddress(desc.InstancesBuffer)},
+            },
+        },
+        .flags = geometryFlags,
+    };
+
+    const VkAccelerationStructureBuildGeometryInfoKHR accelerationStructureBuildGeometryInfo{
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+        .flags = VkContext::BuildFlagsToVkBuildAccelerationStructureFlags(desc.BuildFlags),
+        .geometryCount = 1,
+        .pGeometries = &outGeom,
+    };
+
+    outSizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
+    vkGetAccelerationStructureBuildSizesKHR(VulkanDevice, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &accelerationStructureBuildGeometryInfo, &desc.BuildRange.PrimitiveCount, &outSizeInfo);
+    const uint32_t alignment = MinAccelerationStructureScratchOffsetAlignment;
+    outSizeInfo.accelerationStructureSize += alignment;
+    outSizeInfo.updateScratchSize += alignment;
+    outSizeInfo.buildScratchSize += alignment;
 }
 
 uint32_t VulkanContext::ReloadShaders()
@@ -2659,16 +2989,8 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
 
         if (!isTesselationOkay){return {}; }
 
-        //Device Properties
-        VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
-        VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
-        uint32_t SDKApiVersion{};
-        vkEnumerateInstanceVersion(&SDKApiVersion);
-        const uint32_t SDKMinor = VK_API_VERSION_MINOR(SDKApiVersion);
-        VkContext::GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice, SDKMinor);
-
-        const bool areControlPointsOkay = renderPipelineDescription.PatchControlPoints > 0 && renderPipelineDescription.PatchControlPoints < vkPhysicalDeviceProperties2.properties.limits.maxTessellationPatchSize;
-        CHECK(areControlPointsOkay, "You can have no more tesselation control points then: {} or less then: 1", vkPhysicalDeviceProperties2.properties.limits.maxTessellationPatchSize);
+        const bool areControlPointsOkay = renderPipelineDescription.PatchControlPoints > 0 && renderPipelineDescription.PatchControlPoints < MaxTessellationPatchSize;
+        CHECK(areControlPointsOkay, "You can have no more tesselation control points then: {} or less then: 1", MaxTessellationPatchSize);
         if (!areControlPointsOkay){ return {}; }
     }
 
@@ -2763,7 +3085,7 @@ EOS::Holder<EOS::ComputePipelineHandle> VulkanContext::CreateComputePipeline(con
 {
     CHECK(description.ComputeShader.Valid(), "The Compute Shader Handle is not valid!");
     ComputePipelineState state{description};
-    state.LastVkDescriptorSetLayout = DescriptorSetLayout;
+    state.LastVkDescriptorSetLayout = GetActiveDescriptorSetLayout();
 
     if (description.SpecInfo.Data && description.SpecInfo.DataSize)
     {
@@ -2774,7 +3096,7 @@ EOS::Holder<EOS::ComputePipelineHandle> VulkanContext::CreateComputePipeline(con
     }
 
     const EOS::ComputePipelineHandle computeHandle = ComputePipelinePool.Create(std::move(state));
-    
+
     if (ShaderReloaderImpl)
     {
         ShaderReloaderImpl->RegisterComputePipelineDependencies(computeHandle, description);
@@ -2995,6 +3317,26 @@ EOS::Holder<EOS::SamplerHandle> VulkanContext::CreateSampler(const EOS::SamplerD
     return {this, handle};
 }
 
+EOS::Holder<EOS::AccelStructHandle> VulkanContext::CreateAccelerationStructure(const EOS::AccelerationStructDescription& desc)
+{
+    EOS::AccelStructHandle handle;
+    switch (desc.Type)
+    {
+    case EOS::BLAS:
+        handle = CreateBLAS(desc);
+        break;
+    case EOS::TLAS:
+        handle = CreateTLAS(desc);
+        break;
+    default:
+        CHECK(false, "Please select a proper Acceleration structure type");
+        return{};
+    }
+
+    ShouldDescriptorSetBeUpdated = true;
+    return {this, handle};
+}
+
 void VulkanContext::Destroy(EOS::TextureHandle handle)
 {
     VulkanImage* image = TexturePool.Get(handle);
@@ -3136,6 +3478,13 @@ void VulkanContext::Destroy(EOS::SamplerHandle handle)
     Defer(std::packaged_task<void()>([device = VulkanDevice, sampler = sampler]() { vkDestroySampler(device, sampler, nullptr); }));
 }
 
+void VulkanContext::Destroy(EOS::AccelStructHandle handle)
+{
+    VulkanAccelerationStructure* accelerationStructure = AccelerationStructurePool.Get(handle);
+    Defer(std::packaged_task<void()>([device = VulkanDevice, accelStruct = accelerationStructure->Handle](){vkDestroyAccelerationStructureKHR(device, accelStruct, nullptr); }));
+    AccelerationStructurePool.Destroy(handle);
+}
+
 void VulkanContext::Upload(EOS::BufferHandle handle, const void *data, size_t size, size_t offset)
 {
     CHECK(data, "The data you want to upload should be valid");
@@ -3151,6 +3500,14 @@ uint64_t VulkanContext::GetGPUAddress(EOS::BufferHandle handle, size_t offset) c
     CHECK(buf && buf->VulkanDeviceAddress, "The buffer or the Device Address is not valid");
 
     return buf ? static_cast<uint64_t>(buf->VulkanDeviceAddress) + offset : 0u;
+}
+
+uint64_t VulkanContext::GetGPUAddress(EOS::AccelStructHandle handle) const
+{
+    const VulkanAccelerationStructure* accelStruct = AccelerationStructurePool.Get(handle);
+    CHECK(accelStruct && accelStruct->DeviceAddress, "The acceleration structure or DeviceAddress is not valid");
+
+    return accelStruct ? accelStruct->DeviceAddress : 0u;
 }
 
 uint8_t* VulkanContext::GetMappedPtr(EOS::BufferHandle handle) const
@@ -3241,34 +3598,54 @@ void VulkanContext::Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle h
     DeferredTasks.emplace_back(std::move(task), handle);
 }
 
-void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs)
+VulkanContext::DescriptorSetState& VulkanContext::GetActiveDescriptorSetState()
 {
-    //TODO: Check for our limits in vkPhysicalDeviceVulkan12Properties
-    //Device Properties
-    //VkPhysicalDeviceProperties2 vkPhysicalDeviceProperties2;
-    //VkPhysicalDeviceDriverProperties vkPhysicalDeviceDriverProperties;
-    //uint32_t SDKApiVersion{};
-    //vkEnumerateInstanceVersion(&SDKApiVersion);
-    //const uint32_t SDKMinor = VK_API_VERSION_MINOR(SDKApiVersion);
-    //VkContext::GetPhysicalDeviceProperties(vkPhysicalDeviceProperties2, vkPhysicalDeviceDriverProperties, VulkanPhysicalDevice, SDKMinor);
+    CHECK(!DescriptorSets.empty(), "Descriptor set list must contain at least one item");
+    CHECK(LastUpdatedDescriptorSet < DescriptorSets.size(), "Active descriptor set index is out of bounds");
+    return DescriptorSets[LastUpdatedDescriptorSet];
+}
+
+const VulkanContext::DescriptorSetState& VulkanContext::GetActiveDescriptorSetState() const
+{
+    CHECK(!DescriptorSets.empty(), "Descriptor set list must contain at least one item");
+    CHECK(LastUpdatedDescriptorSet < DescriptorSets.size(), "Active descriptor set index is out of bounds");
+    return DescriptorSets[LastUpdatedDescriptorSet];
+}
+
+VkDescriptorSetLayout VulkanContext::GetActiveDescriptorSetLayout() const
+{
+    return GetActiveDescriptorSetState().Layout;
+}
+
+void VulkanContext::GrowDescriptorPool(DescriptorSetState& descriptorSetState, uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs)
+{
+    //TODO: Store the max values in teh context with when we call teh Store function 
 
     //CHECK(maxTextures <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSampledImages, "Max Textures exceeded, Current:{}, Max:{}", maxTextures, vkPhysicalDeviceVulkan12Properties_.maxDescriptorSetUpdateAfterBindSampledImages);
     //CHECK(maxSamplers <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSamplers, "Max Samplers exceeded, Current:{}, Max:{}", maxSamplers);
-    if (CurrentMaxAccelStructs == maxAccelStructs && CurrentMaxTextures == maxTextures && CurrentMaxSamplers == maxSamplers) return;
-    EOS::Logger->warn("\nGrowing Descriptorpool:\nTextures - \tOld:{}, New:{}\nSamplers - \tOld:{}, New{}\nAcceleration Structures - \tOld:{}, New:{}", CurrentMaxTextures, maxTextures, CurrentMaxSamplers, maxSamplers, CurrentMaxAccelStructs, maxAccelStructs);
-
-    CurrentMaxTextures      = maxTextures;
-    CurrentMaxSamplers      = maxSamplers;
-    CurrentMaxAccelStructs  = maxAccelStructs;
-
-    if (DescriptorSetLayout != VK_NULL_HANDLE)
+    if (descriptorSetState.MaxAccelStructs == maxAccelStructs &&
+        descriptorSetState.MaxTextures == maxTextures &&
+        descriptorSetState.MaxSamplers == maxSamplers &&
+        descriptorSetState.HasAccelerationStructureBinding == HasAccelerationStructure)
     {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, dsl = DescriptorSetLayout]() { vkDestroyDescriptorSetLayout(device, dsl, nullptr); }));
+        return;
     }
 
-    if (DescriptorPool != VK_NULL_HANDLE)
+    EOS::Logger->warn("\nGrowing Descriptorpool:\nTextures - \tOld:{}, New:{}\nSamplers - \tOld:{}, New{}\nAcceleration Structures - \tOld:{}, New:{}", descriptorSetState.MaxTextures, maxTextures, descriptorSetState.MaxSamplers, maxSamplers, descriptorSetState.MaxAccelStructs, maxAccelStructs);
+
+    descriptorSetState.MaxTextures = maxTextures;
+    descriptorSetState.MaxSamplers = maxSamplers;
+    descriptorSetState.MaxAccelStructs = maxAccelStructs;
+    descriptorSetState.HasAccelerationStructureBinding = HasAccelerationStructure;
+
+    if (descriptorSetState.Layout != VK_NULL_HANDLE)
     {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, dp = DescriptorPool]() { vkDestroyDescriptorPool(device, dp, nullptr); }));
+        Defer(std::packaged_task<void()>([device = VulkanDevice, dsl = descriptorSetState.Layout]() { vkDestroyDescriptorSetLayout(device, dsl, nullptr); }));
+    }
+
+    if (descriptorSetState.Pool != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, dp = descriptorSetState.Pool]() { vkDestroyDescriptorPool(device, dp, nullptr); }));
     }
 
     // create default descriptor set layout which is going to be shared by graphics pipelines
@@ -3314,8 +3691,8 @@ void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSampler
         .pBindings = bindings,
     };
 
-    VK_ASSERT(vkCreateDescriptorSetLayout(VulkanDevice, &dslci, nullptr, &DescriptorSetLayout));
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, reinterpret_cast<uint64_t>(DescriptorSetLayout), "Descriptor Set Layout: VulkanContext::DescriptorSetLayout"));
+    VK_ASSERT(vkCreateDescriptorSetLayout(VulkanDevice, &dslci, nullptr, &descriptorSetState.Layout));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, reinterpret_cast<uint64_t>(descriptorSetState.Layout), "Descriptor Set Layout: VulkanContext::DescriptorSetLayout"));
 
     {
         // create default descriptor pool and allocate 1 descriptor set
@@ -3333,25 +3710,43 @@ void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSampler
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
             .maxSets = 1,
-            .poolSizeCount = static_cast<uint32_t>(HasRaytracingPipeline ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+            .poolSizeCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
             .pPoolSizes = poolSizes,
         };
-        VK_ASSERT(vkCreateDescriptorPool(VulkanDevice, &ci, nullptr, &DescriptorPool));
+        VK_ASSERT(vkCreateDescriptorPool(VulkanDevice, &ci, nullptr, &descriptorSetState.Pool));
 
         const VkDescriptorSetAllocateInfo ai
         {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = DescriptorPool,
+            .descriptorPool = descriptorSetState.Pool,
             .descriptorSetCount = 1,
-            .pSetLayouts = &DescriptorSetLayout,
+            .pSetLayouts = &descriptorSetState.Layout,
         };
-        VK_ASSERT(vkAllocateDescriptorSets(VulkanDevice, &ai, &DescriptorSet));
+        VK_ASSERT(vkAllocateDescriptorSets(VulkanDevice, &ai, &descriptorSetState.Set));
     }
+
+    // Invalidate descriptor-set layout compatibility markers.
+    // Pipelines are rebuilt lazily when they are requested or bound next time.
+    for (auto& entry : RenderPipelinePool.Objects)
+    {
+        entry.Object.LastDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+
+    for (auto& entry : ComputePipelinePool.Objects)
+    {
+        entry.Object.LastVkDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs)
+{
+    GrowDescriptorPool(GetActiveDescriptorSetState(), maxTextures, maxSamplers, maxAccelStructs);
 }
 
 void VulkanContext::BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const
 {
-    vkCmdBindDescriptorSets(commandBuffer, bindPoint, layout, 0, 1, &DescriptorSet, 0, nullptr);
+    const VkDescriptorSet descriptorSet = GetActiveDescriptorSetState().Set;
+    vkCmdBindDescriptorSets(commandBuffer, bindPoint, layout, 0, 1, &descriptorSet, 0, nullptr);
 }
 
 VkDevice VulkanContext::GetDevice() const
@@ -3663,21 +4058,34 @@ void VulkanContext::UpdateDescriptorSet()
 {
     if (!ShouldDescriptorSetBeUpdated) return;
 
-    //TODO: Descriptor Sets that are waiting to be submitted in a draw call (when a texture is created in frame) or is still being processed
-    // cannot be reused, That's why a new empty descriptor set should be created.
 
     CHECK(TexturePool.NumObjects() >= 1, "There should be at least 1 texture");
     CHECK(SamplerPool.NumObjects() >= 1, "There should be at least 1 sampler");
+    CHECK(!DescriptorSets.empty(), "Descriptor set list must contain at least one descriptor set state");
 
-    uint32_t newMaxTextures = CurrentMaxTextures;
-    uint32_t newMaxSamplers = CurrentMaxSamplers;
-    uint32_t newMaxAccelStructs = CurrentMaxAccelStructs;
+    LastUpdatedDescriptorSet = (LastUpdatedDescriptorSet + 1) % DescriptorSets.size();
+
+    if (DescriptorSetState& descriptorSetState = DescriptorSets[LastUpdatedDescriptorSet]; descriptorSetState.Set != VK_NULL_HANDLE)
+    {
+        if (descriptorSetState.SubmitHandle.Empty() || !VulkanCommandPool->IsReady(descriptorSetState.SubmitHandle))
+        {
+            LastUpdatedDescriptorSet = DescriptorSets.size();
+            DescriptorSets.emplace_back();
+        }
+    }
+
+    DescriptorSetState& activeDescriptorSetState = GetActiveDescriptorSetState();
+    activeDescriptorSetState.SubmitHandle = {};
+
+    uint32_t newMaxTextures = std::max(activeDescriptorSetState.MaxTextures, 16u);
+    uint32_t newMaxSamplers = std::max(activeDescriptorSetState.MaxSamplers, 16u);
+    uint32_t newMaxAccelStructs = std::max(activeDescriptorSetState.MaxAccelStructs, 1u);
 
     while (TexturePool.Objects.size() > newMaxTextures) newMaxTextures *= 2;
     while (SamplerPool.Objects.size() > newMaxSamplers) newMaxSamplers *= 2;
-    //TODO: AccelStructuresPool
+    while (AccelerationStructurePool.Objects.size() > newMaxAccelStructs) newMaxAccelStructs *= 2;
 
-    GrowDescriptorPool(newMaxTextures, newMaxSamplers, newMaxAccelStructs);
+    GrowDescriptorPool(activeDescriptorSetState, newMaxTextures, newMaxSamplers, newMaxAccelStructs);
 
     std::vector<VkDescriptorImageInfo> infoSampledImages;
     std::vector<VkDescriptorImageInfo> infoSampledImages2DArray;
@@ -3767,7 +4175,32 @@ void VulkanContext::UpdateDescriptorSet()
         });
     }
 
-    //TODO: 3. Acceleration structures
+    // 3. Acceleration structures
+    std::vector<VkAccelerationStructureKHR> handlesAccelStructs;
+    handlesAccelStructs.reserve(AccelerationStructurePool.Objects.size());
+
+    // use the first valid TLAS as a dummy
+    const VkAccelerationStructureKHR dummyTLAS = [this]() -> VkAccelerationStructureKHR
+    {
+        for (const auto& as : AccelerationStructurePool.Objects)
+        {
+            if (as.Object.Handle && as.Object.IsTLAS) return as.Object.Handle;
+        }
+
+        return VK_NULL_HANDLE;
+    }();
+
+    for (const auto& as : AccelerationStructurePool.Objects)
+    {
+        handlesAccelStructs.push_back(as.Object.IsTLAS ? as.Object.Handle : dummyTLAS);
+    }
+
+    VkWriteDescriptorSetAccelerationStructureKHR writeAccelStruct =
+    {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+        .accelerationStructureCount = static_cast<uint32_t>(handlesAccelStructs.size()),
+        .pAccelerationStructures = handlesAccelStructs.data(),
+    };
 
 
     // 4. Count
@@ -3779,7 +4212,7 @@ void VulkanContext::UpdateDescriptorSet()
         write[numWrites++] = VkWriteDescriptorSet
         {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = DescriptorSet,
+            .dstSet = activeDescriptorSetState.Set,
             .dstBinding = EOS::Bindings::Textures,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(infoSampledImages.size()),
@@ -3793,7 +4226,7 @@ void VulkanContext::UpdateDescriptorSet()
         write[numWrites++] = VkWriteDescriptorSet
         {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = DescriptorSet,
+            .dstSet = activeDescriptorSetState.Set,
             .dstBinding = EOS::Bindings::Samplers,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(infoSamplers.size()),
@@ -3807,7 +4240,7 @@ void VulkanContext::UpdateDescriptorSet()
         write[numWrites++] = VkWriteDescriptorSet
         {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = DescriptorSet,
+            .dstSet = activeDescriptorSetState.Set,
             .dstBinding = EOS::Bindings::StorageImages,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(infoStorageImages.size()),
@@ -3821,12 +4254,26 @@ void VulkanContext::UpdateDescriptorSet()
         write[numWrites++] = VkWriteDescriptorSet
         {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = DescriptorSet,
+            .dstSet = activeDescriptorSetState.Set,
             .dstBinding = EOS::Bindings::Textures2DArray,
             .dstArrayElement = 0,
             .descriptorCount = static_cast<uint32_t>(infoSampledImages2DArray.size()),
             .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
             .pImageInfo = infoSampledImages2DArray.data(),
+        };
+    }
+
+    if (!handlesAccelStructs.empty())
+    {
+        write[numWrites++] = VkWriteDescriptorSet
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = &writeAccelStruct,
+            .dstSet = activeDescriptorSetState.Set,
+            .dstBinding = EOS::AccelerationStructures,
+            .dstArrayElement = 0,
+            .descriptorCount = static_cast<uint32_t>(handlesAccelStructs.size()),
+            .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
         };
     }
 
@@ -3945,7 +4392,7 @@ VkPipeline VulkanContext::GetComputePipeline(EOS::ComputePipelineHandle handle)
 
     UpdateDescriptorSet();
 
-    VkDescriptorSetLayout currentDescriptorSetLayout = DescriptorSetLayout;
+    const VkDescriptorSetLayout currentDescriptorSetLayout = GetActiveDescriptorSetLayout();
     if (cps->LastVkDescriptorSetLayout != currentDescriptorSetLayout)
     {
         if (cps->Pipeline != VK_NULL_HANDLE)
@@ -3971,7 +4418,7 @@ VkPipeline VulkanContext::GetComputePipeline(EOS::ComputePipelineHandle handle)
 
         // create pipeline layout
         {
-            const VkDescriptorSetLayout dsls[] = {DescriptorSetLayout, DescriptorSetLayout, DescriptorSetLayout, DescriptorSetLayout};
+            const VkDescriptorSetLayout dsls[] = {currentDescriptorSetLayout, currentDescriptorSetLayout, currentDescriptorSetLayout, currentDescriptorSetLayout};
             const VkPushConstantRange range
             {
                 .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -4012,7 +4459,6 @@ VkPipeline VulkanContext::GetComputePipeline(EOS::ComputePipelineHandle handle)
 
   return cps->Pipeline;
 }
-
 
 void VulkanContext::InitializeSwapChain(const VulkanSwapChainCreationDescription &description)
 {

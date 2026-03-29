@@ -16,6 +16,12 @@
 #define CASCADES 4
 #define SHADOW_SIZE 4096
 
+enum ShadowTechnique : int32_t
+{
+    ShadowTechniqueCpuCascade = 0,
+    ShadowTechniqueComputeCascade = 1,
+    ShadowTechniqueRayQuery = 2,
+};
 
 #pragma region DepthStates
 constexpr EOS::DepthState DepthStateWrite
@@ -38,12 +44,14 @@ struct PerFrameData final
     glm::mat4 mvp;
     glm::mat4 view;
     glm::mat4 cascadeViewProj[CASCADES];
-    glm::vec4 lightPos;
+    glm::vec4 lightDir;
     glm::vec4 cascadeSplits;
     glm::vec3 cameraPos;
     uint32_t  shadowMapID;
+    uint32_t  sceneTLASID;
     int32_t   shadowDebugMode;
     int32_t   shadowForceCascade;
+    int32_t   shadowTechnique;
 };
 
 struct DrawData final
@@ -140,6 +148,13 @@ EOS::BufferHolder IndirectBuffer;
 EOS::BufferHolder PerDrawBuffer;
 EOS::BufferHolder PerFrameBuffer;
 EOS::BufferHolder DepthReductionBuffer;
+EOS::BufferHolder AccelVertexBuffer;
+EOS::BufferHolder AccelIndexBuffer;
+EOS::BufferHolder AccelTransformBuffer;
+EOS::BufferHolder AccelInstancesBuffer;
+
+std::vector<EOS::AccelStructHolder> SceneBLASes;
+EOS::AccelStructHolder SceneTLAS;
 
 EOS::RenderPipelineHolder RenderPipelineEarlyZ;
 EOS::RenderPipelineHolder RenderPipelineShade;
@@ -165,7 +180,6 @@ FramePointers FramePointersData;
 int nMeshes;
 
 // Lights
-glm::vec3 g_LightPos          = {0.0f, 100.0f, 20.0f};
 glm::vec2 g_LightRotation     = {-73, -90};
 
 // Cascades
@@ -173,8 +187,9 @@ std::array<Cascade, CASCADES> g_Cascades;
 int g_ShadowDebugCascadeLayer = 0;
 int g_ShadowDebugMode = 0;
 int g_ForceShadowCascade = -1;
-bool g_UseComputeCascades = false;
 bool g_UseDepthReductionForCascades = true;
+
+int g_ShadowTechnique = ShadowTechniqueCpuCascade;
 
 void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3& lightForward, std::array<Cascade, CASCADES>& cascades);
 
@@ -286,7 +301,6 @@ void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::ImGuiRenderer* UIRenderer)
         ImGui::SetNextWindowSize(ImVec2(450, 520), ImGuiCond_FirstUseEver);
         ImGui::Begin("Light Settings");
 
-        ImGui::DragFloat3("Light Position", glm::value_ptr(g_LightPos));
         ImGui::DragFloat2("Light Rotation", glm::value_ptr(g_LightRotation));
         static const char* shadowDebugModeItems[] =
         {
@@ -298,21 +312,50 @@ void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::ImGuiRenderer* UIRenderer)
             "Depth Delta Heatmap",
             "Validity Mask",
         };
-        ImGui::Combo("Shadow Debug Mode", &g_ShadowDebugMode, shadowDebugModeItems, IM_ARRAYSIZE(shadowDebugModeItems));
-        ImGui::SliderInt("Force Cascade", &g_ForceShadowCascade, -1, CASCADES - 1);
-        if (g_ForceShadowCascade < 0)
+        static const char* shadowTechniqueItems[] =
         {
-            ImGui::Text("Force Cascade: Auto");
+            "CPU Cascade",
+            "Compute Cascade",
+            "RayQuery",
+        };
+
+        ImGui::Combo("Shadow Technique", &g_ShadowTechnique, shadowTechniqueItems, IM_ARRAYSIZE(shadowTechniqueItems));
+        const bool isCascadeTechnique = g_ShadowTechnique == ShadowTechniqueCpuCascade || g_ShadowTechnique == ShadowTechniqueComputeCascade;
+        const bool isComputeCascadeTechnique = g_ShadowTechnique == ShadowTechniqueComputeCascade;
+
+        if (isCascadeTechnique)
+        {
+            ImGui::Separator();
+            ImGui::Text("Cascade Controls");
+            ImGui::Combo("Shadow Debug Mode", &g_ShadowDebugMode, shadowDebugModeItems, IM_ARRAYSIZE(shadowDebugModeItems));
+            ImGui::SliderInt("Force Cascade", &g_ForceShadowCascade, -1, CASCADES - 1);
+            if (g_ForceShadowCascade < 0)
+            {
+                ImGui::Text("Force Cascade: Auto");
+            }
+
+            const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::ImGuiTextureView::Texture2DArray);
+            ImGui::Image(shadowArrayLayerTextureID, {400,400});
+            ImGui::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
+
+            if (isComputeCascadeTechnique)
+            {
+                ImGui::Separator();
+                ImGui::Text("Compute Options");
+                ImGui::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
+                ImGui::Text("Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction" : "Camera Planes");
+            }
+            else
+            {
+                ImGui::Separator();
+                ImGui::Text("CPU Cascade path active");
+            }
         }
-        const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::ImGuiTextureView::Texture2DArray);
-        ImGui::Image(shadowArrayLayerTextureID, {400,400});
-        ImGui::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
-        ImGui::Checkbox("Use Compute Cascades", &g_UseComputeCascades);
-        ImGui::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
-        ImGui::Text("Cascade Setup Path: %s", g_UseComputeCascades ? "Compute" : "CPU");
-        if (g_UseComputeCascades)
+        else
         {
-            ImGui::Text("Compute Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction (min/max)" : "Camera near/far");
+            ImGui::Separator();
+            ImGui::Text("RayQuery mode active");
+            ImGui::Text("Cascade debug/image controls are hidden in this mode.");
         }
         ImGui::End();
     }
@@ -332,6 +375,16 @@ void DestroyHandles()
     PerDrawBuffer.Reset();
     PerFrameBuffer.Reset();
     DepthReductionBuffer.Reset();
+    AccelVertexBuffer.Reset();
+    AccelIndexBuffer.Reset();
+    AccelTransformBuffer.Reset();
+    AccelInstancesBuffer.Reset();
+    for (auto& blas : SceneBLASes)
+    {
+        blas.Reset();
+    }
+    SceneBLASes.clear();
+    SceneTLAS.Reset();
     RenderPipelineEarlyZ.Reset();
     RenderPipelineShade.Reset();
     RenderPipelineShadow.Reset();
@@ -421,6 +474,7 @@ int main()
 
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
     const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+
     std::vector<Vertex> vertices;
     vertices.reserve(scene.vertices.size());
     for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
@@ -441,6 +495,129 @@ int main()
         .Size      = sizeof(uint32_t) * scene.indices.size(),
         .Data      = scene.indices.data(),
         .DebugName = "Buffer: index"
+    });
+
+    AccelVertexBuffer = App.Context->CreateBuffer(
+    {
+        .Usage     = EOS::BufferUsageFlags::AccelStructBuildInputReadOnly,
+        .Storage   = EOS::StorageType::Device,
+        .Size      = sizeof(Vertex) * vertices.size(),
+        .Data      = vertices.data(),
+        .DebugName = "Buffer: accel vertex",
+    });
+
+    AccelIndexBuffer = App.Context->CreateBuffer(
+    {
+        .Usage     = EOS::BufferUsageFlags::AccelStructBuildInputReadOnly,
+        .Storage   = EOS::StorageType::Device,
+        .Size      = sizeof(uint32_t) * scene.indices.size(),
+        .Data      = scene.indices.data(),
+        .DebugName = "Buffer: accel index",
+    });
+
+    const glm::mat3x4 blasTransform{1.0f};
+    AccelTransformBuffer = App.Context->CreateBuffer(
+    {
+        .Usage     = EOS::BufferUsageFlags::AccelStructBuildInputReadOnly,
+        .Storage   = EOS::StorageType::HostVisible,
+        .Size      = sizeof(glm::mat3x4),
+        .Data      = &blasTransform,
+        .DebugName = "Buffer: accel transform",
+    });
+
+    struct MeshBLASEntry
+    {
+        uint32_t vertexOffset;
+        uint32_t indexOffset;
+        uint32_t indexCount;
+        uint32_t blasIndex;
+    };
+
+    std::vector<MeshBLASEntry> meshBLASCache;
+    meshBLASCache.reserve(scene.meshes.size());
+    SceneBLASes.reserve(scene.meshes.size());
+
+    auto getBLASIndexForMesh = [&](const MeshEntry& mesh) -> uint32_t
+    {
+        for (const MeshBLASEntry& entry : meshBLASCache)
+        {
+            if (entry.vertexOffset == mesh.vertexOffset && entry.indexOffset == mesh.indexOffset && entry.indexCount == mesh.indexCount)
+            {
+                return entry.blasIndex;
+            }
+        }
+
+        // EOS backend maps NumberOfVertices -> (maxVertex = NumberOfVertices - 1).
+        // Pass full vertex count so Vulkan maxVertex becomes vertices.size() - 1.
+        const uint32_t globalVertexCount = static_cast<uint32_t>(vertices.size());
+
+        SceneBLASes.emplace_back(App.Context->CreateAccelerationStructure(
+        {
+            .Type = EOS::BLAS,
+            .GeometryType = EOS::Triangles,
+            .VertexFormatStructure = EOS::VertexFormat::Float3,
+            .VertexBuffer = AccelVertexBuffer,
+            .VertexStride = sizeof(Vertex),
+            .NumberOfVertices = globalVertexCount,
+            .IndexBuffer = AccelIndexBuffer,
+            .TransformBuffer = AccelTransformBuffer,
+            .BuildRange =
+            {
+                .PrimitiveCount = mesh.indexCount / 3,
+                .PrimitiveOffset = mesh.indexOffset * static_cast<uint32_t>(sizeof(uint32_t)),
+                .FirstVertex = mesh.vertexOffset,
+                .TransformOffset = 0,
+            },
+            .BuildFlags = EOS::PreferFastTrace,
+            .DebugName = "Cascade Scene BLAS",
+        }));
+
+        const uint32_t newBLASIndex = static_cast<uint32_t>(SceneBLASes.size() - 1);
+        meshBLASCache.push_back({mesh.vertexOffset, mesh.indexOffset, mesh.indexCount, newBLASIndex});
+        return newBLASIndex;
+    };
+
+    std::vector<EOS::AccelStructInstance> tlasInstances;
+    tlasInstances.reserve(scene.meshes.size());
+
+    for (const auto& mesh : scene.meshes)
+    {
+        const uint32_t blasIndex = getBLASIndexForMesh(mesh);
+        const glm::mat4& mt = mesh.transform;
+
+        tlasInstances.push_back(EOS::AccelStructInstance
+        {
+            .Transform =
+            {
+                {mt[0][0], mt[1][0], mt[2][0], mt[3][0]},
+                {mt[0][1], mt[1][1], mt[2][1], mt[3][1]},
+                {mt[0][2], mt[1][2], mt[2][2], mt[3][2]},
+            },
+            .InstanceCustomIndex = 0,
+            .Mask = 0xFF,
+            .InstanceShaderBindingTableRecordOffset = 0,
+            .Flags = EOS::TriangleFacingCullDisable,
+            .AccelerationStructureReference = App.Context->GetGPUAddress(SceneBLASes[blasIndex]),
+        });
+    }
+
+    AccelInstancesBuffer = App.Context->CreateBuffer(
+    {
+        .Usage     = EOS::BufferUsageFlags::AccelStructBuildInputReadOnly,
+        .Storage   = EOS::StorageType::HostVisible,
+        .Size      = static_cast<uint64_t>(sizeof(EOS::AccelStructInstance) * tlasInstances.size()),
+        .Data      = tlasInstances.data(),
+        .DebugName = "Buffer: accel instances",
+    });
+
+    SceneTLAS = App.Context->CreateAccelerationStructure(
+    {
+        .Type = EOS::TLAS,
+        .GeometryType = EOS::Instances,
+        .InstancesBuffer = AccelInstancesBuffer,
+        .BuildRange = {.PrimitiveCount = static_cast<uint32_t>(tlasInstances.size())},
+        .BuildFlags = static_cast<uint8_t>(EOS::PreferFastTrace | EOS::AllowUpdate),
+        .DebugName = "Cascade Scene TLAS",
     });
 
     std::vector<DrawData> drawData;
@@ -584,20 +761,23 @@ int main()
         const glm::mat4 projection = App.MainCamera.GetProjectionMatrix(aspectRatio);
         const glm::mat4 viewProjection = projection * view;
         const glm::mat4 mvp = viewProjection * m;
+        const bool useComputeCascades = g_ShadowTechnique == ShadowTechniqueComputeCascade;
 
         PerFrameData perFrameData
         {
             .model = m,
             .mvp = mvp,
             .view = view,
-            .lightPos = glm::vec4(g_LightPos, 1.0f),
+            .lightDir = glm::vec4(lightForward, 0.0f),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = ShadowDepthTexture.Index(),
+            .sceneTLASID = SceneTLAS.Valid() ? SceneTLAS.Index() : 0u,
             .shadowDebugMode = g_ShadowDebugMode,
             .shadowForceCascade = g_ForceShadowCascade,
+            .shadowTechnique = g_ShadowTechnique,
         };
 
-        if (!g_UseComputeCascades)
+        if (!useComputeCascades)
         {
             CalculateCascades(App.MainCamera, aspectRatio, lightForward, g_Cascades);
 
@@ -627,7 +807,7 @@ int main()
 
         PassEarlyZ(cmdBuffer);
 
-        if (g_UseComputeCascades)
+        if (useComputeCascades)
         {
             const DepthReductionPushConstants depthReductionPC
             {

@@ -436,7 +436,8 @@ namespace VkContext
         vkGetPhysicalDeviceProperties2(physicalDevice, &physicalDeviceProperties);
     }
 
-    void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues)
+    void CreateVulkanDevice(VkDevice& device, const VkPhysicalDevice& physicalDevice, DeviceQueues& deviceQueues,
+                            bool* outHasAccelerationStructure, bool* outHasRaytracingPipeline)
     {
         CHECK(physicalDevice != VK_NULL_HANDLE, "Cannot Create a Vulkan Device if the Physical Device is not valid");
 
@@ -708,8 +709,8 @@ namespace VkContext
             return true;
         };
 
-        addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
-        addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
+        const bool hasAccelerationStructure = addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
+        const bool hasRaytracingPipeline = addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
         addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
 
         if (version == vkVersion::VERSION_13)
@@ -732,6 +733,9 @@ namespace VkContext
         VK_ASSERT(vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device));
         volkLoadDevice(device);
         VK_ASSERT(VkDebug::SetDebugObjectName(device, VK_OBJECT_TYPE_DEVICE, reinterpret_cast<uint64_t>(device), "Device: VulkanContext::Device"));
+
+        if (outHasAccelerationStructure) { *outHasAccelerationStructure = hasAccelerationStructure; }
+        if (outHasRaytracingPipeline) { *outHasRaytracingPipeline = hasRaytracingPipeline; }
 
         //Fill in our Device Queue's
         vkGetDeviceQueue(device, deviceQueues.Compute.QueueFamilyIndex, 0, &deviceQueues.Compute.Queue);
@@ -1525,6 +1529,19 @@ namespace VkContext
         CHECK(false, "Could not determine index type from index format");
         return VK_INDEX_TYPE_NONE_KHR;
     }
+
+    VkBuildAccelerationStructureFlagsKHR BuildFlagsToVkBuildAccelerationStructureFlags(uint8_t buildFlags)
+    {
+        VkBuildAccelerationStructureFlagsKHR flags = 0;
+
+        if (buildFlags & EOS::AllowUpdate) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+        if (buildFlags & EOS::AllowCompaction) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+        if (buildFlags & EOS::PreferFastTrace) flags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        if (buildFlags & EOS::PreferFastBuild) flags |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+        if (buildFlags & EOS::LowMemory)  flags |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+        
+        return flags;
+    }
 };
 
 namespace VkSynchronization
@@ -1581,22 +1598,24 @@ namespace VkSynchronization
         return fence;
     }
 
-    VkPipelineStageFlags2 ConvertToVkPipelineStage2(const EOS::ResourceState &state)
+    VkPipelineStageFlags2 ConvertToVkPipelineStage2(const EOS::ResourceState& state)
     {
         VkPipelineStageFlags2 flags = 0;
 
-        // Raytracing
-        if (state & (EOS::ResourceState::AccelerationStructureRead))
+        if (state & EOS::ResourceState::AccelerationStructureRead)
         {
-            flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+            flags |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+            if (VulkanContext::SupportsRaytracingPipeline())
+            {
+                flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+            }
         }
 
-        if (state & (EOS::ResourceState::AccelerationStructureWrite))
+        if (state & EOS::ResourceState::AccelerationStructureWrite)
         {
             flags |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
         }
 
-        // Graphics
         if (state & EOS::ResourceState::IndexBuffer)
         {
             flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
@@ -1605,7 +1624,6 @@ namespace VkSynchronization
         if (state & EOS::ResourceState::VertexAndConstantBuffer)
         {
             flags |= VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-            //flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT; //TODO: Test this out if the latter flag is needed
         }
 
         if (state & EOS::ResourceState::PixelShaderResource)
@@ -1618,20 +1636,20 @@ namespace VkSynchronization
             flags |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
             flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 
-            //TODO: if (IsGeometryShaderSupported)
+            if (VulkanContext::SupportsGeometryShader())
             {
-                //flags |= VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT;
+                flags |= VK_PIPELINE_STAGE_2_GEOMETRY_SHADER_BIT;
             }
 
-            //TODO: if (IsTesselationSupported)
+            if (VulkanContext::SupportsTessellationShader())
             {
-                //flags |= VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT;
-                //flags |= VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT;
+                flags |= VK_PIPELINE_STAGE_2_TESSELLATION_CONTROL_SHADER_BIT;
+                flags |= VK_PIPELINE_STAGE_2_TESSELLATION_EVALUATION_SHADER_BIT;
             }
 
-            //TODO: if (IsRayTracingSupported)
+            if (VulkanContext::SupportsRaytracingPipeline())
             {
-                //flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+                flags |= VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
             }
         }
 
@@ -1639,31 +1657,22 @@ namespace VkSynchronization
         {
             flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         }
+
         if (state & EOS::ResourceState::UnorderedAccessPixel)
         {
             flags |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
         }
+
         if (state & EOS::ResourceState::RenderTarget)
         {
             flags |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
         }
+
         if (state & (EOS::ResourceState::DepthRead | EOS::ResourceState::DepthWrite))
         {
             flags |= VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
         }
 
-        //TODO: Compute
-        {
-            //flags |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        }
-
-        //TODO: Transfer
-        {
-            //return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-            //return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        }
-
-        // Compatible with both compute and graphics queues
         if (state & EOS::ResourceState::IndirectArgument)
         {
             flags |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;

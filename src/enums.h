@@ -286,11 +286,11 @@ namespace EOS
     {
         Textures = 0,
         Samplers = 1,
-                StorageImages = 2,
-                Textures2DArray = 3,
-                AccelerationStructures = 4,
-                Count = 5,
-      };
+        StorageImages = 2,
+        Textures2DArray = 3,
+        AccelerationStructures = 4,
+        Count = 5,
+    };
 
     enum class LoadOp : uint8_t
     {
@@ -382,5 +382,41 @@ namespace EOS
         ClampToBorder,
         MirrorRepeat,
         MirrorClampToEdge,
+    };
+
+    enum AccelerationStructureType : uint8_t
+    {
+        InvalidAccelerationStructure = 0,
+        TLAS = 1,
+        BLAS = 2,
+    };
+
+    enum AccelerationStructureGeometryType : uint8_t {
+        Triangles = 0,
+        AABBs = 1,
+        Instances = 2,
+    };
+
+    enum AccelerationStructureBuildFlagBits : uint8_t
+    {
+        AllowUpdate = 1 << 0,
+        AllowCompaction = 1 << 1,
+        PreferFastTrace = 1 << 2,
+        PreferFastBuild = 1 << 3,
+        LowMemory = 1 << 4,
+    };
+
+    enum AccelerationStructureGeometryFlagBits : uint8_t
+    {
+        Opaque = 1 << 0,
+        NoDuplicateAnyHit = 1 << 1,
+    };
+
+    enum AccelerationStructureInstanceFlagBits : uint8_t
+    {
+        TriangleFacingCullDisable = 1 << 0,
+        TriangleFlipFacing = 1 << 1,
+        ForceOpaque = 1 << 2,
+        ForceNoOpaque = 1 << 3,
     };
 }

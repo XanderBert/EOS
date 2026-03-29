@@ -103,6 +103,12 @@ namespace EOS
         return (value + alignment - 1) & ~(alignment - 1);
     }
 
+    uint64_t GetAddressAligned(uint64_t address, uint64_t alignment)
+    {
+        const uint64_t offs = address % alignment;
+        return offs ? address + (alignment - offs) : address;
+    }
+
     EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription)
     {
         ktxTexture1* texture = nullptr;

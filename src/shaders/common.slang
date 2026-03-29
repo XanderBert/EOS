@@ -6,6 +6,12 @@ module common;
 [[vk::binding(0, 0)]] Texture2D kTextures2D[];
 [[vk::binding(1, 0)]] SamplerState kSamplers[];
 [[vk::binding(3, 0)]] Texture2DArray kTextures2DArray[];
+[[vk::binding(4, 0)]] RaytracingAccelerationStructure kAccelerationStructures[];
+
+public RaytracingAccelerationStructure GetAccelerationStructure(uint AccelerationStructureId)
+{
+    return kAccelerationStructures[NonUniformResourceIndex(AccelerationStructureId)];
+}
 
 public float4 TextureBindless2D(uint textureId, uint samplerId, float2 uv)
 {
