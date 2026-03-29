@@ -42,7 +42,6 @@ struct PerFrameData final
     glm::vec4 cascadeSplits;
     glm::vec3 cameraPos;
     uint32_t  shadowMapID;
-    uint32_t  showCascades;
     int32_t   shadowDebugMode;
     int32_t   shadowForceCascade;
 };
@@ -172,10 +171,10 @@ glm::vec2 g_LightRotation     = {-73, -90};
 // Cascades
 std::array<Cascade, CASCADES> g_Cascades;
 int g_ShadowDebugCascadeLayer = 0;
-bool g_ShowCascades = false;
 int g_ShadowDebugMode = 0;
 int g_ForceShadowCascade = -1;
 bool g_UseComputeCascades = false;
+bool g_UseDepthReductionForCascades = true;
 
 void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3& lightForward, std::array<Cascade, CASCADES>& cascades);
 
@@ -308,9 +307,13 @@ void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::ImGuiRenderer* UIRenderer)
         const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::ImGuiTextureView::Texture2DArray);
         ImGui::Image(shadowArrayLayerTextureID, {400,400});
         ImGui::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
-        ImGui::Checkbox("Show Cascades", &g_ShowCascades);
         ImGui::Checkbox("Use Compute Cascades", &g_UseComputeCascades);
+        ImGui::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
         ImGui::Text("Cascade Setup Path: %s", g_UseComputeCascades ? "Compute" : "CPU");
+        if (g_UseComputeCascades)
+        {
+            ImGui::Text("Compute Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction (min/max)" : "Camera near/far");
+        }
         ImGui::End();
     }
     UIRenderer->EndFrame(cmdBuffer);
@@ -415,6 +418,7 @@ int main()
 
     //Scene scene = LoadModel("../data/ABeautifulGame/ABeautifulGame.gltf", App.Context.get());
     //const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(10.00f));
+
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
     const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
     std::vector<Vertex> vertices;
@@ -589,7 +593,6 @@ int main()
             .lightPos = glm::vec4(g_LightPos, 1.0f),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = ShadowDepthTexture.Index(),
-            .showCascades = g_ShowCascades ? 1u : 0u,
             .shadowDebugMode = g_ShadowDebugMode,
             .shadowForceCascade = g_ForceShadowCascade,
         };
@@ -641,7 +644,7 @@ int main()
                 .depthRangePtr = App.Context->GetGPUAddress(DepthReductionBuffer),
                 .invViewProjection = glm::inverse(viewProjection),
                 .lightForwardNear = glm::vec4(lightForward, 0.0f),
-                .cameraPlanes = glm::vec4(App.MainCamera.GetNearPlane(), App.MainCamera.GetFarPlane(), aspectRatio, static_cast<float>(SHADOW_SIZE)),
+                .cameraPlanes = glm::vec4(App.MainCamera.GetNearPlane(), App.MainCamera.GetFarPlane(), g_UseDepthReductionForCascades ? 1.0f : 0.0f, static_cast<float>(SHADOW_SIZE)),
             };
 
             cmdPipelineBarrier(cmdBuffer,

@@ -78,7 +78,7 @@ public float3 GetShadingNormal(float3 n, float3 v, float2 normalSample, float2 u
     return normalize(mul(TBN, tangentNormal));
 }
 
-float LinearDepth(float depth, float nearPlane, float farPlane)
+public float LinearDepth(float depth, float nearPlane, float farPlane)
 {
     return (nearPlane * farPlane) / (farPlane - depth * (farPlane - nearPlane));
 }

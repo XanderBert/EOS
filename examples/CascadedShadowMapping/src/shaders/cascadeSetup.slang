@@ -71,10 +71,24 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     float nearClip = pc.cameraPlanes.x;
     float farClip = pc.cameraPlanes.y;
     float clipRange = farClip - nearClip;
+    bool useDepthReduction = pc.cameraPlanes.z > 0.5;
     float shadowResolution = max(pc.cameraPlanes.w, 1.0);
 
     float sceneMin = nearClip;
     float sceneMax = nearClip + clipRange;
+
+    if (useDepthReduction)
+    {
+        DepthReductionData reduction = *((Ptr<DepthReductionData>)pc.depthRangePtr);
+        if (reduction.maxDepth > reduction.minDepth)
+        {
+            float reducedMin = LinearDepth(reduction.minDepth, nearClip, farClip);
+            float reducedMax = LinearDepth(reduction.maxDepth, nearClip, farClip);
+            sceneMin = clamp(reducedMin, nearClip, farClip);
+            sceneMax = clamp(reducedMax, nearClip, farClip);
+            sceneMax = max(sceneMax, sceneMin + 1e-4);
+        }
+    }
 
     float range = sceneMax - sceneMin;
     float ratio = sceneMax / sceneMin;
@@ -143,6 +157,20 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
         float4x4 lightView = BuildLookAtRH(lightPos, frustumCenter, lightUp);
         float4x4 lightOrtho = BuildOrthoZO(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0, maxExtents.z - minExtents.z);
+
+        // Texel-grid stabilization to reduce shimmering while moving the camera.
+        float4x4 shadowMatrix = mul(lightView, lightOrtho);
+        float4 shadowOrigin = mul(float4(0.0, 0.0, 0.0, 1.0), shadowMatrix);
+        shadowOrigin *= (shadowResolution * 0.5);
+
+        float4 roundedOrigin = round(shadowOrigin);
+        float4 roundOffset = (roundedOrigin - shadowOrigin) * (2.0 / shadowResolution);
+        roundOffset.z = 0.0;
+        roundOffset.w = 0.0;
+
+        float4 orthoTranslation = lightOrtho[3];
+        orthoTranslation.xyz += roundOffset.xyz;
+        lightOrtho[3] = orthoTranslation;
 
         frameData.cascadeViewProj[i] = mul(lightView, lightOrtho);
         lastSplitDist = splitDist;

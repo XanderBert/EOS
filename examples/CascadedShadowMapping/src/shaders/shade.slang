@@ -114,7 +114,7 @@ float4 fragmentMain(VSOutput input)
         cascadeIndex = (uint)frameData.shadowForceCascade;
     }
 
-    if (frameData.showCascades != 0 || debugMode == 1)
+    if (debugMode == 1)
     {
         return float4(color * CascadeDebugColor(cascadeIndex), 1.0);
     }

@@ -10,7 +10,6 @@ public struct PerFrameData
     public float4   cascadeSplits;
     public float3   cameraPos;
     public uint     shadowMapID;
-    public uint     showCascades;
     public int      shadowDebugMode;
     public int      shadowForceCascade;
 };
