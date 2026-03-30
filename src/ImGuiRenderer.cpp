@@ -70,8 +70,10 @@ namespace EOS
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
         ImGui_ImplGlfw_InitForOther(window.GlfwWindow, window.GlfwWindow ? true : false);
-        SetFont(defaultFont, fontSize);
 
+        CurrentFont = defaultFont ? defaultFont : "";
+        BaseFontSize = fontSize;
+        SetFont(defaultFont, fontSize);
 
         constexpr SamplerDescription samplerDesc
         {
@@ -97,6 +99,7 @@ namespace EOS
     void ImGuiRenderer::SetFont(const char* defaultFont, float fontSize)
     {
         ImGuiIO& io = ImGui::GetIO();
+        io.Fonts->Clear();
 
         ImFontConfig cfg = ImFontConfig();
         cfg.FontDataOwnedByAtlas = false;
@@ -139,11 +142,30 @@ namespace EOS
 
     void ImGuiRenderer::SetScale(float scale)
     {
-        Scale = scale;
+        PendingScale = scale;
+    }
+
+    void ImGuiRenderer::SetScaleInternal()
+    {
+        //Reset Styling
+        ImGui::GetStyle() = ImGuiStyle();
+
+        //Set Scale
+        Scale = PendingScale;
+        ImGui::GetStyle().ScaleAllSizes(Scale);
+        ImGui::GetStyle().FontScaleMain = Scale;
+
+        // Rebuild font at target size
+        SetFont(CurrentFont, BaseFontSize * Scale);
     }
 
     void ImGuiRenderer::BeginFrame(ICommandBuffer& cmd)
     {
+        if (Scale != PendingScale)
+        {
+            SetScaleInternal();
+        }
+
         constexpr RenderPass renderPass
         {
             .Color { { .LoadOpState = EOS::LoadOp::Load, } },
@@ -155,12 +177,8 @@ namespace EOS
             .DebugName = "ImGui framebuffer"
         };
 
-        CHECK(framebuffer.Color[0].Texture, "We need a valid swapchain texture");
-        const Dimensions dim = Context->GetDimensions(framebuffer.Color[0].Texture);
 
         ImGuiIO& io = ImGui::GetIO();
-        io.DisplaySize = ImVec2(dim.Width / Scale, dim.Height / Scale);
-        io.DisplayFramebufferScale = ImVec2(Scale, Scale);
         io.IniFilename = nullptr;
 
         if (RenderPipeline.Empty()) CreateNewPipeline(framebuffer);
@@ -254,6 +272,7 @@ namespace EOS
 
         for (const ImDrawList* cmdList : drawData->CmdLists)
         {
+            const uint64_t listVertexBufferPtr = Context->GetGPUAddress(VertexBuffer) + vertexOffset * sizeof(ImDrawVert);  // ← offset the BDA pointer
             for (int cmd_i{}; cmd_i < cmdList->CmdBuffer.Size; ++cmd_i)
             {
                 const ImDrawCmd ImCmd = cmdList->CmdBuffer[cmd_i];
@@ -270,11 +289,10 @@ namespace EOS
                 if (clipMax.x <= clipMin.x || clipMax.y <= clipMin.y) continue;
 
                 const DecodedImGuiTextureID textureData = DecodeImGuiTextureID(static_cast<uint64_t>(ImCmd.GetTexID()));
-
                 BindData bindData
                 {
                     .LRTB               = {left, right, top, bottom},
-                    .vertexBufferPtr    = Context->GetGPUAddress(VertexBuffer),
+                    .vertexBufferPtr    = listVertexBufferPtr,
                     .textureId          = textureData.TextureID,
                     .samplerId          = Sampler.Index(),
                     .textureLayer       = textureData.Layer,
@@ -283,7 +301,7 @@ namespace EOS
 
                 cmdPushConstants(cmd, bindData);
                 cmdBindScissorRect(cmd, {static_cast<uint32_t>(clipMin.x), static_cast<uint32_t>(clipMin.y), static_cast<uint32_t>(clipMax.x - clipMin.x), static_cast<uint32_t>(clipMax.y - clipMin.y)});
-                cmdDrawIndexed(cmd, ImCmd.ElemCount, 1u, indexOffset + ImCmd.IdxOffset, static_cast<int32_t>(vertexOffset + ImCmd.VtxOffset));
+                cmdDrawIndexed(cmd, ImCmd.ElemCount, 1u, indexOffset + ImCmd.IdxOffset, static_cast<int32_t>(ImCmd.VtxOffset));
             }
             indexOffset += cmdList->IdxBuffer.Size;
             vertexOffset += cmdList->VtxBuffer.Size;

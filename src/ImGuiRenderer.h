@@ -26,6 +26,7 @@ namespace EOS
 
     private:
         void CreateNewPipeline(const Framebuffer& framebuffer);
+        void SetScaleInternal();
 
     private:
         IContext* Context;
@@ -34,9 +35,12 @@ namespace EOS
         ShaderModuleHolder FragmentShader;
         TextureHolder FontTexture;
         RenderPipelineHolder RenderPipeline;
-
-        float Scale = 3.0f;
         uint32_t FrameIndex = 0;
+
+        float Scale = 1.0f;
+        float PendingScale = 1.0f;
+        const char* CurrentFont;
+        float BaseFontSize;
 
         struct DrawableData final
         {

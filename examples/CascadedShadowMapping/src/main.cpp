@@ -298,6 +298,7 @@ void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::ImGuiRenderer* UIRenderer)
     //Render UI
     UIRenderer->BeginFrame(cmdBuffer);
     {
+        UIRenderer->SetScale(1.5f);
         ImGui::SetNextWindowSize(ImVec2(450, 520), ImGuiCond_FirstUseEver);
         ImGui::Begin("Light Settings");
 
