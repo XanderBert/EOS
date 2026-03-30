@@ -71,4 +71,5 @@ This project is built using CMake and Ninja.
 
 
 # Inspiration
-This project is heavily inspired by LVK and The Forge
+This project is **heavily** inspired by LVK and The Forge. 
+It's created for my personal use to learn about modern Graphics Techniques
