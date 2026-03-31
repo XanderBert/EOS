@@ -19,7 +19,13 @@ set(EOS_USE_IMGUI       ON) # Enable ImGui integration
 set(EOS_USE_TRACY       OFF)# Enable Tracy profiler
 set(EOS_BUILD_EXAMPLES  ON) # Build example applications
 set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
-set(EOS_BUILD_TEXTURE_TOOLS ON) # Build offline texture compressor and prebuild steps
+set(EOS_BUILD_TEXTURE_TOOLS ON) # Add texture compressor as prebuild steps
+
+# CI optimization: skip texture prebuild in GitHub Actions.
+if(DEFINED ENV{GITHUB_ACTIONS} AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+    set(EOS_BUILD_TEXTURE_TOOLS OFF)
+    message(STATUS "GitHub Actions detected: EOS_BUILD_TEXTURE_TOOLS=OFF")
+endif()
 
 
 # Set Debug or Release Define
