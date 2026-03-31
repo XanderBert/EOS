@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace EOS
 {
     enum class HardwareDeviceType : uint8_t
