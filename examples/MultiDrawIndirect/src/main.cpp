@@ -1,9 +1,4 @@
 #include "../../Common/App.h"
-#include "EOS.h"
-#include "imgui.h"
-#include "logger.h"
-#include "shaders/shaderCompiler.h"
-#include "utils.h"
 
 struct PerFrameData final
 {
@@ -35,18 +30,20 @@ struct FramePointers final
     uint64_t drawDataPtr;
 };
 
-EOS::ShaderModuleHolder VertexShader;
-EOS::ShaderModuleHolder PixelShader;
+struct Resources final
+{
+    EOS::ShaderModuleHolder VertexShader;
+    EOS::ShaderModuleHolder PixelShader;
+    EOS::TextureHolder DepthTexture;
+    EOS::BufferHolder VertexBuffer;
+    EOS::BufferHolder IndexBuffer;
+    EOS::BufferHolder PerDrawBuffer;
+    EOS::BufferHolder PerFrameBuffer;
+    EOS::BufferHolder IndirectDrawBuffer;
+    EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
+};
 
-EOS::TextureHolder DepthTexture;
-
-EOS::BufferHolder VertexBuffer;
-EOS::BufferHolder IndexBuffer;
-
-EOS::BufferHolder PerDrawBuffer;
-EOS::BufferHolder PerFrameBuffer;
-
-EOS::BufferHolder IndirectDrawBuffer;
+Resources Handles;
 
 
 int main()
@@ -73,9 +70,9 @@ int main()
 
     ExampleApp App{appDescription};
 
-    VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
-    PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
-    DepthTexture = App.CreateDepthTexture();
+    Handles.VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
+    Handles.PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
+    Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - MultiDrawIndirect");
 
     //TODO: This could be constevaled with reflection Or use Shader Resource Table model
     constexpr EOS::VertexInputData vdesc
@@ -95,11 +92,9 @@ int main()
     };
 
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
-    std::vector<Vertex> vertices;
-    vertices.reserve(scene.vertices.size());
-    for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
+    std::vector<Vertex> vertices = BuildVerticesFromScene<Vertex>(scene);
 
-    VertexBuffer = App.Context->CreateBuffer(
+    Handles.VertexBuffer = App.Context->CreateBuffer(
     {
       .Usage     = EOS::BufferUsageFlags::Vertex,
       .Storage   = EOS::StorageType::Device,
@@ -108,7 +103,7 @@ int main()
       .DebugName = "Buffer: vertex"
       });
 
-    IndexBuffer = App.Context->CreateBuffer(
+    Handles.IndexBuffer = App.Context->CreateBuffer(
     {
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
@@ -118,19 +113,9 @@ int main()
     });
 
 
-    std::vector<DrawData> drawData;
-    drawData.reserve(scene.meshes.size());
-    for (auto& mesh : scene.meshes)
-    {
-        drawData.push_back({
-            .albedoID            = mesh.albedoTextureIdx,
-            .normalID            = mesh.normalTextureIdx,
-            .metallicRoughnessID = mesh.metallicRoughnessTextureIdx,
-            .transform           = mesh.transform,
-        });
-    }
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
 
-    PerDrawBuffer = App.Context->CreateBuffer({
+    Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(DrawData) * drawData.size(),
@@ -138,7 +123,7 @@ int main()
         .DebugName = "PerDrawBuffer",
     });
 
-    PerFrameBuffer = App.Context->CreateBuffer(
+    Handles.PerFrameBuffer = App.Context->CreateBuffer(
 {
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
@@ -147,22 +132,9 @@ int main()
     });
 
 
-    std::vector<EOS::DrawIndexedIndirectCommand> indirectCmds;
-    indirectCmds.reserve(scene.meshes.size());
-    for (auto& mesh : scene.meshes)
-    {
-        indirectCmds.emplace_back(
-        EOS::DrawIndexedIndirectCommand
-        {
-            .indexCount    = mesh.indexCount,
-            .instanceCount = 1,
-            .firstIndex    = mesh.indexOffset,
-            .vertexOffset  = static_cast<int32_t>(mesh.vertexOffset),
-            .firstInstance = 0,
-        });
-    }
+    std::vector<EOS::DrawIndexedIndirectCommand> indirectCmds = BuildIndirectCommands(scene);
 
-    IndirectDrawBuffer = App.Context->CreateBuffer({
+    Handles.IndirectDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::Indirect,
         .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(EOS::DrawIndexedIndirectCommand) * indirectCmds.size(),
@@ -175,20 +147,20 @@ int main()
     const EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = VertexShader,
-        .FragmentShader = PixelShader,
+        .VertexShader = Handles.VertexShader,
+        .FragmentShader = Handles.PixelShader,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = App.Context->GetFormat(DepthTexture),
+        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
-    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
+    Handles.RenderPipeline = App.Context->CreateRenderPipeline(renderPipelineDescription);
 
 
     const FramePointers framePointers
     {
-        .frameDataPtr = App.Context->GetGPUAddress(PerFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(PerDrawBuffer),
+        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
 
@@ -206,13 +178,13 @@ int main()
             .mvp = mvp,
             .cameraPos = glm::vec4(App.MainCamera.GetPosition(), 0),
         };
-        App.Context->Upload(PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
+        App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
 
 
         EOS::Framebuffer framebuffer
         {
             .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DepthStencil = { .Texture = DepthTexture },
+            .DepthStencil = { .Texture = Handles.DepthTexture },
             .DebugName = "Basic Color Depth Framebuffer"
         };
 
@@ -232,19 +204,19 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {},
             {
                 { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
+                { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
             });
 
         cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
         {
             cmdPushMarker(cmdBuffer, "Sponza", 0xff00f0ff);
-            cmdBindVertexBuffer(cmdBuffer, 0, VertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, IndexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
+            cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
 
             cmdPushConstants(cmdBuffer, framePointers);
             cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, IndirectDrawBuffer, 0, scene.meshes.size());
+            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectDrawBuffer, 0, scene.meshes.size());
 
             cmdPopMarker(cmdBuffer);
         }
@@ -254,14 +226,7 @@ int main()
         App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
     });
 
-    VertexShader.Reset();
-    PixelShader.Reset();
-    DepthTexture.Reset();
-    VertexBuffer.Reset();
-    IndexBuffer.Reset();
-    PerDrawBuffer.Reset();
-    PerFrameBuffer.Reset();
-    IndirectDrawBuffer.Reset();
+    Handles = {};
 
     return 0;
 }

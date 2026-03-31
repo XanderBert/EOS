@@ -1,9 +1,4 @@
 #include "../../Common/App.h"
-#include "EOS.h"
-#include "imgui.h"
-#include "logger.h"
-#include "shaders/shaderCompiler.h"
-#include "utils.h"
 
 struct ComputePayload final
 {
@@ -17,6 +12,15 @@ struct ComputePushConstants final
 {
     uint64_t payloadPtr{};
 };
+
+struct Resources final
+{
+    EOS::ShaderModuleHolder ComputeShader;
+    EOS::BufferHolder ComputeBuffer;
+    EOS::ComputePipelineHolder ComputePipeline;
+};
+
+Resources Handles;
 
 int main()
 {
@@ -33,7 +37,7 @@ int main()
     };
 
     ExampleApp App{appDescription};
-    EOS::ShaderModuleHolder ComputeShader = App.Context->CreateShaderModule("compute", EOS::ShaderStage::Compute);
+    Handles.ComputeShader = App.Context->CreateShaderModule("compute", EOS::ShaderStage::Compute);
 
     constexpr ComputePayload initialPayload
     {
@@ -42,7 +46,7 @@ int main()
         .result = 0,
     };
 
-    EOS::BufferHolder ComputeBuffer = App.Context->CreateBuffer({
+    Handles.ComputeBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
         .Size      = sizeof(ComputePayload),
@@ -52,20 +56,20 @@ int main()
 
     const EOS::ComputePipelineDescription computePipelineDescription
     {
-        .ComputeShader = ComputeShader,
+        .ComputeShader = Handles.ComputeShader,
         .DebugName = "Compute Validation Pipeline",
     };
-    EOS::ComputePipelineHolder computePipelineHandle = App.Context->CreateComputePipeline(computePipelineDescription);
+    Handles.ComputePipeline = App.Context->CreateComputePipeline(computePipelineDescription);
 
     const ComputePushConstants computePushConstants
     {
-        .payloadPtr = App.Context->GetGPUAddress(ComputeBuffer),
+        .payloadPtr = App.Context->GetGPUAddress(Handles.ComputeBuffer),
     };
 
     App.Run([&]()
     {
 
-        const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(ComputeBuffer));
+        const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(Handles.ComputeBuffer));
         if (computeData->result == computeData->lhs * computeData->rhs)
         {
             EOS::Logger->info("Compute validation success: {} * {} = {}", computeData->lhs, computeData->rhs, computeData->result);
@@ -75,13 +79,15 @@ int main()
 
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         cmdPushMarker(cmdBuffer, "Compute Validation", 0xfff59d00);
-        cmdBindComputePipeline(cmdBuffer, computePipelineHandle);
+        cmdBindComputePipeline(cmdBuffer, Handles.ComputePipeline);
         cmdPushConstants(cmdBuffer, computePushConstants);
         cmdDispatchThreadGroups(cmdBuffer, {1, 1, 1});
         cmdPopMarker(cmdBuffer);
 
         App.Context->Submit(cmdBuffer, {});
     });
+
+    Handles = {};
 
     return 0;
 }

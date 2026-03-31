@@ -89,6 +89,41 @@ struct DofCompositePC final
     float    maxBlurRadius;
 };
 
+struct Resources final
+{
+    EOS::ShaderModuleHolder VertexShader;
+    EOS::ShaderModuleHolder PixelShader;
+    EOS::ShaderModuleHolder DeferredLightComputeShader;
+    EOS::ShaderModuleHolder DofDownsampleShader;
+    EOS::ShaderModuleHolder DofBlurHShader;
+    EOS::ShaderModuleHolder DofBlurVShader;
+    EOS::ShaderModuleHolder DofCompositeShader;
+    EOS::ShaderModuleHolder PresentVertShader;
+    EOS::ShaderModuleHolder PresentFragShader;
+    EOS::TextureHolder DepthTexture;
+    EOS::TextureHolder GbufferAlbedoTexture;
+    EOS::TextureHolder GbufferNormalTexture;
+    EOS::TextureHolder GbufferWorldPosTexture;
+    EOS::TextureHolder SceneLitTexture;
+    EOS::TextureHolder DofHalfTexture;
+    EOS::TextureHolder DofBlurTexture;
+    EOS::TextureHolder DofTexture;
+    EOS::BufferHolder VertexBuffer;
+    EOS::BufferHolder IndexBuffer;
+    EOS::BufferHolder PerDrawBuffer;
+    EOS::BufferHolder PerFrameBuffer;
+    EOS::BufferHolder IndirectDrawBuffer;
+    EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
+    EOS::Holder<EOS::ComputePipelineHandle> DeferredLightingPipeline;
+    EOS::Holder<EOS::ComputePipelineHandle> DofDownsamplePipeline;
+    EOS::Holder<EOS::ComputePipelineHandle> DofBlurHPipeline;
+    EOS::Holder<EOS::ComputePipelineHandle> DofBlurVPipeline;
+    EOS::Holder<EOS::ComputePipelineHandle> DofCompositePipeline;
+    EOS::Holder<EOS::RenderPipelineHandle> PresentPipeline;
+};
+
+Resources Handles;
+
 int main()
 {
     const EOS::ContextCreationDescription contextDescr
@@ -113,18 +148,18 @@ int main()
 
     ExampleApp App{appDescription};
 
-    EOS::ShaderModuleHolder vertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
-    EOS::ShaderModuleHolder pixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
-    EOS::ShaderModuleHolder deferredLightComputeShader = App.Context->CreateShaderModule("deferredLightCompute", EOS::ShaderStage::Compute);
-    EOS::ShaderModuleHolder dofDownsampleShader = App.Context->CreateShaderModule("dofDownsample", EOS::ShaderStage::Compute);
-    EOS::ShaderModuleHolder dofBlurHShader = App.Context->CreateShaderModule("dofBlurH", EOS::ShaderStage::Compute);
-    EOS::ShaderModuleHolder dofBlurVShader = App.Context->CreateShaderModule("dofBlurV", EOS::ShaderStage::Compute);
-    EOS::ShaderModuleHolder dofCompositeShader = App.Context->CreateShaderModule("dofComposite", EOS::ShaderStage::Compute);
-    EOS::ShaderModuleHolder presentVertShader = App.Context->CreateShaderModule("present", EOS::ShaderStage::Vertex);
-    EOS::ShaderModuleHolder presentFragShader = App.Context->CreateShaderModule("present", EOS::ShaderStage::Fragment);
-    EOS::TextureHolder depthTexture = App.CreateDepthTexture();
+    Handles.VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
+    Handles.PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
+    Handles.DeferredLightComputeShader = App.Context->CreateShaderModule("deferredLightCompute", EOS::ShaderStage::Compute);
+    Handles.DofDownsampleShader = App.Context->CreateShaderModule("dofDownsample", EOS::ShaderStage::Compute);
+    Handles.DofBlurHShader = App.Context->CreateShaderModule("dofBlurH", EOS::ShaderStage::Compute);
+    Handles.DofBlurVShader = App.Context->CreateShaderModule("dofBlurV", EOS::ShaderStage::Compute);
+    Handles.DofCompositeShader = App.Context->CreateShaderModule("dofComposite", EOS::ShaderStage::Compute);
+    Handles.PresentVertShader = App.Context->CreateShaderModule("present", EOS::ShaderStage::Vertex);
+    Handles.PresentFragShader = App.Context->CreateShaderModule("present", EOS::ShaderStage::Fragment);
+    Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - DepthOfField");
 
-    EOS::TextureHolder gbufferAlbedoTexture = App.Context->CreateTexture({
+    Handles.GbufferAlbedoTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = EOS::Format::RGBA_UN8,
         .TextureDimensions= { static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height) },
@@ -132,7 +167,7 @@ int main()
         .DebugName        = "GBuffer AlbedoMetallic",
     });
 
-    EOS::TextureHolder gbufferNormalTexture = App.Context->CreateTexture({
+    Handles.GbufferNormalTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = EOS::Format::RGBA_UN8,
         .TextureDimensions= { static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height) },
@@ -140,7 +175,7 @@ int main()
         .DebugName        = "GBuffer NormalRoughness",
     });
 
-    EOS::TextureHolder gbufferWorldPosTexture = App.Context->CreateTexture({
+    Handles.GbufferWorldPosTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = EOS::Format::RGBA_F16,
         .TextureDimensions= { static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height) },
@@ -148,7 +183,7 @@ int main()
         .DebugName        = "GBuffer WorldPosition",
     });
 
-    EOS::TextureHolder sceneLitTexture = App.Context->CreateTexture({
+    Handles.SceneLitTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = App.Context->GetSwapchainFormat(),
         .TextureDimensions= { static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height) },
@@ -159,7 +194,7 @@ int main()
     const uint32_t halfWidth = (static_cast<uint32_t>(App.Window.Width) + 1) / 2;
     const uint32_t halfHeight = (static_cast<uint32_t>(App.Window.Height) + 1) / 2;
 
-    EOS::TextureHolder dofHalfTexture = App.Context->CreateTexture({
+    Handles.DofHalfTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = EOS::Format::RGBA_F16,
         .TextureDimensions= { halfWidth, halfHeight },
@@ -167,7 +202,7 @@ int main()
         .DebugName        = "DOF Half",
     });
 
-    EOS::TextureHolder dofBlurTexture = App.Context->CreateTexture({
+    Handles.DofBlurTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = EOS::Format::RGBA_F16,
         .TextureDimensions= { halfWidth, halfHeight },
@@ -175,7 +210,7 @@ int main()
         .DebugName        = "DOF Blur",
     });
 
-    EOS::TextureHolder dofTexture = App.Context->CreateTexture({
+    Handles.DofTexture = App.Context->CreateTexture({
         .Type             = EOS::ImageType::Image_2D,
         .TextureFormat    = App.Context->GetSwapchainFormat(),
         .TextureDimensions= { static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height) },
@@ -200,11 +235,9 @@ int main()
     };
 
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
-    std::vector<Vertex> vertices;
-    vertices.reserve(scene.vertices.size());
-    for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
+    std::vector<Vertex> vertices = BuildVerticesFromScene<Vertex>(scene);
 
-    EOS::BufferHolder vertexBuffer = App.Context->CreateBuffer({
+    Handles.VertexBuffer = App.Context->CreateBuffer({
       .Usage     = EOS::BufferUsageFlags::Vertex,
       .Storage   = EOS::StorageType::Device,
       .Size      = sizeof(Vertex) * vertices.size(),
@@ -212,7 +245,7 @@ int main()
       .DebugName = "Buffer: vertex"
       });
 
-    EOS::BufferHolder indexBuffer = App.Context->CreateBuffer({
+    Handles.IndexBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(uint32_t) * scene.indices.size(),
@@ -220,19 +253,9 @@ int main()
         .DebugName = "Buffer: index"
     });
 
-    std::vector<DrawData> drawData;
-    drawData.reserve(scene.meshes.size());
-    for (auto& mesh : scene.meshes)
-    {
-        drawData.push_back({
-            .albedoID            = mesh.albedoTextureIdx,
-            .normalID            = mesh.normalTextureIdx,
-            .metallicRoughnessID = mesh.metallicRoughnessTextureIdx,
-            .transform           = mesh.transform,
-        });
-    }
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
 
-    EOS::BufferHolder perDrawBuffer = App.Context->CreateBuffer({
+    Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(DrawData) * drawData.size(),
@@ -240,7 +263,7 @@ int main()
         .DebugName = "PerDrawBuffer",
     });
 
-    EOS::BufferHolder perFrameBuffer = App.Context->CreateBuffer(
+    Handles.PerFrameBuffer = App.Context->CreateBuffer(
 {
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
@@ -248,22 +271,9 @@ int main()
         .DebugName = "PerFrameBuffer",
     });
 
-    std::vector<EOS::DrawIndexedIndirectCommand> indirectCmds;
-    indirectCmds.reserve(scene.meshes.size());
-    for (auto& mesh : scene.meshes)
-    {
-        indirectCmds.emplace_back(
-        EOS::DrawIndexedIndirectCommand
-        {
-            .indexCount    = mesh.indexCount,
-            .instanceCount = 1,
-            .firstIndex    = mesh.indexOffset,
-            .vertexOffset  = static_cast<int32_t>(mesh.vertexOffset),
-            .firstInstance = 0,
-        });
-    }
+    std::vector<EOS::DrawIndexedIndirectCommand> indirectCmds = BuildIndirectCommands(scene);
 
-    EOS::BufferHolder indirectDrawBuffer = App.Context->CreateBuffer({
+    Handles.IndirectDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::Indirect,
         .Storage   = EOS::StorageType::Device,
         .Size      = sizeof(EOS::DrawIndexedIndirectCommand) * indirectCmds.size(),
@@ -274,69 +284,69 @@ int main()
     const EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = vertexShader,
-        .FragmentShader = pixelShader,
+        .VertexShader = Handles.VertexShader,
+        .FragmentShader = Handles.PixelShader,
         .ColorAttachments =
         {
             { .ColorFormat = EOS::Format::RGBA_UN8 },
             { .ColorFormat = EOS::Format::RGBA_UN8 },
             { .ColorFormat = EOS::Format::RGBA_F16 },
         },
-        .DepthFormat = App.Context->GetFormat(depthTexture),
+        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Deferred Geometry Pipeline",
     };
-    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
+    Handles.RenderPipeline = App.Context->CreateRenderPipeline(renderPipelineDescription);
 
     const EOS::ComputePipelineDescription deferredLightingPipelineDescription
     {
-        .ComputeShader = deferredLightComputeShader,
+        .ComputeShader = Handles.DeferredLightComputeShader,
         .DebugName     = "Deferred Lighting Compute Pipeline",
     };
-    EOS::Holder<EOS::ComputePipelineHandle> deferredLightingPipelineHandle = App.Context->CreateComputePipeline(deferredLightingPipelineDescription);
+    Handles.DeferredLightingPipeline = App.Context->CreateComputePipeline(deferredLightingPipelineDescription);
 
     const EOS::ComputePipelineDescription dofDownsamplePipelineDescription
     {
-        .ComputeShader = dofDownsampleShader,
+        .ComputeShader = Handles.DofDownsampleShader,
         .DebugName     = "DOF Downsample Pipeline",
     };
-    EOS::Holder<EOS::ComputePipelineHandle> dofDownsamplePipelineHandle = App.Context->CreateComputePipeline(dofDownsamplePipelineDescription);
+    Handles.DofDownsamplePipeline = App.Context->CreateComputePipeline(dofDownsamplePipelineDescription);
 
     const EOS::ComputePipelineDescription dofBlurHPipelineDescription
     {
-        .ComputeShader = dofBlurHShader,
+        .ComputeShader = Handles.DofBlurHShader,
         .DebugName     = "DOF Blur H Pipeline",
     };
-    EOS::Holder<EOS::ComputePipelineHandle> dofBlurHPipelineHandle = App.Context->CreateComputePipeline(dofBlurHPipelineDescription);
+    Handles.DofBlurHPipeline = App.Context->CreateComputePipeline(dofBlurHPipelineDescription);
 
     const EOS::ComputePipelineDescription dofBlurVPipelineDescription
     {
-        .ComputeShader = dofBlurVShader,
+        .ComputeShader = Handles.DofBlurVShader,
         .DebugName     = "DOF Blur V Pipeline",
     };
-    EOS::Holder<EOS::ComputePipelineHandle> dofBlurVPipelineHandle = App.Context->CreateComputePipeline(dofBlurVPipelineDescription);
+    Handles.DofBlurVPipeline = App.Context->CreateComputePipeline(dofBlurVPipelineDescription);
 
     const EOS::ComputePipelineDescription dofCompositePipelineDescription
     {
-        .ComputeShader = dofCompositeShader,
+        .ComputeShader = Handles.DofCompositeShader,
         .DebugName     = "DOF Composite Pipeline",
     };
-    EOS::Holder<EOS::ComputePipelineHandle> dofCompositePipelineHandle = App.Context->CreateComputePipeline(dofCompositePipelineDescription);
+    Handles.DofCompositePipeline = App.Context->CreateComputePipeline(dofCompositePipelineDescription);
 
     const EOS::RenderPipelineDescription presentPipelineDescription
     {
-        .VertexShader     = presentVertShader,
-        .FragmentShader   = presentFragShader,
+        .VertexShader     = Handles.PresentVertShader,
+        .FragmentShader   = Handles.PresentFragShader,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat() }},
         .PipelineCullMode = EOS::CullMode::None,
         .DebugName        = "Present Pipeline",
     };
-    EOS::Holder<EOS::RenderPipelineHandle> presentPipelineHandle = App.Context->CreateRenderPipeline(presentPipelineDescription);
+    Handles.PresentPipeline = App.Context->CreateRenderPipeline(presentPipelineDescription);
 
     const FramePointers framePointers
     {
-        .frameDataPtr = App.Context->GetGPUAddress(perFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(perDrawBuffer),
+        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
     glm::vec3 lightDirection = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
@@ -366,17 +376,17 @@ int main()
 
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         const EOS::TextureHandle swapChainTexture = App.Context->GetSwapChainTexture();
-        App.Context->Upload(perFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
+        App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
         const float rcpW = 1.0f / static_cast<float>(App.Window.Width);
         const float rcpH = 1.0f / static_cast<float>(App.Window.Height);
 
         const DeferredLightingPC lightingPC
         {
-            .gbufferAlbedoID   = gbufferAlbedoTexture.Index(),
-            .gbufferNormalID   = gbufferNormalTexture.Index(),
-            .gbufferWorldPosID = gbufferWorldPosTexture.Index(),
+            .gbufferAlbedoID   = Handles.GbufferAlbedoTexture.Index(),
+            .gbufferNormalID   = Handles.GbufferNormalTexture.Index(),
+            .gbufferWorldPosID = Handles.GbufferWorldPosTexture.Index(),
             .samplerID         = App.DefaultSampler.Index(),
-            .outputImageID     = sceneLitTexture.Index(),
+            .outputImageID     = Handles.SceneLitTexture.Index(),
             .debugView         = static_cast<uint32_t>(debugView),
             .cameraPos         = glm::vec4(App.MainCamera.GetPosition(), 1.0f),
             .lightDirIntensity = glm::vec4(lightDirection, lightIntensity),
@@ -385,18 +395,18 @@ int main()
 
         const DofDownsamplePC dofDownsamplePC
         {
-            .sceneColorID  = sceneLitTexture.Index(),
-            .worldPosID    = gbufferWorldPosTexture.Index(),
+            .sceneColorID  = Handles.SceneLitTexture.Index(),
+            .worldPosID    = Handles.GbufferWorldPosTexture.Index(),
             .samplerID     = App.DefaultSampler.Index(),
-            .outputImageID = dofHalfTexture.Index(),
+            .outputImageID = Handles.DofHalfTexture.Index(),
             .focusDistance = focusDistance,
             .focusRange    = focusRange,
         };
 
         const DofBlurPC dofBlurHPC
         {
-            .inputImageID  = dofHalfTexture.Index(),
-            .outputImageID = dofBlurTexture.Index(),
+            .inputImageID  = Handles.DofHalfTexture.Index(),
+            .outputImageID = Handles.DofBlurTexture.Index(),
             .samplerID     = App.DefaultSampler.Index(),
             .maxBlurRadius = maxBlurRadius,
             .texelSizeX    = 1.0f / static_cast<float>(halfWidth),
@@ -405,8 +415,8 @@ int main()
 
         const DofBlurPC dofBlurVPC
         {
-            .inputImageID  = dofBlurTexture.Index(),
-            .outputImageID = dofHalfTexture.Index(),
+            .inputImageID  = Handles.DofBlurTexture.Index(),
+            .outputImageID = Handles.DofHalfTexture.Index(),
             .samplerID     = App.DefaultSampler.Index(),
             .maxBlurRadius = maxBlurRadius,
             .texelSizeX    = 1.0f / static_cast<float>(halfWidth),
@@ -415,11 +425,11 @@ int main()
 
         const DofCompositePC dofCompositePC
         {
-            .sceneColorID  = sceneLitTexture.Index(),
-            .blurredID     = dofHalfTexture.Index(),
-            .worldPosID    = gbufferWorldPosTexture.Index(),
+            .sceneColorID  = Handles.SceneLitTexture.Index(),
+            .blurredID     = Handles.DofHalfTexture.Index(),
+            .worldPosID    = Handles.GbufferWorldPosTexture.Index(),
             .samplerID     = App.DefaultSampler.Index(),
-            .outputImageID = dofTexture.Index(),
+            .outputImageID = Handles.DofTexture.Index(),
             .focusDistance = focusDistance,
             .focusRange    = focusRange,
             .maxBlurRadius = maxBlurRadius,
@@ -427,7 +437,7 @@ int main()
 
         const PresentPC presentPC
         {
-            .sceneColorID = dofTexture.Index(),
+            .sceneColorID = Handles.DofTexture.Index(),
             .samplerID    = App.DefaultSampler.Index(),
         };
 
@@ -453,14 +463,14 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {},
         {
             { swapChainTexture,    EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-            { sceneLitTexture,        EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
-            { dofHalfTexture,      EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
-            { dofBlurTexture,      EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
-            { dofTexture,          EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
-            { gbufferAlbedoTexture,   EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-            { gbufferNormalTexture,   EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-            { gbufferWorldPosTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-            { depthTexture,           EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
+            { Handles.SceneLitTexture,        EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
+            { Handles.DofHalfTexture,      EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
+            { Handles.DofBlurTexture,      EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
+            { Handles.DofTexture,          EOS::ResourceState::Undefined, EOS::ResourceState::ShaderResource },
+            { Handles.GbufferAlbedoTexture,   EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+            { Handles.GbufferNormalTexture,   EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+            { Handles.GbufferWorldPosTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+            { Handles.DepthTexture,           EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
         });
 
         // --- Pass 1: Geometry pass
@@ -469,21 +479,21 @@ int main()
         {
             .Color        =
             {
-                { .Texture = gbufferAlbedoTexture },
-                { .Texture = gbufferNormalTexture },
-                { .Texture = gbufferWorldPosTexture },
+                { .Texture = Handles.GbufferAlbedoTexture },
+                { .Texture = Handles.GbufferNormalTexture },
+                { .Texture = Handles.GbufferWorldPosTexture },
             },
-            .DepthStencil = { .Texture = depthTexture },
+            .DepthStencil = { .Texture = Handles.DepthTexture },
             .DebugName    = "Geometry Framebuffer",
         };
         cmdBeginRendering(cmdBuffer, sceneRenderPass, geoFramebuffer);
         {
-            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
+            cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
             cmdPushConstants(cmdBuffer, framePointers);
             cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, indirectDrawBuffer, 0, scene.meshes.size());
+            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectDrawBuffer, 0, scene.meshes.size());
         }
         cmdEndRendering(cmdBuffer);
         cmdPopMarker(cmdBuffer);
@@ -491,16 +501,16 @@ int main()
         // Transition the G-buffer textures so the lighting pass can sample them.
         cmdPipelineBarrier(cmdBuffer, {},
         {
-            { gbufferAlbedoTexture,   EOS::ResourceState::RenderTarget, EOS::ResourceState::ShaderResource },
-            { gbufferNormalTexture,   EOS::ResourceState::RenderTarget, EOS::ResourceState::ShaderResource },
-            { gbufferWorldPosTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::ShaderResource },
-            { sceneLitTexture,        EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
+            { Handles.GbufferAlbedoTexture,   EOS::ResourceState::RenderTarget, EOS::ResourceState::ShaderResource },
+            { Handles.GbufferNormalTexture,   EOS::ResourceState::RenderTarget, EOS::ResourceState::ShaderResource },
+            { Handles.GbufferWorldPosTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::ShaderResource },
+            { Handles.SceneLitTexture,        EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
         });
 
         // --- Pass 2: Deferred Lighting Compute Pass
         cmdPushMarker(cmdBuffer, "Deferred Lighting Compute", 0xffffff00);
         {
-            cmdBindComputePipeline(cmdBuffer, deferredLightingPipelineHandle);
+            cmdBindComputePipeline(cmdBuffer, Handles.DeferredLightingPipeline);
             cmdPushConstants(cmdBuffer, lightingPC);
             uint32_t dispatchX = (App.Window.Width + 7) / 8;
             uint32_t dispatchY = (App.Window.Height + 7) / 8;
@@ -511,14 +521,14 @@ int main()
         // Transition sceneLitTexture for sampling and swapchain for rendering
         cmdPipelineBarrier(cmdBuffer, {},
         {
-            { sceneLitTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
-            { dofHalfTexture,  EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
+            { Handles.SceneLitTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
+            { Handles.DofHalfTexture,  EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
         });
 
         // --- Pass 3: DOF Downsample
         cmdPushMarker(cmdBuffer, "DOF Downsample", 0xff00ffaa);
         {
-            cmdBindComputePipeline(cmdBuffer, dofDownsamplePipelineHandle);
+            cmdBindComputePipeline(cmdBuffer, Handles.DofDownsamplePipeline);
             cmdPushConstants(cmdBuffer, dofDownsamplePC);
             uint32_t dispatchX = (halfWidth + 7) / 8;
             uint32_t dispatchY = (halfHeight + 7) / 8;
@@ -528,14 +538,14 @@ int main()
 
         cmdPipelineBarrier(cmdBuffer, {},
         {
-            { dofHalfTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
-            { dofBlurTexture, EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
+            { Handles.DofHalfTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
+            { Handles.DofBlurTexture, EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
         });
 
         // --- Pass 4: DOF Blur H
         cmdPushMarker(cmdBuffer, "DOF Blur H", 0xff00aaff);
         {
-            cmdBindComputePipeline(cmdBuffer, dofBlurHPipelineHandle);
+            cmdBindComputePipeline(cmdBuffer, Handles.DofBlurHPipeline);
             cmdPushConstants(cmdBuffer, dofBlurHPC);
             uint32_t dispatchX = (halfWidth + 7) / 8;
             uint32_t dispatchY = (halfHeight + 7) / 8;
@@ -545,14 +555,14 @@ int main()
 
         cmdPipelineBarrier(cmdBuffer, {},
         {
-            { dofBlurTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
-            { dofHalfTexture, EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
+            { Handles.DofBlurTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
+            { Handles.DofHalfTexture, EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
         });
 
         // --- Pass 5: DOF Blur V
         cmdPushMarker(cmdBuffer, "DOF Blur V", 0xff00bbff);
         {
-            cmdBindComputePipeline(cmdBuffer, dofBlurVPipelineHandle);
+            cmdBindComputePipeline(cmdBuffer, Handles.DofBlurVPipeline);
             cmdPushConstants(cmdBuffer, dofBlurVPC);
             uint32_t dispatchX = (halfWidth + 7) / 8;
             uint32_t dispatchY = (halfHeight + 7) / 8;
@@ -562,14 +572,14 @@ int main()
 
         cmdPipelineBarrier(cmdBuffer, {},
         {
-            { dofHalfTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
-            { dofTexture,     EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
+            { Handles.DofHalfTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
+            { Handles.DofTexture,     EOS::ResourceState::ShaderResource, EOS::ResourceState::UnorderedAccess },
         });
 
         // --- Pass 6: DOF Composite
         cmdPushMarker(cmdBuffer, "DOF Composite", 0xff00ccff);
         {
-            cmdBindComputePipeline(cmdBuffer, dofCompositePipelineHandle);
+            cmdBindComputePipeline(cmdBuffer, Handles.DofCompositePipeline);
             cmdPushConstants(cmdBuffer, dofCompositePC);
             uint32_t dispatchX = (App.Window.Width + 7) / 8;
             uint32_t dispatchY = (App.Window.Height + 7) / 8;
@@ -579,7 +589,7 @@ int main()
 
         cmdPipelineBarrier(cmdBuffer, {},
         {
-            { dofTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
+            { Handles.DofTexture, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
         });
 
         // --- Pass 7: Present (full-screen)
@@ -595,7 +605,7 @@ int main()
         };
         cmdBeginRendering(cmdBuffer, presentRenderPass, presentFramebuffer);
         {
-            cmdBindRenderPipeline(cmdBuffer, presentPipelineHandle);
+            cmdBindRenderPipeline(cmdBuffer, Handles.PresentPipeline);
             cmdPushConstants(cmdBuffer, presentPC);
             cmdDraw(cmdBuffer, 3);
         }
@@ -627,6 +637,8 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {}, {{ swapChainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present }});
         App.Context->Submit(cmdBuffer, swapChainTexture);
     });
+
+    Handles = {};
 
     return 0;
 }

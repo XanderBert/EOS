@@ -1,8 +1,4 @@
 #include "../../Common/App.h"
-#include "EOS.h"
-#include "logger.h"
-#include "shaders/shaderCompiler.h"
-#include "utils.h"
 
 struct PerFrameData final
 {
@@ -25,6 +21,19 @@ struct Vertex final
     glm::vec2 uv;
     glm::vec4 tangent;
 };
+
+struct Resources final
+{
+    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleVert;
+    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleFrag;
+    EOS::Holder<EOS::TextureHandle> DepthTexture;
+    EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
+    EOS::Holder<EOS::BufferHandle> VertexBuffer;
+    EOS::Holder<EOS::BufferHandle> IndexBuffer;
+    EOS::Holder<EOS::BufferHandle> PerFrameBuffer;
+};
+
+Resources Handles;
 
 int main()
 {
@@ -50,8 +59,8 @@ int main()
     ExampleApp App{appDescription};
 
 
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Fragment);
+    Handles.ShaderHandleVert = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Vertex);
+    Handles.ShaderHandleFrag = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Fragment);
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vdesc
@@ -70,28 +79,26 @@ int main()
         }
     };
 
-    EOS::Holder<EOS::TextureHandle> depthTexture = App.CreateDepthTexture();
+    Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - ModelPBR");
 
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = shaderHandleVert,
-        .FragmentShader = shaderHandleFrag,
+        .VertexShader = Handles.ShaderHandleVert,
+        .FragmentShader = Handles.ShaderHandleFrag,
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = App.Context->GetFormat(depthTexture),
+        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
-    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = App.Context->CreateRenderPipeline(renderPipelineDescription);
+    Handles.RenderPipeline = App.Context->CreateRenderPipeline(renderPipelineDescription);
 
 
     Scene scene = LoadModel("../data/damaged_helmet/DamagedHelmet.gltf", App.Context.get());
-    std::vector<Vertex> vertices;
-    vertices.reserve(scene.vertices.size());
-    for (const VertexInformation& vertexInfo : scene.vertices)  vertices.emplace_back(vertexInfo.position, vertexInfo.normal, vertexInfo.uv, vertexInfo.tangent);
+    std::vector<Vertex> vertices = BuildVerticesFromScene<Vertex>(scene);
 
-    EOS::Holder<EOS::BufferHandle> vertexBuffer = App.Context->CreateBuffer(
+    Handles.VertexBuffer = App.Context->CreateBuffer(
     {
       .Usage     = EOS::BufferUsageFlags::Vertex,
       .Storage   = EOS::StorageType::Device,
@@ -100,7 +107,7 @@ int main()
       .DebugName = "Buffer: vertex"
       });
 
-    EOS::Holder<EOS::BufferHandle> indexBuffer = App.Context->CreateBuffer(
+    Handles.IndexBuffer = App.Context->CreateBuffer(
     {
         .Usage     = EOS::BufferUsageFlags::Index,
         .Storage   = EOS::StorageType::Device,
@@ -109,12 +116,12 @@ int main()
         .DebugName = "Buffer: index"
     });
 
-    EOS::Holder<EOS::BufferHandle> perFrameBuffer = App.Context->CreateBuffer(
+    Handles.PerFrameBuffer = App.Context->CreateBuffer(
 {
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
         .Size      = sizeof(PerFrameData),
-        .DebugName = "perFrameBuffer",
+        .DebugName = "PerFrameBuffer",
     });
 
 
@@ -141,7 +148,7 @@ int main()
         EOS::Framebuffer framebuffer
         {
             .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DepthStencil = { .Texture = depthTexture },
+            .DepthStencil = { .Texture = Handles.DepthTexture },
             .DebugName = "Basic Color Depth Framebuffer"
         };
 
@@ -161,23 +168,23 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {},
             {
                 { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { depthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
+                { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
             });
 
-        cmdUpdateBuffer(cmdBuffer, perFrameBuffer, perFrameData);
+        cmdUpdateBuffer(cmdBuffer, Handles.PerFrameBuffer, perFrameData);
         cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
         {
             cmdPushMarker(cmdBuffer, "Damaged Helmet", 0xff0000ff);
-            cmdBindVertexBuffer(cmdBuffer, 0, vertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, indexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
+            cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
 
             struct FramePointers
             {
                 uint64_t draw;
             }pc
             {
-                .draw = App.Context->GetGPUAddress(perFrameBuffer)
+                .draw = App.Context->GetGPUAddress(Handles.PerFrameBuffer)
             };
 
             cmdPushConstants(cmdBuffer, pc);
@@ -190,6 +197,8 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
         App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
     });
+
+    Handles = {};
 
     return 0;
 }

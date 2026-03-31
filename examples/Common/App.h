@@ -1,9 +1,11 @@
 #pragma once
 #include "ModelLoader.h"
+#include "ExampleHelpers.h"
 #include "Camera.h"
 #include "EOS.h"
 #include "imgui.h"
 #include "ImGuiRenderer.h"
+#include "glm/gtc/type_ptr.hpp"
 
 struct InputState final
 {
@@ -47,7 +49,7 @@ public:
 
     DELETE_COPY_MOVE(ExampleApp)
 
-    [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateDepthTexture() const
+    [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateDepthTexture(const char* debugName = "Depth Buffer") const
     {
         return Context->CreateTexture(
         {
@@ -55,7 +57,7 @@ public:
             .TextureFormat          = EOS::Format::Z_F32,
             .TextureDimensions      = {static_cast<uint32_t>(Window.Width), static_cast<uint32_t>(Window.Height)},
             .Usage                  = EOS::TextureUsageFlags::Attachment,
-            .DebugName              = "Depth Buffer",
+            .DebugName              = debugName,
         });
     }
 

@@ -1,7 +1,14 @@
-#include "EOS.h"
-#include "logger.h"
-#include "shaders/shaderCompiler.h"
-#include "utils.h"
+#include "../../Common/App.h"
+
+struct Resources final
+{
+    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleVert;
+    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleFrag;
+    EOS::Holder<EOS::SamplerHandle> Sampler;
+    EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
+};
+
+Resources Handles;
 
 int main()
 {
@@ -14,8 +21,8 @@ int main()
 
     std::unique_ptr<EOS::Window> window = std::make_unique<EOS::Window>(contextDescr);
     std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleVert = context->CreateShaderModule("triangle", EOS::ShaderStage::Vertex);
-    EOS::Holder<EOS::ShaderModuleHandle> shaderHandleFrag = context->CreateShaderModule("triangle", EOS::ShaderStage::Fragment);
+    Handles.ShaderHandleVert = context->CreateShaderModule("triangle", EOS::ShaderStage::Vertex);
+    Handles.ShaderHandleFrag = context->CreateShaderModule("triangle", EOS::ShaderStage::Fragment);
 
     EOS::SamplerDescription samplerDescription
     {
@@ -23,16 +30,16 @@ int main()
         .maxAnisotropic = 0,
         .debugName = "Linear Sampler",
     };
-    EOS::Holder<EOS::SamplerHandle> sampler = context->CreateSampler(samplerDescription);
+    Handles.Sampler = context->CreateSampler(samplerDescription);
 
     EOS::RenderPipelineDescription renderPipelineDescription
     {
-        .VertexShader = shaderHandleVert,
-        .FragmentShader = shaderHandleFrag,
+        .VertexShader = Handles.ShaderHandleVert,
+        .FragmentShader = Handles.ShaderHandleFrag,
         .ColorAttachments = {{ .ColorFormat = context->GetSwapchainFormat()}},
         .DebugName = "Basic Render Pipeline",
     };
-    EOS::Holder<EOS::RenderPipelineHandle> renderPipelineHandle = context->CreateRenderPipeline(renderPipelineDescription);
+    Handles.RenderPipeline = context->CreateRenderPipeline(renderPipelineDescription);
 
     while (!window->ShouldClose())
     {
@@ -41,14 +48,18 @@ int main()
 
 
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
-        EOS::Framebuffer framebuffer = {.Color = {{.Texture = context->GetSwapChainTexture()}}};
+        EOS::Framebuffer framebuffer =
+        {
+            .Color = {{.Texture = context->GetSwapChainTexture()}},
+            .DebugName = "Triangle Framebuffer",
+        };
         EOS::RenderPass renderPass{ .Color = { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } }};
         cmdPipelineBarrier(cmdBuffer, {},{{ context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget }});
 
         cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
         {
             cmdPushMarker(cmdBuffer, "Triangle", 0xff0000ff);
-            cmdBindRenderPipeline(cmdBuffer, renderPipelineHandle);
+            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
             cmdDraw(cmdBuffer, 3);
             cmdPopMarker(cmdBuffer);
         }
@@ -57,6 +68,8 @@ int main()
         cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
         context->Submit(cmdBuffer, context->GetSwapChainTexture());
     }
+
+    Handles = {};
 
     return 0;
 }
