@@ -598,6 +598,13 @@ namespace VkContext
             .rayQuery = VK_TRUE,
         };
 
+        VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR computeShaderDerivativesFeatures =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
+            .computeDerivativeGroupQuads = VK_TRUE,
+            .computeDerivativeGroupLinear = VK_TRUE,
+        };
+
         //Will only be tried to enable on 1.3 Vulkan
         VkPhysicalDeviceIndexTypeUint8FeaturesEXT indexTypeUint8Features =
         {
@@ -712,6 +719,7 @@ namespace VkContext
         const bool hasAccelerationStructure = addOptionalExtensions(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, &accelerationStructureFeatures);
         const bool hasRaytracingPipeline = addOptionalExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rayTracingFeatures);
         addOptionalExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, &rayQueryFeatures);
+        addOptionalExtension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, &computeShaderDerivativesFeatures);
 
         if (version == vkVersion::VERSION_13)
         {

@@ -5,12 +5,25 @@ module common;
 
 [[vk::binding(0, 0)]] Texture2D kTextures2D[];
 [[vk::binding(1, 0)]] SamplerState kSamplers[];
+[[vk::binding(2, 0)]] RWTexture2D<float4> kStorageImages2D[];
 [[vk::binding(3, 0)]] Texture2DArray kTextures2DArray[];
 [[vk::binding(4, 0)]] RaytracingAccelerationStructure kAccelerationStructures[];
 
 public RaytracingAccelerationStructure GetAccelerationStructure(uint AccelerationStructureId)
 {
     return kAccelerationStructures[NonUniformResourceIndex(AccelerationStructureId)];
+}
+
+public void ImageBindless2DStore(uint imageId, int2 pixel, float4 value)
+{
+    kStorageImages2D[NonUniformResourceIndex(imageId)][pixel] = value;
+}
+
+public int2 ImageBindless2DSize(uint imageId)
+{
+    int2 size;
+    kStorageImages2D[NonUniformResourceIndex(imageId)].GetDimensions(size.x, size.y);
+    return size;
 }
 
 public float4 TextureBindless2D(uint textureId, uint samplerId, float2 uv)
