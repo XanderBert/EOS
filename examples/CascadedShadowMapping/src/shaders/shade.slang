@@ -1,6 +1,7 @@
 import bindings;
 import shading;
 import shadowCommon;
+import math;
 
 
 struct MaterialHandles
@@ -38,15 +39,6 @@ uint SelectCascade(float viewDepth, float4 cascadeSplits)
     return 3;
 }
 
-// Runtime debug modes from PerFrameData.shadowDebugMode:
-// 0 = normal shading
-// 1 = cascade index color
-// 2 = shadow UV visualization
-// 3 = receiver shadow depth (proj z)
-// 4 = sampled shadow-map depth
-// 5 = depth delta heatmap (receiver - map)
-// 6 = validity mask (inside light frustum)
-
 float3 CascadeDebugColor(uint cascadeIndex)
 {
     if (cascadeIndex == 0) return float3(1.0, 0.0, 0.0);
@@ -55,28 +47,9 @@ float3 CascadeDebugColor(uint cascadeIndex)
     return float3(1.0, 0.0, 1.0);
 }
 
-bool IsFiniteFloat3(float3 v)
-{
-    return all(!isnan(v)) && all(!isinf(v));
-}
-
-float3 SafeNormalize(float3 v, float3 fallback)
-{
-    float lenSq = dot(v, v);
-    if (lenSq <= 1e-12 || !IsFiniteFloat3(v))
-    {
-        return fallback;
-    }
-
-    return v * rsqrt(lenSq);
-}
-
 float ComputeInlineRayShadow(PerFrameData frameData, float3 worldPos, float3 normal, float3 lightDir)
 {
-    if (!IsFiniteFloat3(worldPos) || !IsFiniteFloat3(normal) || !IsFiniteFloat3(lightDir))
-    {
-        return 1.0;
-    }
+    if (!IsFiniteFloat3(worldPos) || !IsFiniteFloat3(normal) || !IsFiniteFloat3(lightDir)) return 1.0;
 
     float3 rayDir = SafeNormalize(lightDir, float3(0.0, -1.0, 0.0));
     float3 rayNormal = SafeNormalize(normal, float3(0.0, 1.0, 0.0));
@@ -158,28 +131,19 @@ float4 fragmentMain(VSOutput input)
         return float4(color * shadow, 1.0);
     }
 
-
     float4 viewPos = mul(float4(input.WorldPos, 1.0), frameData.View);
     float viewDepth = -viewPos.z;
     uint cascadeIndex = SelectCascade(viewDepth, frameData.cascadeSplits);
     int debugMode = frameData.shadowDebugMode;
 
-    if (frameData.shadowForceCascade >= 0 && frameData.shadowForceCascade < 4)
-    {
-        cascadeIndex = (uint)frameData.shadowForceCascade;
-    }
-
-    if (debugMode == 1)
-    {
-        return float4(color * CascadeDebugColor(cascadeIndex), 1.0);
-    }
+    if (frameData.shadowForceCascade >= 0 && frameData.shadowForceCascade < 4) cascadeIndex = (uint)frameData.shadowForceCascade;
+    if (debugMode == 1)  return float4(color * CascadeDebugColor(cascadeIndex), 1.0);
 
     float4 shadowCoord = mul(float4(input.WorldPos, 1.0), frameData.cascadeViewProj[cascadeIndex]);
     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
     float2 shadowUV = projCoords.xy * 0.5 + 0.5;
-    // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
-    shadowUV.y = 1.0 - shadowUV.y;
+    shadowUV.y = 1.0 - shadowUV.y;  // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
 
     bool inDepthRange = projCoords.z > 0.0 && projCoords.z < 1.0;
     bool inUVRange = shadowUV.x > 0.0 && shadowUV.x < 1.0 && shadowUV.y > 0.0 && shadowUV.y < 1.0;
@@ -188,27 +152,15 @@ float4 fragmentMain(VSOutput input)
     float sampledDepth = TextureBindless2DArray(frameData.shadowMapID, 1, float3(shadowUV, cascadeIndex)).r;
     float depthDelta = projCoords.z - sampledDepth;
 
-    if (debugMode == 2)
-    {
-        return float4(saturate(shadowUV), saturate(projCoords.z), 1.0);
-    }
-    if (debugMode == 3)
-    {
-        return float4(projCoords.zzz, 1.0);
-    }
-    if (debugMode == 4)
-    {
-        return float4(sampledDepth.xxx, 1.0);
-    }
+    if (debugMode == 2) return float4(saturate(shadowUV), saturate(projCoords.z), 1.0);
+    if (debugMode == 3) return float4(projCoords.zzz, 1.0);
+    if (debugMode == 4) return float4(sampledDepth.xxx, 1.0);
     if (debugMode == 5)
     {
         float d = saturate(depthDelta * 80.0 + 0.5);
         return float4(d, 1.0 - d, 0.0, 1.0);
     }
-    if (debugMode == 6)
-    {
-        return isValidShadowCoord ? float4(0.0, 1.0, 0.0, 1.0) : float4(1.0, 0.0, 0.0, 1.0);
-    }
+    if (debugMode == 6) return isValidShadowCoord ? float4(0.0, 1.0, 0.0, 1.0) : float4(1.0, 0.0, 0.0, 1.0);
 
     //If the coord is outside the light frustum don't shadow it.
     if (!isValidShadowCoord)

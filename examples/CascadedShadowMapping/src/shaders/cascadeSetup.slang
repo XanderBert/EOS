@@ -23,43 +23,6 @@ struct CascadeSetupPC
 
 [[vk::push_constant]] CascadeSetupPC pc;
 
-float3 UnprojectNDC(float3 ndc)
-{
-    float4 world = mul(float4(ndc, 1.0), (pc.invViewProjection));
-    return world.xyz / world.w;
-}
-
-float4x4 BuildLookAtRH(float3 eye, float3 target, float3 up)
-{
-    float3 f = normalize(eye - target);
-    float3 s = normalize(cross(f, up));
-    float3 u = cross(s, f);
-
-    float4x4 m = float4x4(
-        s.x,  u.x, -f.x, 0.0,
-        s.y,  u.y, -f.y, 0.0,
-        s.z,  u.z, -f.z, 0.0,
-        -dot(s, eye), -dot(u, eye), dot(f, eye), 1.0
-    );
-
-    return m;
-}
-
-float4x4 BuildOrthoZO(float left, float right, float bottom, float top, float zNear, float zFar)
-{
-    float4x4 m = float4x4(
-        2.0 / (right - left), 0.0, 0.0, 0.0,
-        0.0, -2.0 / (top - bottom), 0.0, 0.0,
-        0.0, 0.0, 1.0 / (zFar - zNear), 0.0,
-        -(right + left) / (right - left),
-        -(top + bottom) / (top - bottom),
-        -zNear / (zFar - zNear),
-        1.0
-    );
-
-    return m;
-}
-
 [numthreads(1, 1, 1)]
 [shader("compute")]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
@@ -116,14 +79,14 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         float splitDist = cascadeSplits[i];
 
         float3 frustumCorners[8];
-        frustumCorners[0] = UnprojectNDC(float3(-1.0,  1.0, 0.0));
-        frustumCorners[1] = UnprojectNDC(float3( 1.0,  1.0, 0.0));
-        frustumCorners[2] = UnprojectNDC(float3( 1.0, -1.0, 0.0));
-        frustumCorners[3] = UnprojectNDC(float3(-1.0, -1.0, 0.0));
-        frustumCorners[4] = UnprojectNDC(float3(-1.0,  1.0, 1.0));
-        frustumCorners[5] = UnprojectNDC(float3( 1.0,  1.0, 1.0));
-        frustumCorners[6] = UnprojectNDC(float3( 1.0, -1.0, 1.0));
-        frustumCorners[7] = UnprojectNDC(float3(-1.0, -1.0, 1.0));
+        frustumCorners[0] = UnprojectNDC(float3(-1.0,  1.0, 0.0), pc.invViewProjection);
+        frustumCorners[1] = UnprojectNDC(float3( 1.0,  1.0, 0.0), pc.invViewProjection);
+        frustumCorners[2] = UnprojectNDC(float3( 1.0, -1.0, 0.0), pc.invViewProjection);
+        frustumCorners[3] = UnprojectNDC(float3(-1.0, -1.0, 0.0), pc.invViewProjection);
+        frustumCorners[4] = UnprojectNDC(float3(-1.0,  1.0, 1.0), pc.invViewProjection);
+        frustumCorners[5] = UnprojectNDC(float3( 1.0,  1.0, 1.0), pc.invViewProjection);
+        frustumCorners[6] = UnprojectNDC(float3( 1.0, -1.0, 1.0), pc.invViewProjection);
+        frustumCorners[7] = UnprojectNDC(float3(-1.0, -1.0, 1.0), pc.invViewProjection);
 
         [unroll]
         for (uint j = 0; j < 4; ++j)

@@ -355,7 +355,7 @@ int main()
     int       debugView = 0;
     float     focusDistance = 6.0f;
     float     focusRange = 3.0f;
-    float     maxBlurRadius = 6.0f;
+    float     maxBlurRadius = 1.0f;
 
     App.Run([&]()
     {
@@ -377,8 +377,6 @@ int main()
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         const EOS::TextureHandle swapChainTexture = App.Context->GetSwapChainTexture();
         App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
-        const float rcpW = 1.0f / static_cast<float>(App.Window.Width);
-        const float rcpH = 1.0f / static_cast<float>(App.Window.Height);
 
         const DeferredLightingPC lightingPC
         {
