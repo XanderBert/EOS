@@ -1,19 +1,15 @@
 #include "utils.h"
 #include <fstream>
 #include <vector>
-#include <ios>
-#include <limits>
-
-#include "logger.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include <stb_image.h>
 #include <stb_image_resize2.h>
 
-#include <ktx.h>
 #include "EOS.h"
-#include "vulkan/vkTools.h"
+#include "logger.h"
+#include "textureCompression.h"
 
 namespace EOS
 {
@@ -111,7 +107,7 @@ namespace EOS
 
     EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription)
     {
-        ktxTexture1* texture = nullptr;
+        ktxTexture2* texture = nullptr;
         uint8_t* pixels = nullptr;
         int originalWidth = 0;
         int originalHeight = 0;
@@ -123,7 +119,7 @@ namespace EOS
         {
             file.close();
             EOS::Logger->debug("{} was already compressed and cached. Loading image from cache", textureLoadingDescription.filePath.filename().string());
-            CHECK(ktxTexture1_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
+            CHECK(ktxTexture2_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
         }
         else
         {
@@ -135,19 +131,37 @@ namespace EOS
             EOS::Logger->info({"Compressing image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
 
             // Compress the texture and cache it
-            texture = CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
+            texture = TextureCompressor::CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
             ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
+        }
+
+        // Pack mip data tightly. KTX levels are 4-byte aligned
+        size_t packedSize = 0;
+        for (uint32_t level = 0; level < texture->numLevels; ++level)
+        {
+            packedSize += ktxTexture_GetImageSize(ktxTexture(texture), level);
+        }
+
+        std::vector<uint8_t> packedData(packedSize);
+        size_t packedOffset = 0;
+        for (uint32_t level = 0; level < texture->numLevels; ++level)
+        {
+            size_t levelOffset = 0;
+            ktxTexture_GetImageOffset(ktxTexture(texture), level, 0, 0, &levelOffset);
+            const size_t levelSize = ktxTexture_GetImageSize(ktxTexture(texture), level);
+            std::memcpy(packedData.data() + packedOffset, texture->pData + levelOffset, levelSize);
+            packedOffset += levelSize;
         }
 
         //Upload the texture to the GPU
         Holder<EOS::TextureHandle> loadedTexture = textureLoadingDescription.context->CreateTexture(
         {
             .Type                   = ImageType::Image_2D,
-            .TextureFormat          = CompressionToFormat(textureLoadingDescription.compression),
+            .TextureFormat          = TextureCompressor::CompressionToFormat(textureLoadingDescription.compression),
             .TextureDimensions      = {texture->baseWidth, texture->baseHeight},
             .NumberOfMipLevels      = texture->numLevels,
             .Usage                  = Sampled,
-            .Data                   = texture->pData,
+            .Data                   = packedData.data(),
             .DataNumberOfMipLevels  = texture->numLevels,
             .DebugName              = cachedFilePath.string().c_str(),
         });
@@ -156,133 +170,6 @@ namespace EOS
         stbi_image_free(pixels);
 
         return loadedTexture;
-    }
-
-    ktxTexture1* CompressTexture(uint8_t* pixels, int width, int height, Compression compression)
-    {
-        VkFormat desiredFormat{VK_FORMAT_R8G8B8A8_SRGB}; // Initial format
-        uint32_t glInternalFormat = 0x8058; // GL_RGBA8 - default
-        const uint32_t numberOfMipLevels = CalculateNumberOfMipLevels(width, height);
-
-        // create a KTX2 texture for RGBA data
-        ktxTextureCreateInfo createInfoKTX2
-        {
-            .glInternalformat = 0x8058, // = GL_RGBA8 -> i prefer no dependancy on GL
-            .vkFormat         = static_cast<uint32_t>(desiredFormat),
-            .baseWidth        = static_cast<uint32_t>(width),
-            .baseHeight       = static_cast<uint32_t>(height),
-            .baseDepth        = 1u,
-            .numDimensions    = 2u,
-            .numLevels        = numberOfMipLevels,
-            .numLayers        = 1u,
-            .numFaces         = 1u,
-            .generateMipmaps  = KTX_FALSE,
-        };
-
-        ktxTexture2* textureKTX2 = nullptr;
-        CHECK(ktxTexture2_Create(&createInfoKTX2, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &textureKTX2) == KTX_SUCCESS, "Could not create a KTX texture from the given pixel data for image");
-
-        int w = width;
-        int h = height;
-
-        // generate mip-map
-        for (uint32_t i = 0; i != numberOfMipLevels; ++i)
-        {
-            size_t offset = 0;
-            ktxTexture_GetImageOffset(ktxTexture(textureKTX2), i, 0, 0, &offset);
-            stbir_resize_uint8_linear(static_cast<const unsigned char *>(pixels), width, height, 0, ktxTexture_GetData(ktxTexture(textureKTX2)) + offset, w, h, 0, STBIR_RGBA);
-
-            h = h > 1 ? h >> 1 : 1;
-            w = w > 1 ? w >> 1 : 1;
-        }
-
-        ktxBasisParams basisCompressionParams = {};
-        basisCompressionParams.structSize = sizeof(basisCompressionParams);
-        basisCompressionParams.noSSE = KTX_FALSE;
-        basisCompressionParams.uastc = KTX_FALSE;
-
-        ktx_transcode_fmt_e compressionMethod;
-        switch (compression)
-        {
-            case ETC2:
-                compressionMethod = KTX_TTF_ETC2_RGBA;
-                desiredFormat = VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK; // Fixed to include alpha
-                glInternalFormat = 0x8D68; // GL_COMPRESSED_RGBA8_ETC2_EAC
-                break;
-            case BC5:
-                compressionMethod = KTX_TTF_BC5_RG;
-                desiredFormat = VK_FORMAT_BC5_UNORM_BLOCK;
-                glInternalFormat = 0x8DBD; // GL_COMPRESSED_RG_RGTC2
-
-                basisCompressionParams.uastc = KTX_TRUE;
-                basisCompressionParams.uastcFlags = KTX_PACK_UASTC_LEVEL_DEFAULT;
-                basisCompressionParams.normalMap = KTX_TRUE;
-
-                break;
-            case BC7:
-                compressionMethod = KTX_TTF_BC7_RGBA;
-                desiredFormat = VK_FORMAT_BC7_UNORM_BLOCK;
-                glInternalFormat = 0x8E8C; // GL_COMPRESSED_RGBA_BPTC_UNORM
-                break;
-            case NoCompression:
-            default:
-                compressionMethod = KTX_TTF_NOSELECTION;
-                desiredFormat = VK_FORMAT_R8G8B8A8_SRGB;
-                glInternalFormat = 0x8058; // GL_RGBA8
-                break;
-        }
-
-        if (compressionMethod != KTX_TTF_NOSELECTION)
-        {
-            // compress to Basis and transcode
-            CHECK(ktxTexture2_CompressBasisEx(textureKTX2, &basisCompressionParams) == KTX_SUCCESS, "Could not compress the image to the base compression");
-            CHECK(ktxTexture2_TranscodeBasis(textureKTX2, compressionMethod, 0) == KTX_SUCCESS, "Could not compress Image");
-        }
-
-        // convert to KTX1 - now using the correct format
-        const ktxTextureCreateInfo createInfoKTX1
-        {
-            .glInternalformat = glInternalFormat,
-            .vkFormat         = static_cast<uint32_t>(desiredFormat),
-            .baseWidth        = static_cast<uint32_t>(width),
-            .baseHeight       = static_cast<uint32_t>(height),
-            .baseDepth        = 1u,
-            .numDimensions    = 2u,
-            .numLevels        = numberOfMipLevels,
-            .numLayers        = 1u,
-            .numFaces         = 1u,
-            .generateMipmaps  = KTX_FALSE,
-        };
-
-        ktxTexture1* textureKTX1 = nullptr;
-        CHECK(ktxTexture1_Create(&createInfoKTX1, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &textureKTX1) == KTX_SUCCESS, "Could not create KTX1 Texture from");
-
-        for (uint32_t i = 0; i != numberOfMipLevels; ++i)
-        {
-            size_t offset1 = 0;
-            size_t offset2 = 0;
-
-            CHECK(ktxTexture_GetImageOffset(ktxTexture(textureKTX1), i, 0, 0, &offset1) == KTX_SUCCESS, "Error getting image offset while generating mip maps");
-            CHECK(ktxTexture_GetImageOffset(ktxTexture(textureKTX2), i, 0, 0, &offset2) == KTX_SUCCESS, "Error getting image offset while generating mip maps");
-
-            size_t imageSize = ktxTexture_GetImageSize(ktxTexture(textureKTX1), i);
-            memcpy(ktxTexture_GetData(ktxTexture(textureKTX1)) + offset1, ktxTexture_GetData(ktxTexture(textureKTX2)) + offset2, imageSize);
-        }
-
-        ktxTexture_Destroy(ktxTexture(textureKTX2));
-        return textureKTX1;
-    }
-
-    EOS::Format CompressionToFormat(const EOS::Compression compression)
-    {
-        switch (compression)
-        {
-        case BC5: return Format::BC5_RG;
-        case BC7: return Format::BC7_RGBA;
-        case ETC2: return Format::ETC2_SRGB8;
-        }
-
-        return Format::RGBA_SRGB8;
     }
 
     std::filesystem::file_time_type GetLastWriteTime(const std::string& fileName)

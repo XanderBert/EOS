@@ -4,7 +4,6 @@
 
 #include "enums.h"
 #include "EOS.h"
-#include "ktx.h"
 
 
 namespace EOS
@@ -42,10 +41,6 @@ namespace EOS
     [[nodiscard]] uint64_t GetAddressAligned(uint64_t address, uint64_t alignment);
     
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription);
-
-    [[nodiscard]] ktxTexture1* CompressTexture(uint8_t* pixels, int width, int height, Compression compression = NoCompression);
-
-    [[nodiscard]] EOS::Format CompressionToFormat(const EOS::Compression compression);
 
     [[nodiscard]] constexpr uint32_t CalculateNumberOfMipLevels(uint32_t width, uint32_t height)
     {
