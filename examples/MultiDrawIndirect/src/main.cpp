@@ -169,6 +169,9 @@ int main()
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
         if (std::isnan(aspectRatio)) return;
 
+        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
+        EOS::TextureHandle swapchainTexture = App.Context->GetSwapChainTexture();
+
         glm::mat4 m = glm::mat4(1);
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
@@ -183,7 +186,7 @@ int main()
 
         EOS::Framebuffer framebuffer
         {
-            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
+            .Color = {{.Texture = swapchainTexture}},
             .DepthStencil = { .Texture = Handles.DepthTexture },
             .DebugName = "Basic Color Depth Framebuffer"
         };
@@ -200,10 +203,10 @@ int main()
             .IsDepthWriteEnabled = true,
         };
 
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
+        
         cmdPipelineBarrier(cmdBuffer, {},
             {
-                { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
+                { swapchainTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
                 { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
             });
 
@@ -222,8 +225,9 @@ int main()
         }
         cmdEndRendering(cmdBuffer);
 
-        cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
+        cmdPipelineBarrier(cmdBuffer, {}, {{swapchainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
+        
+        App.Context->Submit(cmdBuffer, swapchainTexture);
     });
 
     Handles = {};

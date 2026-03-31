@@ -2,17 +2,28 @@
 #include <fstream>
 #include <vector>
 
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include <stb_image.h>
-#include <stb_image_resize2.h>
+#include <ktx.h>
+#include <vulkan/vk_enum_string_helper.h>
+#include <volk.h>
 
 #include "EOS.h"
 #include "logger.h"
-#include "textureCompression.h"
+#include "texturePipeline.h"
 
 namespace EOS
 {
+    [[nodiscard]] static EOS::Format KtxVkFormatToEOSFormat(const uint32_t vkFormat)
+    {
+        switch (vkFormat)
+        {
+            case VK_FORMAT_R8G8B8A8_SRGB: return EOS::Format::RGBA_SRGB8;
+            case VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK: return EOS::Format::ETC2_SRGB8;
+            case VK_FORMAT_BC5_UNORM_BLOCK: return EOS::Format::BC5_RG;
+            case VK_FORMAT_BC7_UNORM_BLOCK: return EOS::Format::BC7_RGBA;
+            case VK_FORMAT_BC7_SRGB_BLOCK: return EOS::Format::BC7_RGBA;
+            default: return EOS::Format::Invalid;
+        }
+    }
 
     std::string ReadFile(const std::filesystem::path& filePath)
     {
@@ -108,32 +119,15 @@ namespace EOS
     EOS::Holder<EOS::TextureHandle> LoadTexture(const TextureLoadingDescription& textureLoadingDescription)
     {
         ktxTexture2* texture = nullptr;
-        uint8_t* pixels = nullptr;
-        int originalWidth = 0;
-        int originalHeight = 0;
+        const std::filesystem::path compressedPath = EOS::TexturePipeline::BuildCompressedPathFromSource(textureLoadingDescription.filePath, textureLoadingDescription.compression);
 
-        //Check if texture is already stored in the cache if so load in the ktx instead of the other file.
-        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}_{}.ktx", textureLoadingDescription.filePath.stem().string(),static_cast<int>(textureLoadingDescription.compression));
-        std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-        if (file.is_open())
-        {
-            file.close();
-            EOS::Logger->debug("{} was already compressed and cached. Loading image from cache", textureLoadingDescription.filePath.filename().string());
-            CHECK(ktxTexture2_CreateFromNamedFile(cachedFilePath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load cached KTX texture: {}", cachedFilePath.string().c_str());
-        }
-        else
-        {
-            //Load raw pixel data
-            constexpr int desiredChannels = 4;
-            int channels;
-            pixels = stbi_load(textureLoadingDescription.filePath.string().c_str(), &originalWidth, &originalHeight, &channels, desiredChannels);
-            CHECK(pixels, "Could not load image at location: {}", textureLoadingDescription.filePath.string().c_str());
-            EOS::Logger->info({"Compressing image: {} | Size: {}x{} | Channels: {}"}, textureLoadingDescription.filePath.filename().string(), originalWidth, originalHeight, channels);
+        CHECK(std::filesystem::exists(compressedPath),"Missing compressed texture '{}'. Run the EOSTextureCompressor prebuild step.", compressedPath.string());
 
-            // Compress the texture and cache it
-            texture = TextureCompressor::CompressTexture(pixels, originalWidth, originalHeight, textureLoadingDescription.compression);
-            ktxTexture_WriteToNamedFile(ktxTexture(texture), cachedFilePath.string().c_str());
-        }
+        CHECK(ktxTexture2_CreateFromNamedFile(compressedPath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load compressed KTX texture: {}", compressedPath.string());
+
+          const VkFormat ktxVkFormat = static_cast<VkFormat>(texture->vkFormat);
+          const EOS::Format textureFormat = KtxVkFormatToEOSFormat(texture->vkFormat);
+          CHECK(textureFormat != EOS::Format::Invalid, "Unsupported KTX vkFormat '{}' ({}) in '{}'", string_VkFormat(ktxVkFormat), texture->vkFormat, compressedPath.string());
 
         // Pack mip data tightly. KTX levels are 4-byte aligned
         size_t packedSize = 0;
@@ -157,19 +151,18 @@ namespace EOS
         Holder<EOS::TextureHandle> loadedTexture = textureLoadingDescription.context->CreateTexture(
         {
             .Type                   = ImageType::Image_2D,
-            .TextureFormat          = TextureCompressor::CompressionToFormat(textureLoadingDescription.compression),
+            .TextureFormat          = textureFormat,
             .TextureDimensions      = {texture->baseWidth, texture->baseHeight},
             .NumberOfMipLevels      = texture->numLevels,
             .Usage                  = Sampled,
             .Data                   = packedData.data(),
             .DataNumberOfMipLevels  = texture->numLevels,
-            .DebugName              = cachedFilePath.string().c_str(),
+            .DebugName              = compressedPath.string().c_str(),
         });
 
         ktxTexture_Destroy(ktxTexture(texture));
-        stbi_image_free(pixels);
 
-        return loadedTexture;
+        return std::move(loadedTexture);
     }
 
     std::filesystem::file_time_type GetLastWriteTime(const std::string& fileName)

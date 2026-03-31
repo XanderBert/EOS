@@ -78,8 +78,8 @@ macro(CREATE_LIB name)
         set(LIB_TYPE STATIC)
     endif()
 
-    file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false src/*.c??)
-    file(GLOB_RECURSE HEADER_FILES LIST_DIRECTORIES false src/*.h)
+    file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.c??)
+    file(GLOB_RECURSE HEADER_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.h)
     file(GLOB_RECURSE SHADER_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.slang)
 
     message(STATUS "SRC_FILES: ${SRC_FILES}")
@@ -122,11 +122,15 @@ macro(CREATE_EXAMPLE name)
     set(PROJECT_NAME ${name})
     project(${PROJECT_NAME} CXX)
 
-    file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false src/*.c??)
+    file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.c??)
     file(GLOB_RECURSE SHADER_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.slang)
 
     add_executable(${PROJECT_NAME} ${SRC_FILES})
     set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "Examples")
+
+    if(TARGET EOSPrecompressTextures)
+        add_dependencies(${PROJECT_NAME} EOSPrecompressTextures)
+    endif()
 
     target_link_libraries(${PROJECT_NAME} PRIVATE EOS)
 

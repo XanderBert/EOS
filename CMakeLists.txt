@@ -19,6 +19,7 @@ set(EOS_USE_IMGUI       ON) # Enable ImGui integration
 set(EOS_USE_TRACY       OFF)# Enable Tracy profiler
 set(EOS_BUILD_EXAMPLES  ON) # Build example applications
 set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
+set(EOS_BUILD_TEXTURE_TOOLS ON) # Build offline texture compressor and prebuild steps
 
 
 # Set Debug or Release Define
@@ -81,7 +82,6 @@ endif ()
 
 eos_require_glfw(EOS)
 eos_require_spdlog(EOS)
-eos_require_stb(EOS)
 eos_require_ktx(EOS)
 
 if(EOS_SHADER_COMPILER)
@@ -97,6 +97,24 @@ endif()
 if(EOS_USE_IMGUI)
     target_compile_definitions(EOS PRIVATE EOS_USE_IMGUI)
     eos_require_imgui(EOS)
+endif()
+
+if(EOS_BUILD_TEXTURE_TOOLS)
+    add_subdirectory(tools)
+
+    if(TARGET EOSTextureCompressor)
+        add_custom_target(EOSPrecompressTextures ALL
+            COMMAND $<TARGET_FILE:EOSTextureCompressor>
+                --input "${CMAKE_SOURCE_DIR}/data"
+                --output "${CMAKE_SOURCE_DIR}/data/.compressed"
+                --threads 0
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            COMMENT "Precompressing textures to KTX2"
+            VERBATIM
+        )
+        set_property(TARGET EOSPrecompressTextures PROPERTY FOLDER "Internal/Assets")
+        add_dependencies(EOSPrecompressTextures EOSTextureCompressor)
+    endif()
 endif()
 
 if(EOS_BUILD_EXAMPLES)
