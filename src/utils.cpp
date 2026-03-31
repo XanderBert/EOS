@@ -148,7 +148,7 @@ namespace EOS
             .NumberOfMipLevels      = texture->numLevels,
             .Usage                  = Sampled,
             .Data                   = texture->pData,
-            .DataNumberOfMipLevels  = 1,
+            .DataNumberOfMipLevels  = texture->numLevels,
             .DebugName              = cachedFilePath.string().c_str(),
         });
 

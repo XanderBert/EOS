@@ -36,6 +36,7 @@ public:
         //Create Default Sampler
         constexpr EOS::SamplerDescription samplerDescription
         {
+            .mipMap = EOS::SamplerMip::Linear,
             .mipLodMax = EOS_MAX_MIP_LEVELS,
             .maxAnisotropic = 0,
             .debugName = "Linear Sampler",
