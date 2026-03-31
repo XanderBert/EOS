@@ -1,7 +1,15 @@
-module pbrShared;
-import common;
+module shading;
+import bindings;
+import math;
 
 #define PBR_PI 3.14159265358979323846
+
+public struct Material
+{
+    public float3 albedo;
+    public float metallic;
+    public float roughness;
+}
 
 public struct MaterialTextureSet
 {
@@ -26,6 +34,30 @@ public struct PBRSurface
     public float3 normal;
     public float3 viewDir;
     public float3 lightDir;
+}
+
+public float3 DecodeNormal(float3 packedNormal)
+{
+    return normalize(packedNormal * 2.0 - 1.0);
+}
+
+public float3 ReconstructNormal(float2 normalSample)
+{
+    float2 xy = 2.0 * normalSample - float2(1.0);
+    float z = sqrtFast(clamp(1.0 - dot(xy, xy), 0.0, 1.0));
+    return normalize(float3(xy, z));
+}
+
+public float3 GetShadingNormal(float3 n, float3 v, float2 normalSample, float2 uv, float3 tangent)
+{
+    float3 tangentNormal = ReconstructNormal(normalSample);
+    float3 N = normalize(n);
+    float3 T = normalize(tangent);
+    float3 B = normalize(cross(N, T));
+
+    float3x3 TBN = transpose(float3x3(T, B, N));
+
+    return normalize(mul(TBN, tangentNormal));
 }
 
 public float DistributionGGX(float dotNH, float roughness)

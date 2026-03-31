@@ -1,5 +1,6 @@
-import common;
-import pbrShared;
+import bindings;
+import fullscreen;
+import shading;
 
 public struct DeferredLightingPC
 {
@@ -27,16 +28,9 @@ struct VSOutput
 [shader("vertex")]
 VSOutput vertexMain(uint id : SV_VertexID)
 {
-    float2 uv = float2((id << 1) & 2, id & 2);
     VSOutput o;
-    o.UV  = uv;
-    o.Pos = float4(uv * 2.0 - 1.0, 0.0, 1.0);
+    FullscreenTriangle(id, o.UV, o.Pos);
     return o;
-}
-
-float3 DecodeNormal(float3 packedNormal)
-{
-    return normalize(packedNormal * 2.0 - 1.0);
 }
 
 [shader("fragment")]

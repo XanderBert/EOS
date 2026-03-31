@@ -1,5 +1,5 @@
-import common;
-import pbrShared;
+import bindings;
+import shading;
 
 public struct DeferredLightingPC
 {
@@ -18,10 +18,6 @@ public struct DeferredLightingPC
 
 [[vk::push_constant]] DeferredLightingPC pc;
 
-float3 DecodeNormal(float3 packedNormal)
-{
-    return normalize(packedNormal * 2.0 - 1.0);
-}
 
 [shader("compute")]
 [numthreads(8, 8, 1)]

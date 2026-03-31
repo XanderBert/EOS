@@ -1,4 +1,5 @@
-import common;
+import bindings;
+import dofCommon;
 
 public struct DofCompositePC
 {
@@ -14,11 +15,6 @@ public struct DofCompositePC
 
 [[vk::push_constant]] DofCompositePC pc;
 
-float ComputeCoC(float dist)
-{
-    float coc = abs(dist - pc.focusDistance) / max(pc.focusRange, 0.0001);
-    return saturate(coc);
-}
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -36,7 +32,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     float3 worldPos = TextureBindless2D(pc.worldPosID, pc.samplerID, uv).xyz;
     float dist = length(worldPos);
-    float coc = ComputeCoC(dist);
+    float coc = ComputeCoC(dist, pc.focusDistance, pc.focusRange);
 
     float3 sharp = TextureBindless2D(pc.sceneColorID, pc.samplerID, uv).rgb;
     float3 blurred = TextureBindless2D(pc.blurredID, pc.samplerID, uv).rgb;

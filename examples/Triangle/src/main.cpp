@@ -1,4 +1,4 @@
-#include "../../Common/App.h"
+#include "EOS.h"
 
 struct Resources final
 {

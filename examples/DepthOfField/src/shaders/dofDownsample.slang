@@ -1,4 +1,5 @@
-import common;
+import bindings;
+import dofCommon;
 
 public struct DofDownsamplePC
 {
@@ -14,12 +15,6 @@ public struct DofDownsamplePC
 
 [[vk::push_constant]] DofDownsamplePC pc;
 
-float ComputeCoC(float dist)
-{
-    // Circle of confusion based on distance from focus plane.
-    float coc = abs(dist - pc.focusDistance) / max(pc.focusRange, 0.0001);
-    return saturate(coc);
-}
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -47,7 +42,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         float2 sampleUV = uv + offsets[i] * texel;
         float3 worldPos = TextureBindless2D(pc.worldPosID, pc.samplerID, sampleUV).xyz;
         float dist = length(worldPos);
-        coc = max(coc, ComputeCoC(dist));
+        coc = max(coc, ComputeCoC(dist, pc.focusDistance, pc.focusRange));
         color += TextureBindless2D(pc.sceneColorID, pc.samplerID, sampleUV).rgb;
     }
 

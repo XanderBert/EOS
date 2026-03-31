@@ -1,4 +1,5 @@
-import common;
+import bindings;
+import math;
 import shadowCommon;
 
 static const uint CASCADES = 4;

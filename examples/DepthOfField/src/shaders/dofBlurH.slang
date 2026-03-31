@@ -1,4 +1,4 @@
-import common;
+import bindings;
 
 public struct DofBlurPC
 {

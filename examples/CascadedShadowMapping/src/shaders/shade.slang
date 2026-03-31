@@ -1,5 +1,5 @@
-import pbrShared;
-import common;
+import bindings;
+import shading;
 import shadowCommon;
 
 
