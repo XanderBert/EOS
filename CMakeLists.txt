@@ -23,8 +23,9 @@ set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
 set(EOS_BUILD_SHADER_TOOLS ON) # Add shader compiler as prebuild step
 set(EOS_BUILD_TEXTURE_TOOLS ON) # Add texture compressor as prebuild step
 
-# Skip texture prebuild in GitHub Actions
+# Skip prebuild in GitHub Actions
 if(DEFINED ENV{GITHUB_ACTIONS} AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+    set(EOS_BUILD_SHADER_TOOLS OFF)
     set(EOS_BUILD_TEXTURE_TOOLS OFF)
     message(STATUS "GitHub Actions detected: EOS_BUILD_TEXTURE_TOOLS=OFF")
 endif()
