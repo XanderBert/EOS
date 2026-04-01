@@ -1,7 +1,6 @@
 #pragma once
 
 #include <filesystem>
-
 #include "enums.h"
 
 namespace EOS::TexturePacking

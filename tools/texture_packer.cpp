@@ -7,7 +7,6 @@
 #include <thread>
 
 #include "ktx.h"
-#include <volk.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
@@ -54,7 +53,7 @@ namespace
         const ktxTextureCreateInfo createInfo
         {
             .glInternalformat = 0x8058,
-            .vkFormat         = static_cast<uint32_t>(VK_FORMAT_R8G8B8A8_SRGB),
+            .vkFormat         = static_cast<uint32_t>(43), //VK_FORMAT_R8G8B8A8_SRGB = 43,
             .baseWidth        = static_cast<uint32_t>(width),
             .baseHeight       = static_cast<uint32_t>(height),
             .baseDepth        = 1u,
