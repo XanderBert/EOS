@@ -801,7 +801,9 @@ int main()
         const glm::mat4 projection = App.MainCamera.GetProjectionMatrix(aspectRatio);
         const glm::mat4 viewProjection = projection * view;
         const glm::mat4 mvp = viewProjection * m;
+        const bool isCascadeTechnique = g_ShadowTechnique == ShadowTechniqueCpuCascade || g_ShadowTechnique == ShadowTechniqueComputeCascade;
         const bool useComputeCascades = g_ShadowTechnique == ShadowTechniqueComputeCascade;
+
 
         PerFrameData perFrameData
         {
@@ -902,13 +904,20 @@ int main()
             });
         }
 
-        PassShadowDepth(cmdBuffer);
-
-        cmdPipelineBarrier(cmdBuffer, {},
+        if (isCascadeTechnique)
         {
-            { Handles.ShadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },
-            { Handles.DepthTexture, EOS::ResourceState::DepthRead, EOS::ResourceState::DepthWrite },
-        });
+            PassShadowDepth(cmdBuffer);
+
+            cmdPipelineBarrier(cmdBuffer, {},
+            {
+           { Handles.ShadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },
+           { Handles.DepthTexture, EOS::ResourceState::DepthRead, EOS::ResourceState::DepthWrite },
+            });
+        }else
+        {
+            cmdPipelineBarrier(cmdBuffer, {},{{ Handles.DepthTexture, EOS::ResourceState::DepthRead, EOS::ResourceState::DepthWrite },});
+        }
+
 
         PassShade(cmdBuffer, swapChainTexture);
         PassUI(cmdBuffer, App.ImGuiRenderer.get());

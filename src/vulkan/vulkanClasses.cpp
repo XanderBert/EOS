@@ -12,6 +12,8 @@
 #pragma region GLOBAL_FUNCTIONS
 void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vector<EOS::GlobalBarrier>& globalBarriers, const std::vector<EOS::ImageBarrier>& imageBarriers)
 {
+    EOS_PROFILER_FUNCTION_COLOR(EOS_PROFILER_COLOR_BARRIER);
+
     const CommandBuffer* cmdBuffer = static_cast<const CommandBuffer*>(&commandBuffer);
     CHECK(cmdBuffer, "The commandBuffer is not valid");
 
@@ -147,6 +149,8 @@ void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dime
 {
     CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
     CHECK(!vulkanCommandBuffer->IsRendering, "Make sure you call cmdEndRendering before calling cmdDispatchThreadGroups");
+
+    EOS_PROFILER_GPU_ZONE("vkCmdDispatch", vulkanCommandBuffer->VkContext->GetTracyVkContext(), vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, EOS_PROFILER_COLOR_CMD_DISPATCH);
 
     vkCmdDispatch(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, threadGroupCount.Width, threadGroupCount.Height, threadGroupCount.Depth);
 }
@@ -428,6 +432,7 @@ void cmdDraw(const EOS::ICommandBuffer &commandBuffer, uint32_t vertexCount, uin
     }
 
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    EOS_PROFILER_GPU_ZONE("vkCmdDraw", vulkanCommandBuffer->VkContext->GetTracyVkContext(), vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, EOS_PROFILER_COLOR_CMD_DRAW);
     vkCmdDraw(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, vertexCount, instanceCount, firstVertex, baseInstance);
 }
 
@@ -441,6 +446,7 @@ void cmdDrawIndexed(const EOS::ICommandBuffer &commandBuffer, uint32_t indexCoun
 
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
 
+    EOS_PROFILER_GPU_ZONE("vkCmdDrawIndexed", vulkanCommandBuffer->VkContext->GetTracyVkContext(), vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, EOS_PROFILER_COLOR_CMD_DRAW);
     vkCmdDrawIndexed(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, baseInstance);
 }
 
@@ -450,6 +456,7 @@ void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, const EOS:
     VulkanBuffer* bufferIndirect = vulkanCommandBuffer->VkContext->BufferPool.Get(indirectBuffer);
     CHECK(bufferIndirect, "Could not get the indirectDrawingBuffer");
 
+    EOS_PROFILER_GPU_ZONE("vkCmdDrawIndexedIndirect", vulkanCommandBuffer->VkContext->GetTracyVkContext(), vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, EOS_PROFILER_COLOR_CMD_DRAW);
     vkCmdDrawIndexedIndirect(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, bufferIndirect->VulkanVkBuffer, indirectBufferOffset, drawCount, stride ? stride : sizeof(VkDrawIndexedIndirectCommand));
 }
 
@@ -526,12 +533,36 @@ void cmdPushMarker(const EOS::ICommandBuffer &commandBuffer, const char *label, 
 
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     vkCmdBeginDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, &utilsLabel);
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    if (TracyVkCtx tracyContext = vulkanCommandBuffer->VkContext->GetTracyVkContext())
+    {
+        const_cast<CommandBuffer*>(vulkanCommandBuffer)->TracyGpuZoneStack.emplace_back(std::make_unique<tracy::VkCtxScope>(
+            tracyContext,
+            __LINE__,
+            __FILE__,
+            strlen(__FILE__),
+            __FUNCTION__,
+            strlen(__FUNCTION__),
+            label,
+            strlen(label),
+            vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer,
+            true));
+    }
+#endif
 }
 
 void cmdPopMarker(const EOS::ICommandBuffer &commandBuffer)
 {
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     vkCmdEndDebugUtilsLabelEXT(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer);
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    if (!const_cast<CommandBuffer*>(vulkanCommandBuffer)->TracyGpuZoneStack.empty())
+    {
+        const_cast<CommandBuffer*>(vulkanCommandBuffer)->TracyGpuZoneStack.pop_back();
+    }
+#endif
 }
 
 void cmdUpdateBuffer(const EOS::ICommandBuffer& commandBuffer, const EOS::BufferHandle& buffer, size_t size, const void* data, size_t bufferOffset)
@@ -713,6 +744,7 @@ VkImageViewType VulkanImage::ToImageViewType(EOS::ImageType imageType)
 void VulkanImage::CreateImageView(VkImageView& imageView, VkDevice device, VkImage image, const EOS::ImageType imageType,
     const VkFormat &imageFormat, const uint32_t levels, const uint32_t layers, const char *debugName, const EOS::ComponentMapping& componentMapping, const uint32_t baseMipLevel, const uint32_t baseArrayLayer)
 {
+    EOS_PROFILER_FUNCTION();
     VkImageAspectFlags aspect{};
 
     const bool isDepth = IsDepthFormat(imageFormat);
@@ -932,6 +964,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 : VkContext(vulkanSwapChainDescription.vulkanContext)
 , GraphicsQueue(vulkanSwapChainDescription.vulkanContext->VulkanDeviceQueues.Graphics.Queue)
 {
+    EOS_PROFILER_FUNCTION();
     CHECK(VkContext, "VulkanContext is not valid.");
     CHECK(GraphicsQueue, "GraphicsQueue is not valid.");
     CHECK(vulkanSwapChainDescription.width != 0 || vulkanSwapChainDescription.height != 0, "Cannot Create a swapchain with size 0");
@@ -1114,6 +1147,7 @@ const VkSurfaceFormatKHR& VulkanSwapChain::GetFormat() const
 
 EOS::TextureHandle VulkanSwapChain::GetCurrentTexture()
 {
+    EOS_PROFILER_FUNCTION();
     GetAndWaitOnNextImage();
     CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
     return Textures[CurrentImageIndex];
@@ -1121,6 +1155,7 @@ EOS::TextureHandle VulkanSwapChain::GetCurrentTexture()
 
 void VulkanSwapChain::GetAndWaitOnNextImage()
 {
+    EOS_PROFILER_FUNCTION();
     //Get The Next SwapChain Image
     if (GetNextImage)
     {
@@ -1262,6 +1297,7 @@ void CommandPool::WaitSemaphore(const VkSemaphore& semaphore)
 
 void CommandPool::WaitAll()
 {
+    EOS_PROFILER_FUNCTION();
     VkFence fences[MaxCommandBuffers];
     uint32_t numFences = 0;
 
@@ -1283,6 +1319,7 @@ void CommandPool::WaitAll()
 
 void CommandPool::Wait(const EOS::SubmitHandle handle)
 {
+    EOS_PROFILER_FUNCTION();
     if (handle.Empty())
     {
         vkDeviceWaitIdle(Device);
@@ -1422,6 +1459,7 @@ EOS::SubmitHandle CommandPool::GetNextSubmitHandle() const
 
 CommandBufferData* CommandPool::AcquireCommandBuffer()
 {
+    EOS_PROFILER_FUNCTION();
     //Try to free a command buffer of none are free
     if (!NumberOfAvailableCommandBuffers)
     {
@@ -1471,6 +1509,7 @@ CommandBufferData* CommandPool::AcquireCommandBuffer()
 
 void CommandPool::TryResetCommandBuffers()
 {
+    EOS_PROFILER_FUNCTION();
     for (CommandBufferData& buffer : Buffers)
     {
         if (buffer.VulkanCommandBuffer == VK_NULL_HANDLE || buffer.isEncoding)
@@ -1864,6 +1903,7 @@ void VulkanStagingDevice::EnsureSize(uint32_t sizeNeeded)
 
 void VulkanStagingDevice::WaitAndReset()
 {
+    EOS_PROFILER_FUNCTION();
     for (const MemoryRegionDescription& region : Regions)
     {
         VkContext->VulkanCommandPool->Wait(region.Handle);
@@ -1875,6 +1915,7 @@ void VulkanStagingDevice::WaitAndReset()
 
 void VulkanStagingDevice::BufferSubData(const EOS::Handle<EOS::Buffer> &buffer, size_t dstOffset, size_t size, const void *data)
 {
+    EOS_PROFILER_FUNCTION();
     VulkanBuffer* vulkanBuffer = VkContext->BufferPool.Get(buffer);
     CHECK(vulkanBuffer, "The buffer from the handle is not valid");
     CHECK(dstOffset + size <= vulkanBuffer->BufferSize, "The data you want to upload is too big for the buffer");
@@ -1947,6 +1988,7 @@ void VulkanStagingDevice::BufferSubData(const EOS::Handle<EOS::Buffer> &buffer, 
 
 void VulkanStagingDevice::ImageData2D(const VulkanImage &image, const VkRect2D &imageRegion, uint32_t baseMipLevel, uint32_t numMipLevels, uint32_t layer, uint32_t numLayers, VkFormat format, const void *data)
 {
+    EOS_PROFILER_FUNCTION();
     CHECK(numMipLevels <= EOS_MAX_MIP_LEVELS, "mip levels exceed max mip levels");
 
     // divide the width and height by 2 until we get to the size of level 'baseMipLevel'
@@ -2125,6 +2167,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 , ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderOutputPath, std::vector<std::string>{contextDescription.ShaderPath.string(), contextDescription.EngineShaderPath.string()}))
 , ShaderReloaderImpl(std::make_unique<ShaderReloader>(contextDescription.ShaderPath, contextDescription.EngineShaderPath))
 {
+    EOS_PROFILER_FUNCTION();
     CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
 
     CreateVulkanInstance(contextDescription.ApplicationName);
@@ -2152,6 +2195,30 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     //Create our CommandPool
     VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    {
+        const VkCommandPoolCreateInfo ciCommandPool
+        {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+            .queueFamilyIndex = VulkanDeviceQueues.Graphics.QueueFamilyIndex,
+        };
+        VK_ASSERT(vkCreateCommandPool(VulkanDevice, &ciCommandPool, nullptr, &TracyCommandPool));
+
+        const VkCommandBufferAllocateInfo aiCommandBuffer
+        {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = TracyCommandPool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+        VK_ASSERT(vkAllocateCommandBuffers(VulkanDevice, &aiCommandBuffer, &TracyCommandBuffer));
+
+        TracyVkContext = TracyVkContext(VulkanPhysicalDevice, VulkanDevice, VulkanDeviceQueues.Graphics.Queue, TracyCommandBuffer);
+        CHECK(TracyVkContext, "Failed to initialize Tracy Vulkan context");
+    }
+#endif
 
     //TODO: Create pipeline cache
 
@@ -2182,6 +2249,21 @@ VulkanContext::~VulkanContext()
 {
     //Wait unit all work has been done
     VK_ASSERT(vkDeviceWaitIdle(VulkanDevice));
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    if (TracyVkContext)
+    {
+        TracyVkDestroy(TracyVkContext);
+        TracyVkContext = nullptr;
+    }
+
+    if (TracyCommandPool != VK_NULL_HANDLE)
+    {
+        vkDestroyCommandPool(VulkanDevice, TracyCommandPool, nullptr);
+        TracyCommandPool = VK_NULL_HANDLE;
+        TracyCommandBuffer = VK_NULL_HANDLE;
+    }
+#endif
 
     ShaderReloaderImpl.reset(nullptr);
 
@@ -2281,6 +2363,7 @@ void VulkanContext::StorePhysicalDeviceProperties()
 
 EOS::ICommandBuffer& VulkanContext::AcquireCommandBuffer()
 {
+    EOS_PROFILER_FUNCTION();
     CHECK(!CurrentCommandBuffer, "Another CommandBuffer has been acquired this frame");
     CurrentCommandBuffer = std::move(CommandBuffer{this});
     return CurrentCommandBuffer;
@@ -2288,8 +2371,17 @@ EOS::ICommandBuffer& VulkanContext::AcquireCommandBuffer()
 
 EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present)
 {
+    EOS_PROFILER_FUNCTION_COLOR(EOS_PROFILER_COLOR_SUBMIT);
+
     CommandBuffer* vkCmdBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
     CHECK(vkCmdBuffer, "The command buffer is not valid");
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    if (TracyVkContext)
+    {
+        TracyVkCollect(TracyVkContext, vkCmdBuffer->CommandBufferImpl->VulkanCommandBuffer);
+    }
+#endif
 
 #if defined(EOS_DEBUG)
     if (present)
@@ -2344,6 +2436,7 @@ EOS::SubmitHandle VulkanContext::Submit(EOS::ICommandBuffer &commandBuffer, EOS:
 
 EOS::TextureHandle VulkanContext::GetSwapChainTexture()
 {
+    EOS_PROFILER_FUNCTION();
     CHECK(HasSwapChain(), "You dont have a SwapChain");
     if (!HasSwapChain())
     {
@@ -3753,6 +3846,16 @@ VkDevice VulkanContext::GetDevice() const
     return VulkanDevice;
 }
 
+VkPhysicalDevice VulkanContext::GetPhysicalDevice() const
+{
+    return VulkanPhysicalDevice;
+}
+
+VkQueue VulkanContext::GetGraphicsQueue() const
+{
+    return VulkanDeviceQueues.Graphics.Queue;
+}
+
 bool VulkanContext::HasSwapChain() const noexcept
 {
     return SwapChain != nullptr;
@@ -3760,6 +3863,7 @@ bool VulkanContext::HasSwapChain() const noexcept
 
 void VulkanContext::CreateVulkanInstance(const char* applicationName)
 {
+    EOS_PROFILER_FUNCTION();
     uint32_t apiVersion{};
     vkEnumerateInstanceVersion(&apiVersion);
     const VkApplicationInfo applicationInfo
@@ -3911,6 +4015,7 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
 
 void VulkanContext::SetupDebugMessenger()
 {
+    EOS_PROFILER_FUNCTION();
    const VkDebugUtilsMessengerCreateInfoEXT debugUtilMessengerCreateInfo =
     {
        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -3920,11 +4025,12 @@ void VulkanContext::SetupDebugMessenger()
        .pUserData = this,
    };
 
-   VK_ASSERT(vkCreateDebugUtilsMessengerEXT(VulkanInstance, &debugUtilMessengerCreateInfo, nullptr, &VulkanDebugMessenger));
+    VK_ASSERT(vkCreateDebugUtilsMessengerEXT(VulkanInstance, &debugUtilMessengerCreateInfo, nullptr, &VulkanDebugMessenger));
 }
 
 void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
 {
+    EOS_PROFILER_FUNCTION();
 #if defined(EOS_PLATFORM_WINDOWS)
     const VkWin32SurfaceCreateInfoKHR SurfaceCreateInfo =
     {
@@ -3956,6 +4062,7 @@ void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
 
 void VulkanContext::CreateAllocator()
 {
+    EOS_PROFILER_FUNCTION();
     const VmaVulkanFunctions functions
     {
         .vkGetInstanceProcAddr = vkGetInstanceProcAddr,
@@ -4007,6 +4114,7 @@ void VulkanContext::GenerateMipmaps(const EOS::TextureHandle& handle)
 {
     if (handle.Empty()) { return; }
 
+    EOS_PROFILER_FUNCTION();
     const VulkanImage* texture = TexturePool.Get(handle);
     if (texture->Levels <= 1) { return; }
 
@@ -4019,6 +4127,7 @@ void VulkanContext::GenerateMipmaps(const EOS::TextureHandle& handle)
 
 void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const
 {
+    EOS_PROFILER_FUNCTION();
     uint32_t deviceCount = 0;
     VK_ASSERT(vkEnumeratePhysicalDevices(VulkanInstance, &deviceCount, nullptr));
     std::vector<VkPhysicalDevice> hardwareDevices(deviceCount);
@@ -4055,6 +4164,7 @@ void VulkanContext::GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType,
 
 void VulkanContext::UpdateDescriptorSet()
 {
+    EOS_PROFILER_FUNCTION();
     if (!ShouldDescriptorSetBeUpdated) return;
 
 
@@ -4063,7 +4173,6 @@ void VulkanContext::UpdateDescriptorSet()
     CHECK(!DescriptorSets.empty(), "Descriptor set list must contain at least one descriptor set state");
 
     LastUpdatedDescriptorSet = (LastUpdatedDescriptorSet + 1) % DescriptorSets.size();
-
     if (DescriptorSetState& descriptorSetState = DescriptorSets[LastUpdatedDescriptorSet]; descriptorSetState.Set != VK_NULL_HANDLE)
     {
         if (descriptorSetState.SubmitHandle.Empty() || !VulkanCommandPool->IsReady(descriptorSetState.SubmitHandle))
@@ -4072,7 +4181,6 @@ void VulkanContext::UpdateDescriptorSet()
             DescriptorSets.emplace_back();
         }
     }
-
     DescriptorSetState& activeDescriptorSetState = GetActiveDescriptorSetState();
     activeDescriptorSetState.SubmitHandle = {};
 
@@ -4282,6 +4390,7 @@ void VulkanContext::UpdateDescriptorSet()
 
 void VulkanContext::WaitOnDeferredTasks() const
 {
+    EOS_PROFILER_FUNCTION();
     for (auto& task : DeferredTasks)
     {
         VulkanCommandPool->Wait(task.Handle);

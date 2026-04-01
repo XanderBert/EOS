@@ -13,7 +13,7 @@ CREATE_LIB(EOS)
 
 set(EOS_VULKAN          ON) # Enable Vulkan backend
 set(EOS_USE_IMGUI       ON) # Enable ImGui integration
-set(EOS_USE_TRACY       OFF)# Enable Tracy profiler
+set(EOS_USE_TRACY       ON)# Enable Tracy profiler
 set(EOS_BUILD_EXAMPLES  ON) # Build example applications
 set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
 set(EOS_BUILD_SHADER_TOOLS ON) # Add shader compiler as prebuild step
@@ -40,7 +40,7 @@ target_compile_definitions(EOS PRIVATE $<$<CONFIG:Debug>:EOS_DEBUG=1> $<$<NOT:$<
 
 # When we want to use Vulkan
 if(EOS_VULKAN)
-    target_compile_definitions(EOS PRIVATE EOS_VULKAN)
+    target_compile_definitions(EOS PUBLIC EOS_VULKAN)
     target_compile_definitions(EOS PRIVATE VK_NO_PROTOTYPES) # Needed for VOLK
 
     if(USE_WINDOWS)
@@ -96,7 +96,7 @@ if(EOS_SHADER_COMPILER)
 endif ()
 
 if(EOS_USE_TRACY)
-    target_compile_definitions(EOS PRIVATE EOS_USE_TRACY)
+    target_compile_definitions(EOS PUBLIC EOS_USE_TRACY)
     eos_require_tracy(EOS)
 endif()
 

@@ -5,10 +5,21 @@
 #include <vector>
 
 #include <volk.h>
-#include <vk_mem_alloc.h>
+
+
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+#include <tracy/TracyVulkan.hpp>
+
+#define EOS_PROFILER_GPU_ZONE(name, tracyVkCtx, cmdBuffer, color) TracyVkZoneC((tracyVkCtx), (cmdBuffer), (name), (color))
+#else
+#define EOS_PROFILER_GPU_ZONE(name, tracyVkCtx, cmdBuffer, color)
+#endif
+
 
 #include "vkTools.h"
 #include "pool.h"
+#include "vk_mem_alloc.h"
 
 struct ComputePipelineState;
 struct VulkanRenderPipelineState;
@@ -315,6 +326,10 @@ public:
 
     VkPipeline LastPipelineBound = VK_NULL_HANDLE;
     EOS::Framebuffer VulkanFrameBuffer{};
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    std::vector<std::unique_ptr<tracy::VkCtxScope>> TracyGpuZoneStack{};
+#endif
 };
 
 struct DeferredTask final
@@ -476,6 +491,11 @@ public:
     void UpdateDescriptorSet();
     [[nodiscard]] VkDescriptorSetLayout GetActiveDescriptorSetLayout() const;
     [[nodiscard]] VkDevice GetDevice() const;
+    [[nodiscard]] VkPhysicalDevice GetPhysicalDevice() const;
+    [[nodiscard]] VkQueue GetGraphicsQueue() const;
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    [[nodiscard]] TracyVkCtx GetTracyVkContext() const { return TracyVkContext; }
+#endif
     [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
     bool RebuildRenderPipeline(EOS::RenderPipelineHandle handle);
@@ -559,6 +579,12 @@ private:
     uint32_t MaxPushConstantsSize                   = 0;
     uint32_t MaxTessellationPatchSize               = 0;
     uint32_t MinAccelerationStructureScratchOffsetAlignment = 1;
+
+#if defined(EOS_USE_TRACY) && defined(EOS_VULKAN)
+    TracyVkCtx TracyVkContext                       = nullptr;
+    VkCommandPool TracyCommandPool                 = VK_NULL_HANDLE;
+    VkCommandBuffer TracyCommandBuffer             = VK_NULL_HANDLE;
+#endif
 
 
     CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.

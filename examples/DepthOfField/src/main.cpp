@@ -613,7 +613,7 @@ int main()
         // --- Pass 8: UI
         App.ImGuiRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(360, 220), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(420, 360), ImGuiCond_FirstUseEver);
             ImGui::Begin("Deferred Lighting + DOF");
             ImGui::SliderFloat3("Light direction", &lightDirection.x, -1.0f, 1.0f);
             if (glm::length(lightDirection) > 0.0001f)

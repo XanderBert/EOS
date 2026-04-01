@@ -10,6 +10,27 @@
 #include "enums.h"
 #include "handle.h"
 
+#if defined(EOS_USE_TRACY)
+#include <tracy/Tracy.hpp>
+
+#define EOS_PROFILER_FUNCTION() ZoneScoped
+#define EOS_PROFILER_FUNCTION_COLOR(color) ZoneScopedC(color)
+#define EOS_PROFILER_FRAME(name) FrameMarkNamed(name)
+#define EOS_PROFILER_COLOR_WAIT 0xff0000
+#define EOS_PROFILER_COLOR_SUBMIT 0x0000ff
+#define EOS_PROFILER_COLOR_PRESENT 0x00ff00
+#define EOS_PROFILER_COLOR_CREATE 0xff6600
+#define EOS_PROFILER_COLOR_DESTROY 0xffa500
+#define EOS_PROFILER_COLOR_BARRIER 0xffffff
+#define EOS_PROFILER_COLOR_CMD_DRAW 0x8b0000
+#define EOS_PROFILER_COLOR_CMD_COPY 0x8b0a50
+#define EOS_PROFILER_COLOR_CMD_RTX 0x8b0000
+#define EOS_PROFILER_COLOR_CMD_DISPATCH 0x8b0000
+#else
+#define EOS_PROFILER_FUNCTION()
+#define EOS_PROFILER_FUNCTION_COLOR(color)
+#define EOS_PROFILER_FRAME(name)
+#endif
 
 namespace EOS
 {
