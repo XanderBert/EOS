@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
 project(EOS)
-
-
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 set(EOS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
@@ -12,14 +10,12 @@ include(cmake/deps-lock.cmake)
 include(cmake/deps.cmake)
 
 CREATE_LIB(EOS)
-DEFINE_PLATFORM()
 
 set(EOS_VULKAN          ON) # Enable Vulkan backend
 set(EOS_USE_IMGUI       ON) # Enable ImGui integration
 set(EOS_USE_TRACY       OFF)# Enable Tracy profiler
 set(EOS_BUILD_EXAMPLES  ON) # Build example applications
 set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
-
 set(EOS_BUILD_SHADER_TOOLS ON) # Add shader compiler as prebuild step
 set(EOS_BUILD_TEXTURE_TOOLS ON) # Add texture compressor as prebuild step
 
@@ -114,27 +110,9 @@ if(EOS_BUILD_TEXTURE_TOOLS OR EOS_BUILD_SHADER_TOOLS)
 endif()
 
 if(EOS_BUILD_TEXTURE_TOOLS)
-    if(TARGET EOSTextureCompressor)
-        add_custom_target(EOSPrecompressTextures ALL
-            COMMAND $<TARGET_FILE:EOSTextureCompressor>
-                --input "${CMAKE_SOURCE_DIR}/data"
-                --output "${CMAKE_SOURCE_DIR}/data/.compressed"
-                --threads 0
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-            COMMENT "Precompressing textures to KTX2"
-            USES_TERMINAL
-            VERBATIM
-        )
-        set_property(TARGET EOSPrecompressTextures PROPERTY FOLDER "Internal/Assets")
-        add_dependencies(EOSPrecompressTextures EOSTextureCompressor)
-    endif()
+    ADD_TEXTURE_COMPRESSION_TARGET("${CMAKE_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/data/.compressed")
 endif()
 
 if(EOS_BUILD_EXAMPLES)
     add_subdirectory(examples)
-endif()
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_compile_options(-g) # Add debug symbols
-    add_compile_options(-O0) # The -O0 flag disables optimization
 endif()

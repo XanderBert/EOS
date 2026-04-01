@@ -9,28 +9,6 @@
     endforeach()
 endmacro()
 
-macro(COPY_SHADERS_TO_BIN targetName shaderFiles)
-
-    set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/bin")
-
-    # Unique name per target to avoid clashes between lib and examples
-    set(COPY_TARGET_NAME "CopyShaders_${targetName}")
-
-    set(SHADER_COPY_COMMANDS)
-    foreach(SHADER ${shaderFiles})
-        get_filename_component(SHADER_NAME ${SHADER} NAME)
-        list(APPEND SHADER_COPY_COMMANDS
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SHADER}" "${SHADER_OUTPUT_DIR}/${SHADER_NAME}"
-        )
-    endforeach()
-
-    # Runs on every build, before the target is linked
-    add_custom_target(${COPY_TARGET_NAME} ALL ${SHADER_COPY_COMMANDS})
-    set_property(TARGET ${COPY_TARGET_NAME} PROPERTY FOLDER "Internal/ShaderCopy")
-    add_dependencies(${targetName} ${COPY_TARGET_NAME})
-endmacro()
-
 macro(SETUP_TARGET_DEFAULTS targetName)
     set_property(TARGET ${targetName} PROPERTY CXX_STANDARD 20)
     set_property(TARGET ${targetName} PROPERTY CXX_STANDARD_REQUIRED ON)
@@ -80,13 +58,11 @@ macro(CREATE_LIB name)
 
     file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.c??)
     file(GLOB_RECURSE HEADER_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.h)
-    file(GLOB_RECURSE SHADER_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.slang)
 
     message(STATUS "SRC_FILES: ${SRC_FILES}")
     message(STATUS "HEADER_FILES: ${HEADER_FILES}")
-    message(STATUS "SHADER_FILES: ${SHADER_FILES}")
 
-    add_library(${PROJECT_NAME} ${LIB_TYPE} ${SRC_FILES} ${HEADER_FILES} ${SHADER_FILES})
+    add_library(${PROJECT_NAME} ${LIB_TYPE} ${SRC_FILES} ${HEADER_FILES})
 
     target_include_directories(${PROJECT_NAME}
             PUBLIC
@@ -96,7 +72,6 @@ macro(CREATE_LIB name)
 
     SETUP_GROUPS("${SRC_FILES}")
     SETUP_GROUPS("${HEADER_FILES}")
-    SOURCE_GROUP(shaders FILES "${SHADER_FILES}")
 
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_DEBUG ${PROJECT_NAME}_Debug)
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME_RELEASE ${PROJECT_NAME}_Release)
@@ -115,7 +90,26 @@ macro(CREATE_LIB name)
         set_property(TARGET ${PROJECT_NAME} PROPERTY WINDOWS_EXPORT_ALL_SYMBOLS ON)
     endif()
 
+    DEFINE_PLATFORM()
 endmacro()
+
+
+function(ADD_TEXTURE_COMPRESSION_TARGET INPUT_PATH OUTPUT_PATH)
+if(TARGET EOSTextureCompressor)
+    add_custom_target(EOSPrecompressTextures ALL
+            COMMAND $<TARGET_FILE:EOSTextureCompressor>
+            --input "${INPUT_PATH}"
+            --output "${OUTPUT_PATH}"
+            --threads 0
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            COMMENT "Precompressing textures to KTX2"
+            USES_TERMINAL
+            VERBATIM
+    )
+    set_property(TARGET EOSPrecompressTextures PROPERTY FOLDER "Internal/Assets")
+    add_dependencies(EOSPrecompressTextures EOSTextureCompressor)
+endif()
+endfunction()
 
 function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH SHADER_FILES_LIST)
     if(NOT TARGET EOSShaderCompilerTool)
@@ -145,7 +139,6 @@ macro(CREATE_EXAMPLE name)
     project(${PROJECT_NAME} CXX)
 
     file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.c??)
-    file(GLOB_RECURSE SHADER_FILES CONFIGURE_DEPENDS LIST_DIRECTORIES false src/*.slang)
 
     add_executable(${PROJECT_NAME} ${SRC_FILES})
     set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "Examples")
@@ -165,7 +158,6 @@ macro(CREATE_EXAMPLE name)
     target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_SHADER_OUTPUT_PATH="${SHADER_OUTPUT_PATH}")
 
     SETUP_GROUPS("${SRC_FILES}")
-    SOURCE_GROUP(shaders FILES "${SHADER_FILES}")
 
     set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
 
