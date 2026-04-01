@@ -1,16 +1,10 @@
+#include "texture_packer.h"
+
 #include <algorithm>
-#include <atomic>
-#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
-#include <mutex>
-#include <string>
 #include <thread>
-#include <vector>
-
-#include "enums.h"
-#include "texturePipeline.h"
 
 #include "ktx.h"
 #include <volk.h>
@@ -27,13 +21,6 @@ namespace
         ktx_transcode_fmt_e transcodeFormat = KTX_TTF_NOSELECTION;
         bool useUASTC = false;
         bool normalMap = false;
-    };
-
-    struct Job final
-    {
-        std::filesystem::path sourcePath;
-        std::filesystem::path outputPath;
-        EOS::Compression compression = EOS::Compression::NoCompression;
     };
 
     [[nodiscard]] uint32_t CalculateNumberOfMipLevels(uint32_t width, uint32_t height)
@@ -57,40 +44,6 @@ namespace
             case EOS::Compression::NoCompression:
             default: return { KTX_TTF_NOSELECTION, false, false };
         }
-    }
-
-    [[nodiscard]] bool HasSupportedImageExtension(const std::filesystem::path& path)
-    {
-        //Get the extension
-        std::string extension = path.extension().string();
-
-        // Make extension lower case
-        std::ranges::transform(extension, extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-        return extension == ".png"
-            || extension == ".jpg"
-            || extension == ".jpeg"
-            || extension == ".tga"
-            || extension == ".bmp"
-            || extension == ".hdr";
-    }
-
-    [[nodiscard]] bool NeedsRebuild(const std::filesystem::path& sourcePath, const std::filesystem::path& outputPath)
-    {
-        std::error_code errorCode;
-
-        //Check if the file has been compressed already
-        if (!std::filesystem::exists(outputPath, errorCode))  return true;
-        if (errorCode) return true;
-
-        const auto sourceTime = std::filesystem::last_write_time(sourcePath, errorCode);
-        if (errorCode) return true;
-
-        const auto outputTime = std::filesystem::last_write_time(outputPath, errorCode);
-        if (errorCode) return true;
-
-        // If the source file is newer then the compressed file, we need to recompress it
-        return outputTime < sourceTime;
     }
 
     [[nodiscard]] ktxTexture2* CompressTexture(const uint8_t* pixels, const int width, const int height, const EOS::Compression compression)
@@ -146,7 +99,7 @@ namespace
             ktxBasisParams basisParams = {};
             basisParams.structSize = sizeof(basisParams);
             basisParams.noSSE = KTX_FALSE;
-            basisParams.threadCount = 1;
+            basisParams.threadCount = std::max(1u, std::thread::hardware_concurrency());
             basisParams.uastc = info.useUASTC ? KTX_TRUE : KTX_FALSE;
             basisParams.uastcFlags = info.useUASTC ? KTX_PACK_UASTC_LEVEL_DEFAULT : 0;
             basisParams.normalMap = info.normalMap ? KTX_TRUE : KTX_FALSE;
@@ -166,228 +119,50 @@ namespace
 
         return texture;
     }
+}
 
-    int CompressJob(const Job& job)
+namespace EOS::TexturePacking
+{
+    bool CompressTextureToCache(const std::filesystem::path& sourcePath, const std::filesystem::path& outputPath, const Compression compression)
     {
+        std::cout << "[info] Compressing texture: " << sourcePath.string().c_str() << std::endl;
         int width = 0;
         int height = 0;
         int channels = 0;
         constexpr int desiredChannels = 4;
-        uint8_t* pixels = stbi_load(job.sourcePath.string().c_str(), &width, &height, &channels, desiredChannels);
+        uint8_t* pixels = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, desiredChannels);
         if (pixels == nullptr)
         {
-            std::cerr << "[error] failed to load " << job.sourcePath << std::endl;
-            return 1;
+            std::cerr << "[error] failed to load " << sourcePath << std::endl;
+            return false;
         }
 
-        ktxTexture2* texture = CompressTexture(pixels, width, height, job.compression);
+        ktxTexture2* texture = CompressTexture(pixels, width, height, compression);
         stbi_image_free(pixels);
 
         if (texture == nullptr)
         {
-            std::cerr << "[error] failed to compress " << job.sourcePath << std::endl;
-            return 1;
+            std::cerr << "[error] failed to compress " << sourcePath << std::endl;
+            return false;
         }
 
         std::error_code errorCode;
-        std::filesystem::create_directories(job.outputPath.parent_path(), errorCode);
+        std::filesystem::create_directories(outputPath.parent_path(), errorCode);
         if (errorCode)
         {
-            std::cerr << "[error] failed to create directories for " << job.outputPath << std::endl;
+            std::cerr << "[error] failed to create directories for " << outputPath << std::endl;
             ktxTexture_Destroy(ktxTexture(texture));
-            return 1;
+            return false;
         }
 
-        if (ktxTexture_WriteToNamedFile(ktxTexture(texture), job.outputPath.string().c_str()) != KTX_SUCCESS)
+        if (ktxTexture_WriteToNamedFile(ktxTexture(texture), outputPath.string().c_str()) != KTX_SUCCESS)
         {
-            std::cerr << "[error] failed to write " << job.outputPath << std::endl;
+            std::cerr << "[error] failed to write " << outputPath << std::endl;
             ktxTexture_Destroy(ktxTexture(texture));
-            return 1;
+            return false;
         }
 
         ktxTexture_Destroy(ktxTexture(texture));
-        return 0;
-    }
-
-    // Used to skip files inside the output folder by checking whether `path` has `root` as its path
-    [[nodiscard]] bool PathStartsWith(const std::filesystem::path& path, const std::filesystem::path& root)
-    {
-        const auto pathIt = path.begin();
-        const auto rootIt = root.begin();
-
-        auto p = pathIt;
-        auto r = rootIt;
-        for (; r != root.end(); ++r, ++p)
-        {
-            if (p == path.end() || *p != *r)
-            {
-                return false;
-            }
-        }
-
         return true;
     }
-
-    [[nodiscard]] std::vector<Job> BuildJobs(
-        const std::filesystem::path& inputRoot,
-        const std::filesystem::path& outputRoot,
-        const bool includeETC2)
-    {
-        std::vector<Job> jobs;
-        std::error_code errorCode;
-
-        // Check if the folder exists
-        if (!std::filesystem::exists(inputRoot, errorCode))  return jobs;
-
-        // Try finding the input and output folder
-        const std::filesystem::path weakInputRoot = std::filesystem::weakly_canonical(inputRoot, errorCode);
-        const std::filesystem::path weakOutputRoot = std::filesystem::weakly_canonical(outputRoot, errorCode);
-
-        // Setup the Compressions we want to do
-        // TODO: i somehow need to find out which texture needs to be compressed in which format.
-        // I am thinking of a naming convention like `texture_bc7.png` or `texture_etc2.png` to indicate which compression format to use. 
-        // I don't want to force the end user a specific naming convention so if i go this way it should editable trough cmake.
-        const std::vector<EOS::Compression> compressionModes = includeETC2
-            ? std::vector<EOS::Compression>{ EOS::Compression::BC7, EOS::Compression::BC5, EOS::Compression::ETC2 }
-            : std::vector<EOS::Compression>{ EOS::Compression::BC7, EOS::Compression::BC5 };
-
-        // Go over the "entries" in the input directory
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(inputRoot))
-        {
-            // If it's not a file, skip it
-            if (!entry.is_regular_file()) continue;
-
-            // Check if its a image format we support
-            if (!HasSupportedImageExtension(entry.path())) continue;
-
-            // Skip files in the output folder to avoid processing already compressed textures. 
-            if (!weakOutputRoot.empty() && PathStartsWith(entry.path(), weakOutputRoot)) continue;
-
-
-            for (const EOS::Compression compression : compressionModes)
-            {
-                // Build the output path for this file and compression mode
-                const std::filesystem::path outputPath = EOS::TexturePipeline::BuildCompressedPathFromRoots(
-                    weakInputRoot.empty() ? inputRoot : weakInputRoot,
-                    weakOutputRoot.empty() ? outputRoot : weakOutputRoot,
-                    entry.path(),
-                    compression);
-
-                // Check if we need to rebuild this file by comparing the last write time of the source and output. If the output is newer, we can skip it.
-                if (!NeedsRebuild(entry.path(), outputPath)) continue;
-        
-                // If we need to rebuild, add a job for it.
-                jobs.push_back(Job{
-                    .sourcePath = entry.path(),
-                    .outputPath = outputPath,
-                    .compression = compression,
-                });
-            }
-        }
-
-        return jobs;
-    }
-}
-
-int main(int argc, char** argv)
-{
-    std::filesystem::path inputRoot = "data";
-    std::filesystem::path outputRoot = "data/.compressed";
-    uint32_t requestedThreads = 0;
-    bool includeETC2 = false;
-
-    // Parse command line arguments
-    for (int i = 1; i < argc; ++i)
-    {
-        const std::string arg = argv[i];
-
-        if (arg == "--input" && i + 1 < argc)
-        {
-            inputRoot = argv[++i];
-            continue;
-        }
-
-        if (arg == "--output" && i + 1 < argc)
-        {
-            outputRoot = argv[++i];
-            continue;
-        }
-
-        if (arg == "--threads" && i + 1 < argc)
-        {
-            requestedThreads = static_cast<uint32_t>(std::stoul(argv[++i]));
-            continue;
-        }
-
-        if (arg == "--include-etc2")
-        {
-            includeETC2 = true;
-            continue;
-        }
-
-        std::cerr << "Usage: EOSTextureCompressor [--input <dir>] [--output <dir>] [--threads <N>] [--include-etc2]\n";
-        return 1;
-    }
-
-    // Build the list of jobs to do 
-    std::vector<Job> jobs = BuildJobs(inputRoot, outputRoot, includeETC2);
-    if (jobs.empty())
-    {
-        std::cout << "[texture-packer] no texture updates required" << std::endl;
-        return 0;
-    }
-
-    const uint32_t threadCount = requestedThreads == 0 ? std::max(1u, std::thread::hardware_concurrency()) : std::max(1u, requestedThreads);
-    std::cout << "[texture-packer] processing " << jobs.size() << " jobs on " << threadCount << " threads" << std::endl;
-
-    std::atomic<size_t> nextJob = 0;
-    std::atomic<int> failures = 0;
-    std::atomic<size_t> finished = 0;
-    std::mutex outputMutex;
-
-    // Create a lambda function that a thread will run to process jobs
-    auto worker = [&]()
-    {
-        while (true)
-        {
-            // Get the next job index atomically
-            const size_t index = nextJob.fetch_add(1);
-            
-            // If the index is out of range, we are done
-            if (index >= jobs.size())   break;
-
-            // Process the job
-            const Job& job = jobs[index];
-            const int result = CompressJob(job);
-            
-            // If the job failed, increment the failure count
-            if (result != 0) failures.fetch_add(1);
-  
-
-            //If the job succeeded, print the output path.
-            const size_t done = finished.fetch_add(1) + 1;
-            std::lock_guard<std::mutex> lock(outputMutex);
-            std::cout << "[texture-packer] [" << done << "/" << jobs.size() << "] " << job.sourcePath << " -> " << job.outputPath << std::endl;
-        }
-    };
-
-    // Create a number of worker threads to process the jobs
-    std::vector<std::thread> workers;
-    workers.reserve(threadCount);
-    for (uint32_t i = 0; i < threadCount; ++i) workers.emplace_back(worker);
-
-    // Wait for all threads to finish
-    for (std::thread& thread : workers) thread.join();
-
-
-    // If there were any failures, report it and return an error code
-    if (failures.load() > 0)
-    {
-        std::cerr << "[texture-packer] completed with " << failures.load() << " failures" << std::endl;
-        return 2;
-    }
-
-
-    std::cout << "[texture-packer] completed successfully" << std::endl;
-    return 0;
 }

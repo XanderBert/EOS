@@ -94,23 +94,6 @@ macro(CREATE_LIB name)
 endmacro()
 
 
-function(ADD_TEXTURE_COMPRESSION_TARGET INPUT_PATH OUTPUT_PATH)
-if(TARGET EOSTextureCompressor)
-    add_custom_target(EOSPrecompressTextures ALL
-            COMMAND $<TARGET_FILE:EOSTextureCompressor>
-            --input "${INPUT_PATH}"
-            --output "${OUTPUT_PATH}"
-            --threads 0
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-            COMMENT "Precompressing textures to KTX2"
-            USES_TERMINAL
-            VERBATIM
-    )
-    set_property(TARGET EOSPrecompressTextures PROPERTY FOLDER "Internal/Assets")
-    add_dependencies(EOSPrecompressTextures EOSTextureCompressor)
-endif()
-endfunction()
-
 function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH SHADER_FILES_LIST)
     if(NOT TARGET EOSShaderCompilerTool)
         return()
@@ -142,10 +125,6 @@ macro(CREATE_EXAMPLE name)
 
     add_executable(${PROJECT_NAME} ${SRC_FILES})
     set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "Examples")
-
-    if(TARGET EOSPrecompressTextures)
-        add_dependencies(${PROJECT_NAME} EOSPrecompressTextures)
-    endif()
 
     # Set shader paths
     set(PROJECT_SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")

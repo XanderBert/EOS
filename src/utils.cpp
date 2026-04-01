@@ -4,11 +4,15 @@
 
 #include <ktx.h>
 #include <vulkan/vk_enum_string_helper.h>
-#include <volk.h>
+
 
 #include "EOS.h"
 #include "logger.h"
 #include "texturePipeline.h"
+
+#if defined(EOS_BUILD_TEXTURE_TOOLS)
+#include "texture_packer.h"
+#endif
 
 namespace EOS
 {
@@ -121,13 +125,28 @@ namespace EOS
         ktxTexture2* texture = nullptr;
         const std::filesystem::path compressedPath = EOS::TexturePipeline::BuildCompressedPathFromSource(textureLoadingDescription.filePath, textureLoadingDescription.compression);
 
-        CHECK(std::filesystem::exists(compressedPath),"Missing compressed texture '{}'. Run the EOSTextureCompressor prebuild step.", compressedPath.string());
+        if (!std::filesystem::exists(compressedPath))
+        {
+#if defined(EOS_BUILD_TEXTURE_TOOLS) && EOS_BUILD_TEXTURE_TOOLS
+            CHECK(EOS::TexturePacking::CompressTextureToCache(
+                    textureLoadingDescription.filePath,
+                    compressedPath,
+                    textureLoadingDescription.compression),
+                "Failed to build compressed texture cache '{}' from source '{}'",
+                compressedPath.string(),
+                textureLoadingDescription.filePath.string());
+#else
+            CHECK(false,
+                "Missing compressed texture '{}'. Build with EOS_BUILD_TEXTURE_TOOLS=ON or precompress textures before shipping.",
+                compressedPath.string());
+#endif
+        }
 
         CHECK(ktxTexture2_CreateFromNamedFile(compressedPath.string().c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) == KTX_SUCCESS, "Could not load compressed KTX texture: {}", compressedPath.string());
 
-          const VkFormat ktxVkFormat = static_cast<VkFormat>(texture->vkFormat);
-          const EOS::Format textureFormat = KtxVkFormatToEOSFormat(texture->vkFormat);
-          CHECK(textureFormat != EOS::Format::Invalid, "Unsupported KTX vkFormat '{}' ({}) in '{}'", string_VkFormat(ktxVkFormat), texture->vkFormat, compressedPath.string());
+        const VkFormat ktxVkFormat = static_cast<VkFormat>(texture->vkFormat);
+        const EOS::Format textureFormat = KtxVkFormatToEOSFormat(texture->vkFormat);
+        CHECK(textureFormat != EOS::Format::Invalid, "Unsupported KTX vkFormat '{}' ({}) in '{}'", string_VkFormat(ktxVkFormat), texture->vkFormat, compressedPath.string());
 
         // Pack mip data tightly. KTX levels are 4-byte aligned
         size_t packedSize = 0;

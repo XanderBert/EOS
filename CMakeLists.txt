@@ -16,14 +16,13 @@ set(EOS_USE_IMGUI       ON) # Enable ImGui integration
 set(EOS_USE_TRACY       ON)# Enable Tracy profiler
 set(EOS_BUILD_EXAMPLES  ON) # Build example applications
 set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
-set(EOS_BUILD_SHADER_TOOLS ON) # Add shader compiler as prebuild step
-set(EOS_BUILD_TEXTURE_TOOLS ON) # Add texture compressor as prebuild step
+option(EOS_BUILD_SHADER_TOOLS "Build the shader compiler tool" ON)
+option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
 
 # Skip prebuild in GitHub Actions
 if(DEFINED ENV{GITHUB_ACTIONS} AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
     set(EOS_BUILD_SHADER_TOOLS OFF)
-    set(EOS_BUILD_TEXTURE_TOOLS OFF)
-    message(STATUS "GitHub Actions detected: EOS_BUILD_TEXTURE_TOOLS=OFF")
+    message(STATUS "GitHub Actions detected")
 endif()
 
 
@@ -110,7 +109,10 @@ if(EOS_BUILD_TEXTURE_TOOLS OR EOS_BUILD_SHADER_TOOLS)
 endif()
 
 if(EOS_BUILD_TEXTURE_TOOLS)
-    ADD_TEXTURE_COMPRESSION_TARGET("${CMAKE_SOURCE_DIR}/data" "${CMAKE_SOURCE_DIR}/data/.compressed")
+    eos_require_stb(EOS)
+    target_compile_definitions(EOS PRIVATE EOS_BUILD_TEXTURE_TOOLS)
+    target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
+    target_sources(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools/texture_packer.cpp")
 endif()
 
 if(EOS_BUILD_EXAMPLES)
