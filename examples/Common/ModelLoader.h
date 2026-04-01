@@ -2,6 +2,7 @@
 
 #include "EOS.h"
 #include "utils.h"
+#include "texturePipeline.h"
 #include "glm/fwd.hpp"
 #include "glm/detail/type_quat.hpp"
 #include "glm/gtc/quaternion.hpp"
@@ -150,7 +151,7 @@ inline Scene LoadModel(const std::filesystem::path& modelPath, EOS::IContext* co
                 aiString texPath;
                 if (material->GetTexture(type, 0, &texPath) != aiReturn_SUCCESS) return {};
                 std::filesystem::path fullPath = modelPath.parent_path() / texPath.C_Str();
-                return EOS::LoadTexture(
+                return EOS::TexturePipeline::LoadTexture(
                 {
                     .filePath    = fullPath,
                     .compression = (type == aiTextureType_NORMALS) ? EOS::Compression::BC5 : EOS::Compression::BC7,
