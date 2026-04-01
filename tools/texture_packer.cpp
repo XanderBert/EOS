@@ -244,6 +244,9 @@ namespace
         const std::filesystem::path weakOutputRoot = std::filesystem::weakly_canonical(outputRoot, errorCode);
 
         // Setup the Compressions we want to do
+        // TODO: i somehow need to find out which texture needs to be compressed in which format.
+        // I am thinking of a naming convention like `texture_bc7.png` or `texture_etc2.png` to indicate which compression format to use. 
+        // I don't want to force the end user a specific naming convention so if i go this way it should editable trough cmake.
         const std::vector<EOS::Compression> compressionModes = includeETC2
             ? std::vector<EOS::Compression>{ EOS::Compression::BC7, EOS::Compression::BC5, EOS::Compression::ETC2 }
             : std::vector<EOS::Compression>{ EOS::Compression::BC7, EOS::Compression::BC5 };

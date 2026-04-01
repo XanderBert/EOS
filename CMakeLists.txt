@@ -116,6 +116,7 @@ if(EOS_BUILD_TEXTURE_TOOLS)
                 --threads 0
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Precompressing textures to KTX2"
+            USES_TERMINAL
             VERBATIM
         )
         set_property(TARGET EOSPrecompressTextures PROPERTY FOLDER "Internal/Assets")
