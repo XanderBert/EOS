@@ -19,9 +19,11 @@ set(EOS_USE_IMGUI       ON) # Enable ImGui integration
 set(EOS_USE_TRACY       OFF)# Enable Tracy profiler
 set(EOS_BUILD_EXAMPLES  ON) # Build example applications
 set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
-set(EOS_BUILD_TEXTURE_TOOLS ON) # Add texture compressor as prebuild steps
 
-# CI optimization: skip texture prebuild in GitHub Actions.
+set(EOS_BUILD_SHADER_TOOLS ON) # Add shader compiler as prebuild step
+set(EOS_BUILD_TEXTURE_TOOLS ON) # Add texture compressor as prebuild step
+
+# Skip texture prebuild in GitHub Actions
 if(DEFINED ENV{GITHUB_ACTIONS} AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
     set(EOS_BUILD_TEXTURE_TOOLS OFF)
     message(STATUS "GitHub Actions detected: EOS_BUILD_TEXTURE_TOOLS=OFF")
@@ -92,6 +94,7 @@ eos_require_ktx(EOS)
 
 if(EOS_SHADER_COMPILER)
     target_compile_definitions(EOS PRIVATE EOS_SHADER_COMPILER)
+    target_compile_definitions(EOS PRIVATE EOS_ENGINE_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/shaders")
     eos_require_slang(EOS)
 endif ()
 
@@ -105,9 +108,11 @@ if(EOS_USE_IMGUI)
     eos_require_imgui(EOS)
 endif()
 
-if(EOS_BUILD_TEXTURE_TOOLS)
+if(EOS_BUILD_TEXTURE_TOOLS OR EOS_BUILD_SHADER_TOOLS)
     add_subdirectory(tools)
+endif()
 
+if(EOS_BUILD_TEXTURE_TOOLS)
     if(TARGET EOSTextureCompressor)
         add_custom_target(EOSPrecompressTextures ALL
             COMMAND $<TARGET_FILE:EOSTextureCompressor>

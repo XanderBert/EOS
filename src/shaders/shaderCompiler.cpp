@@ -1,7 +1,7 @@
 #include "shaderCompiler.h"
+#include <algorithm>
 #include <fstream>
-
-#include "logger.h"
+#include <iostream>
 #include "utils.h"
 #include "spdlog/fmt/bundled/os.h"
 
@@ -9,12 +9,34 @@ namespace EOS
 {
 #if defined(EOS_SHADER_COMPILER)
     using namespace slang;
+    [[nodiscard]] static std::string BlobToString(const Slang::ComPtr<ISlangBlob>& blob)
+    {
+        if (!blob || !blob->getBufferPointer() || blob->getBufferSize() == 0)  return {};
+
+        constexpr size_t kMaxDiagnosticBytes = 4 * 1024 * 1024; // 4 mb
+        const size_t blobSize = blob->getBufferSize();
+        const size_t safeSize = std::min(blobSize, kMaxDiagnosticBytes);
+
+        try
+        {
+            std::string message(static_cast<const char*>(blob->getBufferPointer()), safeSize);
+            if (blobSize > safeSize) message += "\n[diagnostics truncated]";
+            return message;
+        }
+        catch (const std::bad_alloc&)
+        {
+            return "[diagnostics unavailable: allocation failed]";
+        }
+    }
 #endif
 
     //https://shader-slang.org/slang/user-guide/compiling.html#using-the-compilation-api
-    ShaderCompiler::ShaderCompiler(const std::filesystem::path& shaderFolder)
-    : ShaderFolder(shaderFolder)
+    ShaderCompiler::ShaderCompiler(const std::filesystem::path& outputFolder, const std::vector<std::string>& shaderSearchPaths)
+    : OutputFolder(outputFolder)
+    , ShaderSearchPaths(shaderSearchPaths)
     {
+        assert(!ShaderSearchPaths.empty());
+
 #if defined(EOS_SHADER_COMPILER)
         //Create a Global Session, This is not threadsafe, so if we want to multithread shader compilation we need to create a global session for each thread
         SlangGlobalSessionDesc sessionDescription = {};
@@ -65,10 +87,20 @@ namespace EOS
             .compilerOptionEntryCount = ARRAY_COUNT(compilerOptions),
         };
 
+        // Convert string vector to const char* array for Slang
+        std::vector<const char*> searchPathPtrs;
+        searchPathPtrs.reserve(ShaderSearchPaths.size());
+        for (const auto& path : ShaderSearchPaths)
+        {
+            searchPathPtrs.push_back(path.c_str());
+        }
+
         const SessionDesc sessionDesc
         {
             .targets = &targetDesc,
             .targetCount = 1,
+            .searchPaths = searchPathPtrs.empty() ? nullptr : searchPathPtrs.data(),
+            .searchPathCount = static_cast<SlangInt>(searchPathPtrs.size()),
         };
         GlobalSession->createSession(sessionDesc, Session.writeRef());
 
@@ -76,7 +108,7 @@ namespace EOS
         IModule* module = Session->loadModule(shaderCompilationDescription.Name, Diagnostics.writeRef());
         if (Diagnostics)
         {
-            std::string msgStr(static_cast<const char*>(Diagnostics->getBufferPointer()));
+            const std::string msgStr = BlobToString(Diagnostics);
             std::string_view msgView(msgStr);
 
             bool isError = msgView.find("error[") != std::string_view::npos;
@@ -84,27 +116,42 @@ namespace EOS
 
             if (isError)
             {
-                EOS::Logger->error("Slang Shader Compiler Error:\n\n\033[31m{}\033[0m", msgStr);
+                std::cerr << "[shader-compiler][error] Compile Error: " << msgStr << "\n";
                 return false;
             }
 
             if (isWarning)
             {
-                EOS::Logger->warn("\033[33m{}\033[0m", msgStr);
+                std::cout << "[shader-compiler][warning] Compile Warning: " << "\033[33m" << msgStr <<  "\033[0m" << std::endl;
                 Diagnostics.setNull();
             }
         }
 
+        if (!module)
+        {
+            std::cerr << "[shader-compiler][error] Compile Error: Failed to load module: " << shaderCompilationDescription.Name << "\n";
+            return false;
+        }
+
         // Load All Entry Points (a EntryPoint is a shader within a file) and write to disk if desired
         const uint32_t entryPointCount = module->getDefinedEntryPointCount();
+        if (entryPointCount == 0)
+        {
+            std::cout << "[shader-compiler][debug] Skipping cache for include-only shader module: " << shaderCompilationDescription.Name << std::endl;
+            outShaderInfo.clear();
+            return true;
+        }
 
         outShaderInfo.clear();
         outShaderInfo.resize(entryPointCount);
-
         for (SlangInt32 i{}; i < entryPointCount; ++i)
         {
             // Read out the data for this entry point and store it in the shader info.
-            HandleEntryPoint(outShaderInfo[i], module, shaderCompilationDescription.Name, i);
+            if (!HandleEntryPoint(outShaderInfo[i], module, shaderCompilationDescription.Name, i))
+            {
+                std::cerr << "[shader-compiler][error] failed to compile entry point " << i << " in module: " << shaderCompilationDescription.Name << "\n";
+                return false;
+            }
 
             // Write the SPIR-V to disk if requested
             if (shaderCompilationDescription.Cache)
@@ -155,33 +202,60 @@ namespace EOS
         }
     }
 #endif
-    bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo)
+    bool ShaderCompiler::CompileAndCacheShader([[maybe_unused]] const char* fileName)
     {
 #if defined(EOS_SHADER_COMPILER)
-        //Compile all shaders in the file and cache if needed
-        EOS::Logger->debug("{} Has not been Compiled yet.", fileName);
-        std::vector<ShaderInfo> shaderInfos{};
-        bool success = CompileShader({fileName}, shaderInfos);
-        if (!success) return false;
+        assert(fileName);
+        std::vector<ShaderInfo> shaderInfos;
+        return CompileShader({fileName, true}, shaderInfos);
+#else
+        return false;
+#endif
+    }
 
-        for (const auto& shaderInfo : shaderInfos)
+    bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo, bool invalidate)
+    {
+#if defined(EOS_SHADER_COMPILER)
+
+        if (!invalidate)
         {
-            if(shaderInfo.ShaderStage == shaderStage)
+            const std::filesystem::path cachedFilePath = OutputFolder / (std::string(fileName) + ShaderStageToString(shaderStage) + ShaderFileFormat);
+            std::ifstream cachedFile(cachedFilePath, std::ios::in | std::ios::binary);
+            if (cachedFile.is_open())
             {
-                outShaderInfo = shaderInfo;
+                cachedFile.close();
+                LoadShaderFromCache(cachedFilePath, outShaderInfo);
                 return true;
             }
+
+            std::cout << "[shader-compiler][warning] Shader has not been compiled yet: " << "\033[33m" << fileName <<  "\033[0m" << std::endl;
         }
-        CHECK(false, "Could not Load: {} - {}", fileName, ShaderStageToString(shaderStage));
+
+        std::vector<ShaderInfo> shaderInfos{};
+        if (CompileShader({fileName}, shaderInfos))
+        {
+            for (const auto& shaderInfo : shaderInfos)
+            {
+                if(shaderInfo.ShaderStage == shaderStage)
+                {
+                    outShaderInfo = shaderInfo;
+                    return true;
+                }
+            }
+
+            std::cerr << "[shader-compiler][error] Could not load shader: " << "" << fileName <<  "" << std::endl;
+            assert(false);
+            return false;
+        }
+
         return false;
 #else
         //We never want to recompile shaders when there is no compiler
         // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
-        const std::filesystem::path cachedFilePath = fmt::format(".cache/{}{}{}", fileName, ShaderStageToString(shaderStage), ShaderFileFormat);
-        std::ifstream file(cachedFilePath, std::ios::in | std::ios::binary);
-        if (file.is_open())
+        std::ifstream cachedFile(cachedFilePath, std::ios::in | std::ios::binary);
+        if (cachedFile.is_open())
         {
-            file.close();
+            cachedFile.close();
             EOS::Logger->debug("{} shader was already compiled and cached. Loading from cache.", fileName);
 
             LoadShaderFromCache(cachedFilePath, outShaderInfo);
@@ -205,9 +279,9 @@ namespace EOS
         }
 
         // Construct the full output path
-        std::filesystem::path outputPath = ShaderFolder;
+        std::filesystem::path outputPath = OutputFolder;
         EOS::ShaderStage shaderStage = shaderInfo.ShaderStage;
-        outputPath.append(".cache").append(baseName + ShaderStageToString(shaderStage) + ShaderFileFormat); //will become .cache/ShaderNameShaderStage.ShaderFileFormat
+        outputPath.append(baseName + ShaderStageToString(shaderStage) + ShaderFileFormat); //will become ShaderNameShaderStage.ShaderFileFormat
 
 
         //Write Binary
@@ -226,29 +300,49 @@ namespace EOS
     }
 
 
-    void ShaderCompiler::HandleEntryPoint(ShaderInfo& outShaderInfo, IModule* module, const char* shaderName, SlangInt32 entryPointIndex)
+    bool ShaderCompiler::HandleEntryPoint(ShaderInfo& outShaderInfo, IModule* module, const char* shaderName, SlangInt32 entryPointIndex)
     {
         Slang::ComPtr<IEntryPoint> entryPoint;
         module->getDefinedEntryPoint(entryPointIndex, entryPoint.writeRef());
-        CHECK(entryPoint, "Cannot find entrypoint for shader: '{}'.", shaderName);
+        if (!entryPoint)
+        {
+            EOS::Logger->error("Cannot find entrypoint index {} for shader '{}'", entryPointIndex, shaderName);
+            std::cerr << "[shader-compiler][error] cannot find entry point index " << entryPointIndex << " for module: " << shaderName << "\n";
+            outShaderInfo = {};
+            return false;
+        }
 
         IComponentType* components[] = { module, entryPoint };
         Slang::ComPtr<IComponentType> program;
-        Session->createCompositeComponentType(components, 2, program.writeRef());
+        Slang::ComPtr<ISlangBlob> compositeDiagnostics;
+        const SlangResult compositeResult = Session->createCompositeComponentType(components, 2, program.writeRef(), compositeDiagnostics.writeRef());
+        if (SLANG_FAILED(compositeResult) || !program)
+        {
+            std::cerr << "[shader-compiler][error] composite creation failed for module " << shaderName << " entry " << entryPointIndex << "\n" << BlobToString(compositeDiagnostics) << "\n";
+            outShaderInfo = {};
+            return false;
+        }
 
         // resolve all cross-module references
         // also used to resolve link time specializations (https://shader-slang.org/slang/user-guide/link-time-specialization)
         Slang::ComPtr<IComponentType> linkedProgram;
         Slang::ComPtr<ISlangBlob> diagnosticBlob;
-        program->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());
+        const SlangResult linkResult = program->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());
+        if (SLANG_FAILED(linkResult) || !linkedProgram)
+        {
+            std::cerr << "[shader-compiler][error] link failed for module " << shaderName << " entry " << entryPointIndex << "\n" << BlobToString(diagnosticBlob) << "\n";
+            outShaderInfo = {};
+            return false;
+        }
 
         Slang::ComPtr<ISlangBlob> kernelBlob;
         linkedProgram->getEntryPointCode(0, 0, kernelBlob.writeRef(), Diagnostics.writeRef());
         if(Diagnostics)
         {
-            EOS::Logger->critical("Slang Shader Compiler Diagnostics:\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
-            CHECK(false, "Shader Compile Error");
+            std::cerr << "[shader-compiler][error] entry-point code generation failed for module " << shaderName << " entry " << entryPointIndex << "\n" << BlobToString(Diagnostics) << "\n";
             Diagnostics.setNull();
+            outShaderInfo = {};
+            return false;
         }
         if (kernelBlob)
         {
@@ -272,9 +366,10 @@ namespace EOS
         linkedProgram->getEntryPointMetadata(0,0, metadata.writeRef(), Diagnostics.writeRef());
         if(Diagnostics)
         {
-            EOS::Logger->critical("Slang Shader Compiler Diagnostics:\n{}", static_cast<const char *>(Diagnostics->getBufferPointer()));
-            CHECK(false, "Shader Compile Error");
+            std::cerr << "[shader-compiler][error] reflection metadata failed for module " << shaderName << " entry " << entryPointIndex << "\n" << BlobToString(Diagnostics) << "\n";
             Diagnostics.setNull();
+            outShaderInfo = {};
+            return false;
         }
 
         ProgramLayout* reflection = linkedProgram->getLayout();
@@ -289,13 +384,12 @@ namespace EOS
             if ( variableLayout->getCategory() == slang::PushConstantBuffer)
             {
                 totalPushConstantSize += variableLayout->getTypeLayout()->getElementVarLayout()->getTypeLayout()->getSize();
-                EOS::Logger->debug("\tFound Shader Variable: {}, of Type: {}, as PushConstant in Shader: {}, with Stage: {}", variableLayout->getName(), variableLayout->getType()->getName(), shaderName, ShaderStageToString(outShaderInfo.ShaderStage));
             }
         }
-        EOS::Logger->debug("Total Push Constant Size:{}", totalPushConstantSize);
 
         outShaderInfo.PushConstantSize = totalPushConstantSize;
         outShaderInfo.DebugName = shaderName;
+        return true;
     }
 #endif
 

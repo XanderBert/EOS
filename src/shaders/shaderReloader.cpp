@@ -8,8 +8,9 @@
 
 //TODO: I need to handle that fact that shaders get copied...
 
-ShaderReloader::ShaderReloader(std::filesystem::path shaderSourcePath)
+ShaderReloader::ShaderReloader(std::filesystem::path shaderSourcePath, std::filesystem::path engineShaderSourcePath)
 : ShaderSourcePath(std::move(shaderSourcePath))
+, EngineShaderSourcePath(std::move(engineShaderSourcePath))
 {}
 
 void ShaderReloader::TrackShader([[maybe_unused]] const EOS::ShaderModuleHandle& shaderHandle,[[maybe_unused]]  const char* fileName,[[maybe_unused]]  EOS::ShaderStage shaderStage)
@@ -18,9 +19,40 @@ void ShaderReloader::TrackShader([[maybe_unused]] const EOS::ShaderModuleHandle&
     if (!shaderHandle.Valid() || !fileName)  return;
 
     TrackedShader& trackedShader = ShaderMap[shaderHandle];
-    trackedShader.FileName = fileName;
+    const std::filesystem::path incomingPath(fileName);
+    const std::filesystem::path modulePath = incomingPath.has_extension() ? incomingPath : std::filesystem::path(std::string(fileName) + ".slang");
+
+    std::filesystem::path resolvedPath;
+    if (modulePath.is_absolute())
+    {
+        resolvedPath = modulePath;
+    }
+    else
+    {
+        const std::filesystem::path projectPath = ShaderSourcePath / modulePath;
+        const std::filesystem::path enginePath = EngineShaderSourcePath.empty() ? std::filesystem::path{} : (EngineShaderSourcePath / modulePath);
+
+        if (std::filesystem::exists(projectPath))
+        {
+            resolvedPath = projectPath;
+        }
+        else if (!enginePath.empty() && std::filesystem::exists(enginePath))
+        {
+            resolvedPath = enginePath;
+        }
+        else
+        {
+            resolvedPath = projectPath;
+        }
+    }
+
+    trackedShader.SourceFilePath = resolvedPath;
+
+    const std::string stem = modulePath.stem().string();
+    trackedShader.ModuleName = stem.empty() ? modulePath.filename().string() : stem;
+
     trackedShader.ShaderStage = shaderStage;
-    trackedShader.LastWriteTime = EOS::GetLastWriteTime(trackedShader.FileName.append(".slang"));
+    trackedShader.LastWriteTime = EOS::GetLastWriteTime(trackedShader.SourceFilePath.string());
 #endif
 }
 
@@ -106,7 +138,7 @@ uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShade
     std::vector<EOS::ComputePipelineHandle> computePipelinesToRebuild;
     for (auto& [shaderHandle, trackedShader] : ShaderMap)
     {
-        if (!shaderHandle.Valid() || trackedShader.FileName.empty())
+        if (!shaderHandle.Valid() || trackedShader.SourceFilePath.empty() || trackedShader.ModuleName.empty())
         {
             continue;
         }
@@ -116,12 +148,12 @@ uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShade
             continue;
         }
 
-        const std::filesystem::file_time_type currentWriteTime = EOS::GetLastWriteTime(trackedShader.FileName);
+        const std::filesystem::file_time_type currentWriteTime = EOS::GetLastWriteTime(trackedShader.SourceFilePath.string());
         if (currentWriteTime == std::filesystem::file_time_type{})
         {
             if (!trackedShader.MissingTimestampWarningLogged)
             {
-                EOS::Logger->warn("Hot reload could not resolve timestamp for shader source: {}", trackedShader.FileName);
+                EOS::Logger->warn("Hot reload could not resolve timestamp for shader source: {}", trackedShader.SourceFilePath.string());
                 trackedShader.MissingTimestampWarningLogged = true;
             }
             continue;
@@ -134,7 +166,7 @@ uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShade
             continue;
         }
 
-        if (!reloadShaderModuleCallback(shaderHandle, trackedShader.FileName.c_str(), trackedShader.ShaderStage))
+        if (!reloadShaderModuleCallback(shaderHandle, trackedShader.ModuleName.c_str(), trackedShader.ShaderStage))
         {
             continue;
         }

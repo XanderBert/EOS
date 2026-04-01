@@ -115,8 +115,30 @@ macro(CREATE_LIB name)
         set_property(TARGET ${PROJECT_NAME} PROPERTY WINDOWS_EXPORT_ALL_SYMBOLS ON)
     endif()
 
-    COPY_SHADERS_TO_BIN(${PROJECT_NAME} "${SHADER_FILES}")
 endmacro()
+
+function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH SHADER_FILES_LIST)
+    if(NOT TARGET EOSShaderCompilerTool)
+        return()
+    endif()
+
+    set(SHADER_COMPILE_TARGET "CompileShaders_${TARGET_NAME}")
+    
+    add_custom_target(${SHADER_COMPILE_TARGET}
+        COMMAND $<TARGET_FILE:EOSShaderCompilerTool>
+            --project-shaders "${PROJECT_SHADER_PATH}"
+            --engine-shaders "${ENGINE_SHADER_PATH}"
+            --output "${OUTPUT_PATH}"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Compiling shaders for ${TARGET_NAME}"
+        USES_TERMINAL
+        VERBATIM
+        DEPENDS ${SHADER_FILES_LIST}
+    )
+    set_property(TARGET ${SHADER_COMPILE_TARGET} PROPERTY FOLDER "Internal/Shaders")
+    add_dependencies(${SHADER_COMPILE_TARGET} EOSShaderCompilerTool)
+    add_dependencies(${TARGET_NAME} ${SHADER_COMPILE_TARGET})
+endfunction()
 
 macro(CREATE_EXAMPLE name)
     set(PROJECT_NAME ${name})
@@ -132,7 +154,15 @@ macro(CREATE_EXAMPLE name)
         add_dependencies(${PROJECT_NAME} EOSPrecompressTextures)
     endif()
 
+    # Set shader paths
+    set(PROJECT_SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+    set(ENGINE_SHADER_PATH "${CMAKE_SOURCE_DIR}/src/shaders")
+    set(SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
+
     target_link_libraries(${PROJECT_NAME} PRIVATE EOS)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_PROJECT_SHADER_PATH="${PROJECT_SHADER_PATH}")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_ENGINE_SHADER_PATH="${ENGINE_SHADER_PATH}")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_SHADER_OUTPUT_PATH="${SHADER_OUTPUT_PATH}")
 
     SETUP_GROUPS("${SRC_FILES}")
     SOURCE_GROUP(shaders FILES "${SHADER_FILES}")
@@ -140,7 +170,15 @@ macro(CREATE_EXAMPLE name)
     set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
 
     SETUP_TARGET_DEFAULTS(${PROJECT_NAME})
-    COPY_SHADERS_TO_BIN(${PROJECT_NAME} "${SHADER_FILES}")
+
+
+    ADD_SHADER_COMPILATION_TARGET(
+        ${PROJECT_NAME}
+        "${PROJECT_SHADER_PATH}"
+        "${ENGINE_SHADER_PATH}"
+        "${SHADER_OUTPUT_PATH}"
+        "${SHADER_FILES}"
+    )
 endmacro()
 
 macro(DEFINE_PLATFORM)

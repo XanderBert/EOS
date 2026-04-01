@@ -15,7 +15,7 @@ public:
     using RebuildRenderPipelineCallback = std::function<bool(EOS::RenderPipelineHandle)>;
     using RebuildComputePipelineCallback = std::function<bool(EOS::ComputePipelineHandle)>;
 
-    explicit ShaderReloader(std::filesystem::path shaderSourcePath);
+    explicit ShaderReloader(std::filesystem::path shaderSourcePath, std::filesystem::path engineShaderSourcePath = {});
 
     void TrackShader(const EOS::ShaderModuleHandle& shaderHandle, const char* fileName, EOS::ShaderStage shaderStage);
     void UntrackShader(const EOS::ShaderModuleHandle& shaderHandle);
@@ -45,7 +45,8 @@ private:
 
     struct TrackedShader final
     {
-        std::string FileName{};
+        std::filesystem::path SourceFilePath{};
+        std::string ModuleName{};
         EOS::ShaderStage ShaderStage = EOS::ShaderStage::None;
         std::filesystem::file_time_type LastWriteTime{};
         bool MissingTimestampWarningLogged = false;
@@ -62,4 +63,5 @@ private:
 #endif
 
     std::filesystem::path ShaderSourcePath{};
+    std::filesystem::path EngineShaderSourcePath{};
 };

@@ -564,7 +564,6 @@ private:
     CommandBuffer CurrentCommandBuffer{};                   //TODO: This needs to become a map or vector for multithreaded recording.
     DeviceQueues VulkanDeviceQueues{};
     EOS::ContextConfiguration Configuration{};              //TODO: Should the lifetime of this obj be the whole application?
-    std::filesystem::path ShaderSourcePath{};
 
     std::unique_ptr<EOS::ShaderCompiler> ShaderCompiler{};
     std::unique_ptr<ShaderReloader> ShaderReloaderImpl{};

@@ -3,6 +3,8 @@
 #include <slang-include.h>
 #endif
 #include <filesystem>
+#include <string>
+#include <vector>
 
 #include "defines.h"
 #include "EOS.h"
@@ -29,10 +31,11 @@ namespace EOS
     class ShaderCompiler final
     {
     public:
-        explicit ShaderCompiler(const std::filesystem::path& shaderFolder);
+        explicit ShaderCompiler(const std::filesystem::path& outputFolder, const std::vector<std::string>& shaderSearchPaths = {});
         DELETE_COPY_MOVE(ShaderCompiler);
 
-        [[nodiscard]] bool LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo);
+        [[nodiscard]] bool CompileAndCacheShader(const char* fileName);
+        [[nodiscard]] bool LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo, bool invalidate = false);
         static inline const char* ShaderFileFormat = ".EOS";
 
 #if defined(EOS_SHADER_COMPILER)
@@ -42,7 +45,7 @@ namespace EOS
 
         [[nodiscard]] bool CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo);
         void CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& info) const;
-        void HandleEntryPoint(ShaderInfo& outShaderInfo, slang::IModule* module, const char* shaderName, SlangInt32 entryPointIndex);
+        [[nodiscard]] bool HandleEntryPoint(ShaderInfo& outShaderInfo, slang::IModule* module, const char* shaderName, SlangInt32 entryPointIndex);
 
         Slang::ComPtr<slang::IGlobalSession> GlobalSession;
         Slang::ComPtr<slang::ISession> Session;
@@ -51,6 +54,7 @@ namespace EOS
 
         static std::string ShaderStageToString(EOS::ShaderStage shaderStage);
         static void LoadShaderFromCache(const std::filesystem::path& path, ShaderInfo& outInfo);
-        std::filesystem::path ShaderFolder;
+        std::filesystem::path OutputFolder;
+        std::vector<std::string> ShaderSearchPaths;
     };
 }

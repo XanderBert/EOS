@@ -2122,9 +2122,8 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
 
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.Config)
-, ShaderSourcePath(contextDescription.ShaderPath)
-, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderPath))
-, ShaderReloaderImpl(std::make_unique<ShaderReloader>(contextDescription.ShaderPath))
+, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderOutputPath, std::vector<std::string>{contextDescription.ShaderPath.string(), contextDescription.EngineShaderPath.string()}))
+, ShaderReloaderImpl(std::make_unique<ShaderReloader>(contextDescription.ShaderPath, contextDescription.EngineShaderPath))
 {
     CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
 
@@ -2435,7 +2434,7 @@ bool VulkanContext::ReloadShaderModule(EOS::ShaderModuleHandle handle, const cha
     }
 
     EOS::ShaderInfo shaderInfo{};
-    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo))
+    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo, true))
     {
         EOS::Logger->error("Could not load shader: {}", fileName);
         return {};

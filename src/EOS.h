@@ -82,7 +82,25 @@ namespace EOS
     {
         ContextConfiguration    Config;
         HardwareDeviceType      PreferredHardwareType{HardwareDeviceType::Discrete};
-        std::filesystem::path   ShaderPath{"./"};
+
+#if defined(EOS_PROJECT_SHADER_PATH)
+        std::filesystem::path   ShaderPath{EOS_PROJECT_SHADER_PATH};
+#else
+        std::filesystem::path   ShaderPath{};
+#endif
+
+#if defined(EOS_ENGINE_SHADER_PATH)
+        std::filesystem::path   EngineShaderPath{EOS_ENGINE_SHADER_PATH};
+#else
+        std::filesystem::path   EngineShaderPath{"../src/shaders"};
+#endif
+
+#if defined(EOS_SHADER_OUTPUT_PATH)
+        std::filesystem::path   ShaderOutputPath{EOS_SHADER_OUTPUT_PATH};
+#else
+        std::filesystem::path   ShaderOutputPath{"./"};
+#endif
+
         const char*             ApplicationName{};
         void*                   Window{};
         void*                   Display{};
