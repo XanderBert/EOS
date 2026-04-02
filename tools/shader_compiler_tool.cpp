@@ -114,10 +114,6 @@ namespace
 
 int main(int argc, char** argv)
 {
-    std::ios::sync_with_stdio(true);
-    std::cout << std::unitbuf;
-    std::cerr << std::unitbuf;
-
     Options options;
     if (!ParseOptions(argc, argv, options))  ExitProcess(1);
 
