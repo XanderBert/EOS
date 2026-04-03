@@ -23,11 +23,11 @@ Eos aims to be:
 - [Vulkan Utility Libraries](https://github.com/KhronosGroup/Vulkan-Utility-Libraries)
 - [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [spdlog](https://github.com/gabime/spdlog)
-- [stb](https://github.com/nothings/stb)
 - [KTX-Software](https://github.com/KhronosGroup/KTX-Software)
-- [Slang](https://github.com/shader-slang/slang)
 
 ### Optional EOS dependencies
+- [Slang](https://github.com/shader-slang/slang) when `EOS_SHADER_TOOLS=ON`
+- [stb](https://github.com/nothings/stb) when `EOS_BUILD_TEXTURE_TOOLS=ON`
 - [Dear ImGui](https://github.com/ocornut/imgui) when `EOS_USE_IMGUI=ON`
 - [Tracy](https://github.com/wolfpld/tracy) when `EOS_USE_TRACY=ON`
 
