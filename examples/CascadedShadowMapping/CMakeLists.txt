@@ -1,3 +1,3 @@
 CREATE_EXAMPLE(CascadedShadowMapping)
-eos_require_assimp(CascadedShadowMapping)
+eos_require_fastgltf(CascadedShadowMapping)
 eos_require_glm(CascadedShadowMapping)

@@ -32,7 +32,7 @@ Eos aims to be:
 - [Tracy](https://github.com/wolfpld/tracy) when `EOS_USE_TRACY=ON`
 
 ### Example-only dependencies
-- [Assimp](https://github.com/assimp/assimp)
+- [fastGLTF](https://github.com/spnda/fastgltf)
 - [GLM](https://github.com/g-truc/glm)
 
 ### System dependencies

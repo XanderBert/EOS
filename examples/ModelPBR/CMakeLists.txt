@@ -1,3 +1,3 @@
 CREATE_EXAMPLE(ModelPBR)
-eos_require_assimp(ModelPBR)
+eos_require_fastgltf(ModelPBR)
 eos_require_glm(ModelPBR)

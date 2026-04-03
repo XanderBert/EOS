@@ -1,3 +1,3 @@
 CREATE_EXAMPLE(MultiDrawIndirect)
-eos_require_assimp(MultiDrawIndirect)
+eos_require_fastgltf(MultiDrawIndirect)
 eos_require_glm(MultiDrawIndirect)
