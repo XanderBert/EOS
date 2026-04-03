@@ -39,6 +39,27 @@ Eos aims to be:
 - Vulkan SDK (required)
 
 
+# CMake Options
+All build toggles are exposed as CMake options and can be configured with `-D...` flags.
+
+```cmake
+option(EOS_VULKAN "Enable Vulkan backend" ON)
+option(EOS_USE_IMGUI "Enable ImGui integration" ON)
+option(EOS_USE_TRACY "Enable Tracy profiler" ON)
+option(EOS_BUILD_EXAMPLES "Build example applications" ON)
+option(EOS_SHADER_TOOLS "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" ON)
+option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
+```
+
+### Shader path cache variables
+
+- `EOS_PROJECT_SHADER_PATH`:
+    - Empty by default.
+- `EOS_SHADER_OUTPUT_PATH`:
+    - Defaults to `bin` in the repository root.
+    - Used as the output location for compiled shaders.
+
+
 # Building
 This project is built using CMake and Ninja.
 

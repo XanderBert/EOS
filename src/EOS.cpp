@@ -3,7 +3,7 @@
 #include "logger.h"
 #include "utils.h"
 #include "vulkan/vulkanClasses.h"
-#include "shaders/shaderCompiler.h"
+#include "ShaderTools/shaderCompiler.h"
 
 namespace EOS
 {

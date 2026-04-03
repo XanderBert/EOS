@@ -8,7 +8,7 @@
 #include "logger.h"
 
 #if defined(EOS_BUILD_TEXTURE_TOOLS)
-#include "texture_packer.h"
+#include "TextureTools/texture_packer.h"
 #endif
 
 namespace EOS::TexturePipeline

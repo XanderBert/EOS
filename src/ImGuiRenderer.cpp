@@ -1,7 +1,7 @@
 #include "ImGuiRenderer.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
-#include "shaders/shaderCompiler.h"
+#include "ShaderTools/shaderCompiler.h"
 
 namespace EOS
 {

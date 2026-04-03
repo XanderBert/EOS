@@ -1,5 +1,5 @@
 #pragma once
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
 #include <slang-include.h>
 #endif
 #include <filesystem>
@@ -38,7 +38,7 @@ namespace EOS
         [[nodiscard]] bool LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo, bool invalidate = false);
         static inline const char* ShaderFileFormat = ".EOS";
 
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
     private:
 
         static EOS::ShaderStage ToShaderStage(SlangStage slangStage);

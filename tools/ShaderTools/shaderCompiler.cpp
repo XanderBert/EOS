@@ -7,7 +7,7 @@
 
 namespace EOS
 {
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
     using namespace slang;
     [[nodiscard]] static std::string BlobToString(const Slang::ComPtr<ISlangBlob>& blob)
     {
@@ -35,15 +35,14 @@ namespace EOS
     : OutputFolder(outputFolder)
     , ShaderSearchPaths(shaderSearchPaths)
     {
+#if defined(EOS_SHADER_TOOLS)
         assert(!ShaderSearchPaths.empty());
-
-#if defined(EOS_SHADER_COMPILER)
         //Create a Global Session, This is not threadsafe, so if we want to multithread shader compilation we need to create a global session for each thread
         SlangGlobalSessionDesc sessionDescription = {};
         SLANG_ASSERT_VOID_ON_FAIL(createGlobalSession(&sessionDescription, GlobalSession.writeRef()));
 #endif
     }
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
     bool ShaderCompiler::CompileShader(const ShaderCompilationDescription& shaderCompilationDescription, std::vector<ShaderInfo>& outShaderInfo)
     {
         CompilerOptionEntry compilerOptions[] =
@@ -204,7 +203,7 @@ namespace EOS
 #endif
     bool ShaderCompiler::CompileAndCacheShader([[maybe_unused]] const char* fileName)
     {
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
         assert(fileName);
         std::vector<ShaderInfo> shaderInfos;
         return CompileShader({fileName, true}, shaderInfos);
@@ -215,7 +214,7 @@ namespace EOS
 
     bool ShaderCompiler::LoadShader(const char* fileName, EOS::ShaderStage shaderStage, ShaderInfo& outShaderInfo, bool invalidate)
     {
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
 
         if (!invalidate)
         {
@@ -266,7 +265,7 @@ namespace EOS
     }
 
 
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
     void ShaderCompiler::CacheShader(const ShaderCompilationDescription& shaderCompilationDescription, const ShaderInfo& shaderInfo) const
     {
         std::string baseName = shaderCompilationDescription.Name;

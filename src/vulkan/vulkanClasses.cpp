@@ -5,8 +5,8 @@
 #include <ranges>
 
 #include "utils.h"
-#include "shaders/shaderCompiler.h"
-#include "../shaders/shaderReloader.h"
+#include "ShaderTools/shaderCompiler.h"
+#include "ShaderTools/shaderReloader.h"
 #include "vulkan/vkTools.h"
 
 #pragma region GLOBAL_FUNCTIONS

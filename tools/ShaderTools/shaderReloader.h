@@ -29,7 +29,7 @@ public:
     [[nodiscard]] uint32_t ReloadChangedShaders(const ReloadShaderModuleCallback& reloadShaderModuleCallback, const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback, const RebuildComputePipelineCallback& rebuildComputePipelineCallback = nullptr);
 
 private:
-#if defined(EOS_SHADER_COMPILER)
+#if defined(EOS_SHADER_TOOLS)
     struct ShaderHandleLess final
     {
         [[nodiscard]] bool operator()(const EOS::ShaderModuleHandle& lhs, const EOS::ShaderModuleHandle& rhs) const

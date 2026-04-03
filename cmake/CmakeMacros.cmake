@@ -48,6 +48,32 @@ macro(SETUP_X11_NONE_WORKAROUND targetName)
     target_compile_options(${targetName} PUBLIC "$<$<COMPILE_LANGUAGE:C,CXX>:-include${EOS_X11_UNDEFINE_NONE_HEADER}>")
 endmacro()
 
+function(EOS_PRINT_CONFIGURATION_SUMMARY)
+    message(STATUS "")
+    message(STATUS "================ EOS Configuration Summary ================")
+
+    set(EOS_CONFIG_SUMMARY_VARS
+        EOS_VULKAN
+        EOS_USE_IMGUI
+        EOS_USE_TRACY
+        EOS_BUILD_EXAMPLES
+        EOS_SHADER_TOOLS
+        EOS_BUILD_TEXTURE_TOOLS
+        EOS_SHADER_OUTPUT_PATH
+    )
+
+    foreach(EOS_SUMMARY_VAR IN LISTS EOS_CONFIG_SUMMARY_VARS)
+        if(DEFINED ${EOS_SUMMARY_VAR})
+            message(STATUS "  ${EOS_SUMMARY_VAR} = [${${EOS_SUMMARY_VAR}}]")
+        else()
+            message(STATUS "  ${EOS_SUMMARY_VAR} = <UNDEFINED>")
+        endif()
+    endforeach()
+
+    message(STATUS "==========================================================")
+    message(STATUS "")
+endfunction()
+
 macro(CREATE_LIB name)
     set(PROJECT_NAME ${name})
     project(${PROJECT_NAME} CXX)
@@ -117,6 +143,13 @@ function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SH
     add_dependencies(${TARGET_NAME} ${SHADER_COMPILE_TARGET})
 endfunction()
 
+macro(SET_SHADER_PATHS TARGET_NAME PROJECT_SHADER_PATH_VALUE SHADER_OUTPUT_PATH_VALUE)
+    target_compile_definitions(${TARGET_NAME} PRIVATE EOS_PROJECT_SHADER_PATH="${PROJECT_SHADER_PATH_VALUE}")
+    target_compile_definitions(${TARGET_NAME} PRIVATE EOS_SHADER_OUTPUT_PATH="${SHADER_OUTPUT_PATH_VALUE}")
+    message(STATUS "[${TARGET_NAME}] PROJECT_SHADER_PATH = [${PROJECT_SHADER_PATH_VALUE}]")
+    message(STATUS "[${TARGET_NAME}] SHADER_OUTPUT_PATH = [${SHADER_OUTPUT_PATH_VALUE}]")
+endmacro()
+
 macro(CREATE_EXAMPLE name)
     set(PROJECT_NAME ${name})
     project(${PROJECT_NAME} CXX)
@@ -126,20 +159,14 @@ macro(CREATE_EXAMPLE name)
     add_executable(${PROJECT_NAME} ${SRC_FILES})
     set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "Examples")
 
-    # Set shader paths
-    set(PROJECT_SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
-    set(ENGINE_SHADER_PATH "${CMAKE_SOURCE_DIR}/src/shaders")
-    set(SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
-
     target_link_libraries(${PROJECT_NAME} PRIVATE EOS)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_PROJECT_SHADER_PATH="${PROJECT_SHADER_PATH}")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_ENGINE_SHADER_PATH="${ENGINE_SHADER_PATH}")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_SHADER_OUTPUT_PATH="${SHADER_OUTPUT_PATH}")
 
+    set(PROJECT_SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+    set(SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
+    SET_SHADER_PATHS(${PROJECT_NAME} "${PROJECT_SHADER_PATH}" "${SHADER_OUTPUT_PATH}")
     SETUP_GROUPS("${SRC_FILES}")
 
     set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
-
     SETUP_TARGET_DEFAULTS(${PROJECT_NAME})
 
 

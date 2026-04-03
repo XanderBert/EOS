@@ -11,19 +11,24 @@ include(cmake/deps.cmake)
 
 CREATE_LIB(EOS)
 
-set(EOS_VULKAN          ON) # Enable Vulkan backend
-set(EOS_USE_IMGUI       ON) # Enable ImGui integration
-set(EOS_USE_TRACY       ON)# Enable Tracy profiler
-set(EOS_BUILD_EXAMPLES  ON) # Build example applications
-set(EOS_SHADER_COMPILER ON) # Enable shader hot-reload and compiling
-option(EOS_BUILD_SHADER_TOOLS "Build the shader compiler tool" ON)
+option(EOS_VULKAN "Enable Vulkan backend" ON)
+option(EOS_USE_IMGUI "Enable ImGui integration" ON)
+option(EOS_USE_TRACY "Enable Tracy profiler" ON)
+option(EOS_BUILD_EXAMPLES "Build example applications" ON)
+option(EOS_SHADER_TOOLS "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" ON)
 option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
+
+# User-configurable shader paths for runtime and shader compilation.
+set(EOS_PROJECT_SHADER_PATH "" CACHE PATH "Path to project shaders used by examples. Leave empty to use each example's src/shaders directory")
+set(EOS_SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin" CACHE PATH "Path where compiled shader binaries are written")
 
 # Skip prebuild in GitHub Actions
 if(DEFINED ENV{GITHUB_ACTIONS} AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
-    set(EOS_BUILD_SHADER_TOOLS OFF)
-    message(STATUS "GitHub Actions detected")
+    set(EOS_SHADER_TOOLS OFF CACHE BOOL "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" FORCE)
+    message(STATUS "GitHub Actions detected") 
 endif()
+
+EOS_PRINT_CONFIGURATION_SUMMARY()
 
 
 # Set Debug or Release Define
@@ -88,9 +93,25 @@ eos_require_glfw(EOS)
 eos_require_spdlog(EOS)
 eos_require_ktx(EOS)
 
-if(EOS_SHADER_COMPILER)
-    target_compile_definitions(EOS PRIVATE EOS_SHADER_COMPILER)
-    target_compile_definitions(EOS PRIVATE EOS_ENGINE_SHADER_PATH="${CMAKE_SOURCE_DIR}/src/shaders")
+if(EOS_SHADER_TOOLS)
+    if(NOT DEFINED EOS_SHADER_OUTPUT_PATH OR EOS_SHADER_OUTPUT_PATH STREQUAL "")
+        message(FATAL_ERROR "EOS_SHADER_OUTPUT_PATH must be set when EOS_SHADER_TOOLS is ON")
+        message(STATUS "Please call SET_SHADER_PATHS(${PROJECT_NAME} <project_shader_path> <shader_output_path>) in your CMakeLists.txt to set the paths for shader compilation")
+    endif()
+
+    if(DEFINED EOS_PROJECT_SHADER_PATH AND NOT EOS_PROJECT_SHADER_PATH STREQUAL "" AND NOT IS_DIRECTORY "${EOS_PROJECT_SHADER_PATH}")
+        message(FATAL_ERROR "EOS_PROJECT_SHADER_PATH is set but does not exist: ${EOS_PROJECT_SHADER_PATH}")
+        message(STATUS "Please call SET_SHADER_PATHS(${PROJECT_NAME} <project_shader_path> <shader_output_path>) in your CMakeLists.txt to set the paths for shader compilation")
+    endif()
+
+    set(ENGINE_SHADER_PATH "${CMAKE_SOURCE_DIR}/src/shaders")
+    target_compile_definitions(EOS PRIVATE EOS_SHADER_TOOLS)
+    target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
+    target_sources(EOS PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCompiler.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReloader.cpp"
+    )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_ENGINE_SHADER_PATH="${ENGINE_SHADER_PATH}")
     eos_require_slang(EOS)
 endif ()
 
@@ -104,7 +125,7 @@ if(EOS_USE_IMGUI)
     eos_require_imgui(EOS)
 endif()
 
-if(EOS_BUILD_TEXTURE_TOOLS OR EOS_BUILD_SHADER_TOOLS)
+if(EOS_BUILD_TEXTURE_TOOLS OR EOS_SHADER_TOOLS)
     add_subdirectory(tools)
 endif()
 
@@ -112,7 +133,7 @@ if(EOS_BUILD_TEXTURE_TOOLS)
     eos_require_stb(EOS)
     target_compile_definitions(EOS PRIVATE EOS_BUILD_TEXTURE_TOOLS)
     target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
-    target_sources(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools/texture_packer.cpp")
+    target_sources(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools/TextureTools/texture_packer.cpp")
 endif()
 
 if(EOS_BUILD_EXAMPLES)

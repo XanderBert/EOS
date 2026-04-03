@@ -7,7 +7,7 @@
 #include <set>
 #include <string>
 #include <vector>
-#include "shaders/shaderCompiler.h"
+#include "ShaderTools/shaderCompiler.h"
 
 namespace
 {
@@ -117,8 +117,13 @@ int main(int argc, char** argv)
     Options options;
     if (!ParseOptions(argc, argv, options))  ExitProcess(1);
 
+    std::cout << "Project   Shader Folder: " << options.engineShaderDir.string().c_str() << std::endl;
+    std::cout << "Engine    Shader Folder: " << options.projectShaderDir.string().c_str() << std::endl;
+    std::cout << "Output    Shader Folder: " << options.outputDir.string().c_str() << std::endl;
+
     std::set<std::string> moduleNames = CollectShaderModulesFromDirectory(options.projectShaderDir);
     std::set<std::string> engineModules = CollectShaderModulesFromDirectory(options.engineShaderDir);
+
     moduleNames.insert(engineModules.begin(), engineModules.end());
 
     if (moduleNames.empty())
