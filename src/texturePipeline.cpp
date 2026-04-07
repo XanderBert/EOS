@@ -13,69 +13,6 @@
 
 namespace EOS::TexturePipeline
 {
-    const char* GetCompressionSuffix(const Compression compression)
-    {
-        switch (compression)
-        {
-        case Compression::NoCompression: return "raw";
-        case Compression::ETC2: return "etc2";
-        case Compression::BC5: return "bc5";
-        case Compression::BC7: return "bc7";
-        default: return "unknown";
-        }
-    }
-
-    std::filesystem::path BuildCompressedPathFromRoots(const std::filesystem::path& inputRoot,
-        const std::filesystem::path& outputRoot, const std::filesystem::path& sourceFile, const Compression compression)
-    {
-        // Fall back to filename only if we cannot find a relative path.
-        std::filesystem::path relative = sourceFile.filename();
-        std::error_code errorCode;
-        const std::filesystem::path weakInputRoot = std::filesystem::weakly_canonical(inputRoot, errorCode);
-        const std::filesystem::path weakSource = std::filesystem::weakly_canonical(sourceFile, errorCode);
-        if (!errorCode && !weakInputRoot.empty() && !weakSource.empty())
-        {
-            std::filesystem::path candidate = std::filesystem::relative(weakSource, weakInputRoot, errorCode);
-            if (!errorCode)
-            {
-                relative = candidate;
-            }
-        }
-
-        // Output path layout and appends a compression tag.
-        std::filesystem::path outputPath = outputRoot / relative;
-        outputPath.replace_extension(std::string(".") + GetCompressionSuffix(compression) + ".ktx2");
-        return outputPath;
-    }
-
-    std::filesystem::path BuildCompressedPathFromSource(const std::filesystem::path& sourceFile,
-        const Compression compression)
-    {
-        std::filesystem::path dataRoot;
-        for (std::filesystem::path current = sourceFile.parent_path(); !current.empty(); current = current.parent_path())
-        {
-            if (current.filename() == "data")
-            {
-                dataRoot = current;
-                break;
-            }
-
-            if (current == current.root_path())
-            {
-                break;
-            }
-        }
-
-        if (!dataRoot.empty())
-        {
-            return BuildCompressedPathFromRoots(dataRoot, dataRoot / ".compressed", sourceFile, compression);
-        }
-
-        // Fallback for external assets: create a .compressed folder near the source.
-        const std::filesystem::path fallbackOutputRoot = sourceFile.parent_path() / ".compressed";
-        return BuildCompressedPathFromRoots(sourceFile.parent_path(), fallbackOutputRoot, sourceFile, compression);
-    }
-
     EOS::Format KtxVkFormatToEOSFormat(const uint32_t vkFormat)
     {
         switch (vkFormat)
@@ -89,22 +26,25 @@ namespace EOS::TexturePipeline
         }
     }
 
-
     EOS::Holder<EOS::TextureHandle> LoadTexture(const EOS::TextureLoadingDescription& textureLoadingDescription)
     {
-        ktxTexture2* texture = nullptr;
-        const std::filesystem::path compressedPath = BuildCompressedPathFromSource(textureLoadingDescription.filePath, textureLoadingDescription.compression);
+        CHECK(!textureLoadingDescription.InputFilePath.empty() || std::filesystem::exists(textureLoadingDescription.InputFilePath), "{} : Is not a valid Texture Path.", textureLoadingDescription.InputFilePath.string());
+        CHECK(std::filesystem::is_regular_file(textureLoadingDescription.InputFilePath), "{} : Is not a valid Texture file.", textureLoadingDescription.InputFilePath.string());
+        CHECK(!textureLoadingDescription.OutputFilePath.empty(), "Please Specify a output path for the texture compression");
+        CHECK(std::filesystem::is_directory(textureLoadingDescription.OutputFilePath), "{} : Is not a valid compression directory", textureLoadingDescription.OutputFilePath.string());
 
+        ktxTexture2* texture = nullptr;
+        const std::filesystem::path compressedPath = textureLoadingDescription.OutputFilePath / textureLoadingDescription.InputFilePath.filename().replace_extension("ktx2");
         if (!std::filesystem::exists(compressedPath))
         {
 #if defined(EOS_BUILD_TEXTURE_TOOLS)
             CHECK(EOS::TexturePacking::CompressTextureToCache(
-                    textureLoadingDescription.filePath,
+                    textureLoadingDescription.InputFilePath,
                     compressedPath,
-                    textureLoadingDescription.compression),
+                    textureLoadingDescription.TextureCompression),
                 "Failed to build compressed texture cache '{}' from source '{}'",
                 compressedPath.string(),
-                textureLoadingDescription.filePath.string());
+                textureLoadingDescription.InputFilePath.string());
 #else
             CHECK(false,
                 "Missing compressed texture '{}'. Build with EOS_BUILD_TEXTURE_TOOLS=ON or precompress textures before shipping.",
@@ -137,13 +77,13 @@ namespace EOS::TexturePipeline
         }
 
         //Upload the texture to the GPU
-        EOS::Holder<EOS::TextureHandle> loadedTexture = textureLoadingDescription.context->CreateTexture(
+        TextureHolder loadedTexture = textureLoadingDescription.Context->CreateTexture(
         {
-            .Type                   = EOS::ImageType::Image_2D,
+            .Type                   = textureLoadingDescription.Type,
             .TextureFormat          = textureFormat,
             .TextureDimensions      = {texture->baseWidth, texture->baseHeight},
             .NumberOfMipLevels      = texture->numLevels,
-            .Usage                  = EOS::Sampled,
+            .Usage                  = textureLoadingDescription.Usage,
             .Data                   = packedData.data(),
             .DataNumberOfMipLevels  = texture->numLevels,
             .DebugName              = compressedPath.string().c_str(),

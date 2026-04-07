@@ -123,15 +123,14 @@ inline EOS::Holder<EOS::TextureHandle> LoadGltfTexture(const fastgltf::Asset& as
                                                        EOS::IContext* context)
 {
     const auto texturePath = ResolveTexturePath(asset, modelDirectory, textureIndex);
-    if (!texturePath.has_value())
-    {
-        return {};
-    }
+    if (!texturePath.has_value()) return {};
+
 
     return EOS::TexturePipeline::LoadTexture({
-        .filePath = texturePath.value(),
-        .compression = compression,
-        .context = context,
+        .InputFilePath = texturePath.value(),
+        .OutputFilePath = std::filesystem::current_path() / ".cache" / "compressed_textures",
+        .TextureCompression = compression,
+        .Context = context,
     });
 }
 

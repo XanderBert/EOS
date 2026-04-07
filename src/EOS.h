@@ -510,9 +510,12 @@ namespace EOS
      */
     struct TextureLoadingDescription final
     {
-        std::filesystem::path filePath;
-        Compression compression;
-        EOS::IContext* context;
+        std::filesystem::path InputFilePath;
+        std::filesystem::path OutputFilePath;
+        Compression TextureCompression;
+        uint8_t Usage = Sampled;
+        ImageType Type = ImageType::Image_2D;
+        IContext* Context;
     };
 
     /**
