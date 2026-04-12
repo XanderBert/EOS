@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <deque>
 #include <EOS.h>
 #include <future>
@@ -536,7 +536,7 @@ private:
     [[nodiscard]] bool HasSwapChain() const noexcept;
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
-    void CreateSurface(void* window, void* display);
+    void CreateSurface(void* window);
     void CreateAllocator();
     void StorePhysicalDeviceProperties();
     void GenerateMipmaps(const EOS::TextureHandle& handle);

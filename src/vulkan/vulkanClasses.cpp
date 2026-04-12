@@ -1176,7 +1176,7 @@ void VulkanSwapChain::GetAndWaitOnNextImage()
 
         // when timeout is set to UINT64_MAX, we wait until the next image has been acquired
         const VkResult result = vkAcquireNextImageKHR(VkContext->VulkanDevice, SwapChain, UINT64_MAX, acquireSemaphore, acquireFence, &CurrentImageIndex);
-        CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "vkAcquireNextImageKHR Failed");
+        CHECK(result != VK_ERROR_OUT_OF_DATE_KHR && result != VK_SUBOPTIMAL_KHR, "vkAcquireNextImageKHR Failed");
 
         GetNextImage = false;
         VkContext->VulkanCommandPool->WaitSemaphore(acquireSemaphore);
@@ -2172,7 +2172,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     CreateVulkanInstance(contextDescription.ApplicationName);
     SetupDebugMessenger();
-    CreateSurface(contextDescription.Window, contextDescription.Display);
+    CreateSurface(contextDescription.Window);
 
     //Select the Physical Device
     std::vector<EOS::HardwareDeviceDescription> hardwareDevices;
@@ -3917,13 +3917,10 @@ void VulkanContext::CreateVulkanInstance(const char* applicationName)
     instanceExtensionNames.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
 
     //Choose the right surface extension
-    #if defined(EOS_PLATFORM_WINDOWS)
-            instanceExtensionNames.emplace_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-    #elif defined(EOS_PLATFORM_WAYLAND)
-            instanceExtensionNames.emplace_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-    #elif defined(EOS_PLATFORM_X11)
-            instanceExtensionNames.emplace_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
-    #endif
+    uint32_t glfwExtCount = 0;
+    const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
+    for (uint32_t i = 0; i < glfwExtCount; i++)
+        instanceExtensionNames.emplace_back(glfwExts[i]);
 
     EOS::Logger->debug("Vulkan Instance Extensions:\n     {}", fmt::join(allInstanceExtensions | std::views::transform([](const auto& ext) { return ext.extensionName; }), "\n     "));
 
@@ -4028,36 +4025,10 @@ void VulkanContext::SetupDebugMessenger()
     VK_ASSERT(vkCreateDebugUtilsMessengerEXT(VulkanInstance, &debugUtilMessengerCreateInfo, nullptr, &VulkanDebugMessenger));
 }
 
-void VulkanContext::CreateSurface(void* window, [[maybe_unused]] void* display)
+void VulkanContext::CreateSurface(void* window)
 {
     EOS_PROFILER_FUNCTION();
-#if defined(EOS_PLATFORM_WINDOWS)
-    const VkWin32SurfaceCreateInfoKHR SurfaceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-        .hinstance = GetModuleHandle(nullptr),
-        .hwnd = static_cast<HWND>(window),
-    };
-    VK_ASSERT(vkCreateWin32SurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
-#elif defined(EOS_PLATFORM_X11)
-    const VkXlibSurfaceCreateInfoKHR SurfaceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
-        .flags = 0,
-        .dpy = static_cast<Display*>(display),
-        .window = reinterpret_cast<Window>(window),
-    };
-    VK_ASSERT(vkCreateXlibSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
-#elif defined(EOS_PLATFORM_WAYLAND)
-    const VkWaylandSurfaceCreateInfoKHR SurfaceCreateInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
-        .flags = 0,
-        .display = static_cast<wl_display*>(display),
-        .surface = static_cast<wl_surface*>(window),
-    };
-    VK_ASSERT(vkCreateWaylandSurfaceKHR(VulkanInstance, &SurfaceCreateInfo, nullptr, &VulkanSurface));
-#endif
+    VK_ASSERT(glfwCreateWindowSurface(VulkanInstance, static_cast<GLFWwindow*>(window), nullptr, &VulkanSurface));
 }
 
 void VulkanContext::CreateAllocator()

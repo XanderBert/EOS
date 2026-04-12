@@ -13,23 +13,23 @@ namespace EOS
             printf("%s", fmt::format("GLFW: {}, {}", error, message).c_str());
         });
 
+#if defined(EOS_PLATFORM_WAYLAND) || defined(EOS_PLATFORM_X11)
+        char* displayEnv = getenv("WAYLAND_DISPLAY");
+        if (displayEnv && strlen(displayEnv) > 0)
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
+        else
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#elif defined(EOS_PLATFORM_WINDOWS)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
+#endif
+
         // Initialize GLFW
         if (!glfwInit())
         {
             contextDescription.Window = nullptr;
-            contextDescription.Display = nullptr;
             return;
         }
-
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-
-#if defined(EOS_PLATFORM_WAYLAND)
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
-#elif defined(EOS_PLATFORM_X11)
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#elif defined(EOS_PLATFORM_WINDOWS)
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
-#endif
 
         // Determine if we're in fullscreen mode
         const bool fullscreen = !contextDescription.Width || !contextDescription.Height;
@@ -62,7 +62,6 @@ namespace EOS
         {
             glfwTerminate();
             contextDescription.Window = nullptr;
-            contextDescription.Display = nullptr;
             return;
         }
 
@@ -87,16 +86,7 @@ namespace EOS
 
         glfwFocusWindow(GlfwWindow);
 
-#if defined(EOS_PLATFORM_WAYLAND)
-        contextDescription.Window     = static_cast<void*>(glfwGetWaylandWindow(GlfwWindow));
-        contextDescription.Display    = static_cast<void*>(glfwGetWaylandDisplay());
-#elif defined(EOS_PLATFORM_X11)
-        contextDescription.Window     = reinterpret_cast<void*>(glfwGetX11Window(GlfwWindow));
-        contextDescription.Display    = static_cast<void*>(glfwGetX11Display());
-#elif defined(EOS_PLATFORM_WINDOWS)
-        contextDescription.Window     = static_cast<void*>(glfwGetWin32Window(GlfwWindow));
-        contextDescription.Display    = nullptr;  // Not used on Windows
-#endif
+        contextDescription.Window  = static_cast<void*>(GlfwWindow);
     }
 
     Window::~Window()

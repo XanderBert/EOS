@@ -124,7 +124,6 @@ namespace EOS
 
         const char*             ApplicationName{};
         void*                   Window{};
-        void*                   Display{};
         int                     Width{};
         int                     Height{};
     };
