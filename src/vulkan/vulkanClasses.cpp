@@ -284,12 +284,12 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
         const VkExtent3D dim = depthTexture.Extent;
         if (frameBufferWidth)
         {
-            CHECK(dim.width == frameBufferWidth, "All attachments should have the same width");
+            CHECK(dim.width == frameBufferWidth, "All attachments should have the same width, expected: {}, actual: {}", frameBufferWidth, dim.width);
         }
 
         if (frameBufferHeight)
         {
-            CHECK(dim.height == frameBufferHeight, "All attachments should have the same height");
+            CHECK(dim.height == frameBufferHeight, "All attachments should have the same height, expected: {}, actual: {}", frameBufferHeight, dim.height);
         }
 
         mipLevel = descDepth.Level;
@@ -2461,6 +2461,20 @@ EOS::ColorSpace VulkanContext::GetSwapchainColorSpace() const
     CHECK(HasSwapChain(), "Context: {} does not have a valid swapchain", reinterpret_cast<uint64_t>(this));
     //TODO: Check if the desired and actual color space match up.
     return Configuration.DesiredSwapChainColorSpace;
+}
+
+void VulkanContext::ResizeSwapChain(uint32_t width, uint32_t height)
+{
+    if (width == 0 || height == 0) return;
+
+    const VulkanSwapChainCreationDescription desc
+    {
+        .vulkanContext = this,
+        .width = width,
+        .height = height,
+    };
+
+    InitializeSwapChain(desc);
 }
 
 EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const

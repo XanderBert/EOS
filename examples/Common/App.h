@@ -74,19 +74,24 @@ public:
     void Run(Function&& renderLoop)
     {
         lastTime = glfwGetTime();
+        bool AllowStartupFrame = true;
 
         while (!Window.ShouldClose() && !ShouldExit)
         {
             Window.Poll();
-            if (!Window.IsFocused())
+
+            if (!Window.IsFocused() && !AllowStartupFrame)
             {
                 if (Input.rightMouse) SetMouseLookMode(false);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
+            AllowStartupFrame = false;
+
             //Update time
-            const float currentTime = glfwGetTime();
-            DeltaTime = currentTime - lastTime;
+            const double currentTime = glfwGetTime();
+            DeltaTime = static_cast<float>(currentTime - lastTime);
             lastTime = currentTime;
 
             //Update Camera
@@ -194,7 +199,7 @@ private:
         });
     }
 
-    float lastTime{};
+    double lastTime{};
     bool FirstMouseSample = true;
     double LastMouseX = 0.0;
     double LastMouseY = 0.0;

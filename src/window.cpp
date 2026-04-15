@@ -2,6 +2,7 @@
 #include "EOS.h"
 
 #include <algorithm>
+#include <iostream>
 
 namespace EOS
 {
@@ -66,10 +67,7 @@ namespace EOS
         }
 
         // Position the window in fullscreen mode
-        if (fullscreen)
-        {
-            glfwSetWindowPos(GlfwWindow, x, y);
-        }
+        if (fullscreen)  glfwSetWindowPos(GlfwWindow, x, y);
 
 #if defined(EOS_PLATFORM_WINDOWS)
         // Get the actual window size and store it
@@ -103,6 +101,21 @@ namespace EOS
     void Window::Poll()
     {
         glfwPollEvents();
+
+        int newWidth;
+        int newHeight;
+        glfwGetFramebufferSize(GlfwWindow, &newWidth, &newHeight);
+
+        if (Width != newWidth || Height != newHeight)
+        {
+            Height = newHeight;
+            Width = newWidth;
+
+            for (const auto& [ID, Callback] : ResizeSubscriptions)
+            {
+                if (Callback) Callback(newWidth, newHeight);
+            }
+        }
     }
 
     bool Window::ShouldClose() const
@@ -112,18 +125,7 @@ namespace EOS
 
     bool Window::IsFocused() const
     {
-        int newWidth;
-        int newHeight;
-        glfwGetFramebufferSize(GlfwWindow, &newWidth, &newHeight);
-
-        if (Width != newWidth || Height != newHeight)
-        {
-
-        }
-
-        Width = newWidth;
-        Height = newHeight;
-        return Width || Height;
+        return glfwGetWindowAttrib(GlfwWindow, GLFW_FOCUSED) == GLFW_TRUE;
     }
 
     CallbackSubscription Window::OnKey(KeyCallback callback)

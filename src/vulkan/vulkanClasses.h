@@ -454,6 +454,7 @@ public:
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
     [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
     [[nodiscard]] EOS::ColorSpace GetSwapchainColorSpace() const override;
+    void ResizeSwapChain(uint32_t width, uint32_t height) override;
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;

@@ -662,6 +662,13 @@ namespace EOS
         virtual ColorSpace GetSwapchainColorSpace() const = 0;
 
         /**
+         * @brief Recreates the swapchain for a new framebuffer size.
+         * @param width New framebuffer width.
+         * @param height New framebuffer height.
+         */
+        virtual void ResizeSwapChain(uint32_t width, uint32_t height) = 0;
+
+        /**
          * @brief Gets dimensions for a texture handle.
          * @param handle The handle of the texture to query.
          * @return The dimensions of the texture.

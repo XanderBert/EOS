@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 
 #include "defines.h"
 namespace EOS
@@ -48,10 +47,10 @@ namespace EOS
         void UnsubscribeResize(CallbackSubscription callbackSubscription);
 
         GLFWwindow* GlfwWindow = nullptr;
-        inline static int Width;
-        inline static int Height;
-
+        int Width{};
+        int Height{};
     private:
+
         struct KeySubscription final
         {
             CallbackSubscription ID;

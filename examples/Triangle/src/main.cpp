@@ -41,10 +41,14 @@ int main()
     };
     Handles.RenderPipeline = context->CreateRenderPipeline(renderPipelineDescription);
 
+    bool AllowStartupFrame = true;
+
     while (!window->ShouldClose())
     {
         window->Poll();
-        if (!window->IsFocused()) continue;
+
+        if (!window->IsFocused() && !AllowStartupFrame) continue;
+        AllowStartupFrame = false;
 
 
         EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
