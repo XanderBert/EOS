@@ -837,6 +837,12 @@ namespace EOS
          */
         virtual Format GetFormat(TextureHandle handle) const = 0;
 
+        /**
+         * @brief Waits for the GPU work associated with a submission handle to be fully complete.
+         * @param handle The submission handle to wait on.
+         */
+        virtual void Wait(const EOS::SubmitHandle handle) = 0;
+
     protected:
         IContext() = default;
     };

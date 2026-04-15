@@ -68,15 +68,6 @@ int main()
 
     App.Run([&]()
     {
-
-        const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(Handles.ComputeBuffer));
-        if (computeData->result == computeData->lhs * computeData->rhs)
-        {
-            EOS::Logger->info("Compute validation success: {} * {} = {}", computeData->lhs, computeData->rhs, computeData->result);
-            App.Exit();
-            return;
-        }
-
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
         cmdPushMarker(cmdBuffer, "Compute Validation", 0xfff59d00);
         cmdBindComputePipeline(cmdBuffer, Handles.ComputePipeline);
@@ -84,7 +75,19 @@ int main()
         cmdDispatchThreadGroups(cmdBuffer, {1, 1, 1});
         cmdPopMarker(cmdBuffer);
 
-        App.Context->Submit(cmdBuffer, {});
+        EOS::SubmitHandle waitHandle = App.Context->Submit(cmdBuffer, {});
+        App.Context->Wait(waitHandle);
+
+        const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(Handles.ComputeBuffer));
+        if (computeData->result == computeData->lhs * computeData->rhs)
+        {
+            EOS::Logger->info("Compute validation success: {} * {} = {}", computeData->lhs, computeData->rhs, computeData->result);
+            App.Exit();
+        }
+        else
+        {
+            EOS::Logger->error("Compute validation failed: {} * {} != {}", computeData->lhs, computeData->rhs, computeData->result);
+        }
     });
 
     Handles = {};

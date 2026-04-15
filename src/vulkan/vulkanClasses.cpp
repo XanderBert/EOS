@@ -3681,6 +3681,11 @@ EOS::Format VulkanContext::GetFormat(EOS::TextureHandle handle) const
     return VkContext::vkFormatToFormat(texture->ImageFormat);
 }
 
+void VulkanContext::Wait(const EOS::SubmitHandle handle)
+{
+    VulkanCommandPool->Wait(handle);
+}
+
 void VulkanContext::ProcessDeferredTasks() const
 {
     while (!DeferredTasks.empty() && VulkanCommandPool->IsReady(DeferredTasks.front().Handle, true))

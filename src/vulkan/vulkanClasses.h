@@ -482,6 +482,8 @@ public:
     void Upload(EOS::TextureHandle handle, const EOS::TextureRangeDescription &range, const void *data) override;
     EOS::Format GetFormat(EOS::TextureHandle handle) const override;
 
+    void Wait(const EOS::SubmitHandle handle) override;
+
     //Deferred Tasks
     void ProcessDeferredTasks() const;
     void WaitOnDeferredTasks() const;
@@ -555,6 +557,8 @@ private:
     void GrowDescriptorPool(DescriptorSetState& descriptorSetState, uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
     [[nodiscard]] DescriptorSetState& GetActiveDescriptorSetState();
     [[nodiscard]] const DescriptorSetState& GetActiveDescriptorSetState() const;
+
+
 
 private:
     VkInstance VulkanInstance                       = VK_NULL_HANDLE;
