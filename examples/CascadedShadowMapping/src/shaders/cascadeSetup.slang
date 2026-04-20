@@ -3,6 +3,7 @@ import math;
 import shadowCommon;
 
 static const uint CASCADES = 4;
+static const float kCascadeOverlapNDC = 0.03;
 
 struct DepthReductionData
 {
@@ -77,6 +78,8 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     for (uint i = 0; i < CASCADES; ++i)
     {
         float splitDist = cascadeSplits[i];
+        float cascadeNearDist = max(lastSplitDist - kCascadeOverlapNDC, 0.0);
+        float cascadeFarDist = min(splitDist + kCascadeOverlapNDC, 1.0);
 
         float3 frustumCorners[8];
         frustumCorners[0] = UnprojectNDC(float3(-1.0,  1.0, 0.0), pc.invViewProjection);
@@ -92,8 +95,8 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         for (uint j = 0; j < 4; ++j)
         {
             float3 dist = frustumCorners[j + 4] - frustumCorners[j];
-            frustumCorners[j + 4] = frustumCorners[j] + dist * splitDist;
-            frustumCorners[j] = frustumCorners[j] + dist * lastSplitDist;
+            frustumCorners[j + 4] = frustumCorners[j] + dist * cascadeFarDist;
+            frustumCorners[j] = frustumCorners[j] + dist * cascadeNearDist;
         }
 
         float3 frustumCenter = 0.0;

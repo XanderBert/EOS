@@ -1,12 +1,13 @@
 
 #include "../../Common/App.h"
 
-
 //https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
 //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
 //http://the-witness.net/news/2010/03/graphics-tech-shadow-maps-part-1/
 //https://therealmjp.github.io/posts/shadow-maps/
 //https://mynameismjp.wordpress.com/2013/09/10/shadow-maps/
+//https://www.researchgate.net/publication/220791941_Sample_distribution_Shadow_Maps
+//https://advances.realtimerendering.com/s2010/Lauritzen-SDSM(SIGGRAPH%202010%20Advanced%20RealTime%20Rendering%20Course).pdf
 
 #define CASCADES 4
 #define SHADOW_SIZE 4096
@@ -177,7 +178,7 @@ Resources Handles;
 
 FramePointers FramePointersData;
 
-int nMeshes;
+int32_t nMeshes;
 
 // Lights
 glm::vec2 g_LightRotation     = {-73, -90};
@@ -211,7 +212,7 @@ void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3&
     for (uint32_t i = 0; i < CASCADES; ++i)
     {
         constexpr float cascadeLambda = 0.25f;
-        float p = (i + 1) / static_cast<float>(CASCADES);
+        float p = (static_cast<float>(i) + 1.0f) / static_cast<float>(CASCADES);
         float log = minZ * std::pow(ratio, p);
         float uniform = minZ + range * p;
         float d = cascadeLambda * (log - uniform) + uniform;
@@ -239,10 +240,10 @@ void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3&
 
         //Project frustum corners into world space
         glm::mat4 invCam = glm::inverse(camera.GetViewProjectionMatrix(aspectRatio));
-        for (uint32_t j = 0; j < 8; ++j)
+        for (auto & frustumCorner : frustumCorners)
         {
-            glm::vec4 invCorner = invCam * glm::vec4(frustumCorners[j], 1.0f) ;
-            frustumCorners[j] = invCorner / invCorner.w;
+            glm::vec4 invCorner = invCam * glm::vec4(frustumCorner, 1.0f) ;
+            frustumCorner = invCorner / invCorner.w;
         }
 
         for (uint32_t j = 0; j < 4; ++j)
@@ -253,18 +254,18 @@ void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3&
         }
 
         // Get frustum center
-        glm::vec3 frustumCenter = glm::vec3(0.0f);
-        for (uint32_t j = 0; j < 8; j++)
+        auto frustumCenter = glm::vec3(0.0f);
+        for (auto frustumCorner : frustumCorners)
         {
-            frustumCenter += frustumCorners[j];
+            frustumCenter += frustumCorner;
         }
         frustumCenter /= 8.0f;
 
         //Find the longest radius of the frustum
         float radius = 0.0f;
-        for (uint32_t j = 0; j < 8; j++)
+        for (auto frustumCorner : frustumCorners)
         {
-            float distance = glm::length(frustumCorners[j] - frustumCenter);
+            float distance = glm::length(frustumCorner - frustumCenter);
             radius = glm::max(radius, distance);
         }
         radius = std::ceil(radius * 16.0f) / 16.0f;
@@ -272,18 +273,17 @@ void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3&
         //Create light ortho based on the AABB for this cascade
         glm::vec3 maxExtents = glm::vec3(radius);
         glm::vec3 minExtents = -maxExtents;
-        glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
+        constexpr glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
         glm::mat4 lightViewMatrix = glm::lookAt(frustumCenter - lightForward * -minExtents.z, frustumCenter, lightUp);
         glm::mat4 lightOrthoMatrix = glm::ortho(minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, 0.0f, maxExtents.z - minExtents.z);
 
         //Texel Grid Stabilization
         //Avoid light shimmering -> Create rounding matrix so we move in texel sized increments
-        constexpr float shadowMapResolution = 4096.0f;
         const glm::mat4 shadowMatrix = lightOrthoMatrix * lightViewMatrix;
         glm::vec4 shadowOrigin = shadowMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        shadowOrigin = shadowOrigin * (shadowMapResolution * 0.5f);
+        shadowOrigin = shadowOrigin * (SHADOW_SIZE * 0.5f);
         const glm::vec4 roundedOrigin = glm::round(shadowOrigin);
-        glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) * (2.0f / shadowMapResolution);
+        glm::vec4 roundOffset = (roundedOrigin - shadowOrigin) * (2.0f / SHADOW_SIZE);
         roundOffset.z = 0.0f;
         roundOffset.w = 0.0f;
         lightOrthoMatrix[3] += roundOffset;
@@ -579,7 +579,7 @@ int main()
         .DebugName = "Buffer: accel index",
     });
 
-    const glm::mat3x4 blasTransform{1.0f};
+    constexpr glm::mat3x4 blasTransform{1.0f};
     Handles.AccelTransformBuffer = App.Context->CreateBuffer(
     {
         .Usage     = EOS::BufferUsageFlags::AccelStructBuildInputReadOnly,
@@ -603,17 +603,17 @@ int main()
 
     auto getBLASIndexForMesh = [&](const MeshEntry& mesh) -> uint32_t
     {
-        for (const MeshBLASEntry& entry : meshBLASCache)
+        for (const auto& [vertexOffset, indexOffset, indexCount, blasIndex] : meshBLASCache)
         {
-            if (entry.vertexOffset == mesh.vertexOffset && entry.indexOffset == mesh.indexOffset && entry.indexCount == mesh.indexCount)
+            if (vertexOffset == mesh.vertexOffset && indexOffset == mesh.indexOffset && indexCount == mesh.indexCount)
             {
-                return entry.blasIndex;
+                return blasIndex;
             }
         }
 
         // EOS backend maps NumberOfVertices -> (maxVertex = NumberOfVertices - 1).
         // Pass full vertex count so Vulkan maxVertex becomes vertices.size() - 1.
-        const uint32_t globalVertexCount = static_cast<uint32_t>(vertices.size());
+        const auto globalVertexCount = static_cast<uint32_t>(vertices.size());
 
         Handles.SceneBLASes.emplace_back(App.Context->CreateAccelerationStructure(
         {
@@ -636,7 +636,7 @@ int main()
             .DebugName = "Cascade Scene BLAS",
         }));
 
-        const uint32_t newBLASIndex = static_cast<uint32_t>(Handles.SceneBLASes.size() - 1);
+        const auto newBLASIndex = static_cast<uint32_t>(Handles.SceneBLASes.size() - 1);
         meshBLASCache.push_back({mesh.vertexOffset, mesh.indexOffset, mesh.indexCount, newBLASIndex});
         return newBLASIndex;
     };
@@ -791,9 +791,9 @@ int main()
 
         //Update Light Frustum
         glm::vec3 lightForward;
-        lightForward.x = cos(glm::radians(g_LightRotation.y)) * cos(glm::radians(g_LightRotation.x));
-        lightForward.y = sin(glm::radians(g_LightRotation.x));
-        lightForward.z = sin(glm::radians(g_LightRotation.y)) * cos(glm::radians(g_LightRotation.x));
+        lightForward.x = cosf(glm::radians(g_LightRotation.y)) * cosf(glm::radians(g_LightRotation.x));
+        lightForward.y = sinf(glm::radians(g_LightRotation.x));
+        lightForward.z = sinf(glm::radians(g_LightRotation.y)) * cosf(glm::radians(g_LightRotation.x));
         lightForward = glm::normalize(lightForward);
 
         //Get camera matrices
