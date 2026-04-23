@@ -90,9 +90,9 @@ struct DepthReductionPushConstants final
 {
     uint64_t depthRangePtr;
     uint32_t depthTextureID;
-    uint32_t depthSamplerID;
     uint32_t width;
     uint32_t height;
+    uint32_t numGroupsX;
 };
 
 struct CascadeSetupPushConstants final
@@ -377,12 +377,14 @@ void PassShade(EOS::ICommandBuffer& cmdBuffer, const EOS::TextureHandle& swapCha
     cmdPopMarker(cmdBuffer);
 }
 
-void PassDepthReductionCompute(EOS::ICommandBuffer& cmdBuffer, const DepthReductionPushConstants& pushConstants)
+void PassDepthReductionCompute(EOS::ICommandBuffer& cmdBuffer, const DepthReductionPushConstants& pc)
 {
+    const uint32_t gy = (pc.height + 15) / 16;
+
     cmdPushMarker(cmdBuffer, "Depth Reduction Compute", 0xff22aa66);
     cmdBindComputePipeline(cmdBuffer, Handles.ComputePipelineDepthReduction);
-    cmdPushConstants(cmdBuffer, pushConstants);
-    cmdDispatchThreadGroups(cmdBuffer, {1, 1, 1});
+    cmdPushConstants(cmdBuffer, pc);
+    cmdDispatchThreadGroups(cmdBuffer, {pc.numGroupsX, gy, 1});
     cmdPopMarker(cmdBuffer);
 }
 
@@ -839,6 +841,14 @@ int main()
         const EOS::TextureHandle swapChainTexture = App.Context->GetSwapChainTexture();
         App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
 
+        // Reset min and max depth values
+        if (useComputeCascades)
+        {
+            constexpr DepthReductionData sentinel{ 0.0f, 0.0f };
+            App.Context->Upload(Handles.DepthReductionBuffer, &sentinel, sizeof(DepthReductionData), 0);
+        }
+
+
         cmdPipelineBarrier(cmdBuffer, {},
 {
                 { swapChainTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
@@ -851,13 +861,14 @@ int main()
 
         if (useComputeCascades)
         {
+            const uint32_t gx = (static_cast<uint32_t>(App.Window.Width) + 15) / 16;
             const DepthReductionPushConstants depthReductionPC
             {
-                .depthRangePtr = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
+                .depthRangePtr  = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
                 .depthTextureID = Handles.DepthTexture.Index(),
-                .depthSamplerID = Handles.DepthMapSampler.Index(),
-                .width = static_cast<uint32_t>(App.Window.Width),
-                .height = static_cast<uint32_t>(App.Window.Height),
+                .width          = static_cast<uint32_t>(App.Window.Width),
+                .height         = static_cast<uint32_t>(App.Window.Height),
+                .numGroupsX     = gx,
             };
 
             const CascadeSetupPushConstants cascadeSetupPC

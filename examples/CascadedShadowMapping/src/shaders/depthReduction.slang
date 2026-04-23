@@ -11,70 +11,75 @@ struct DepthReductionData
 struct PushConstants
 {
     uint64_t depthRangePtr;
-    uint depthTextureID;
-    uint depthSamplerID;
-    uint width;
-    uint height;
+    uint      depthTextureID;
+    uint      width;
+    uint      height;
+    uint      numGroupsX;
 };
 
 [[vk::push_constant]] PushConstants pc;
 
-// These arrays live in thread-group shared memory (on-chip LDS/shared memory).
-// Every thread writes its local min/max once, then the group reduces to a
-// single min/max pair using synchronized reduction steps below.
+// Two Stage strategy:
+// each group reduces its assigned tiles into one result,
+// then lane 0 does an atomic min/max into the output buffer.
+
 groupshared float gsMinDepth[256];
 groupshared float gsMaxDepth[256];
 
-[numthreads(16, 16, 1)]
+
+[numthreads(256, 1, 1)]
 [shader("compute")]
-void computeMain(uint3 groupThreadID : SV_GroupThreadID)
+void computeMain(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uint3 groupID          : SV_GroupID,
+    uint  localIndex       : SV_GroupIndex)
 {
-    // Flatten 2D thread-id into [0, 255] index for our shared arrays.
-    uint localIndex = groupThreadID.y * 16 + groupThreadID.x;
+    // ---------------------------------------------------------------------------
+    // Phase 1 — each thread checks its own pixel
+    // ---------------------------------------------------------------------------
 
+    // Map flat 256-thread group back to a 16x16 logical tile position.
+    uint lx = localIndex % 16;
+    uint ly = localIndex / 16;
 
-    // Start with identity values for min/max reduction.
-    float minDepth = 1.0;
-    float maxDepth = 0.0;
+    // This group's starting pixel in the texture.
+    uint startX = groupID.x * 16 + lx;
+    uint startY = groupID.y * 16 + ly;
 
-    // This shader runs as one 16x16 group. Each lane strided-walks the full
-    // depth texture so together they cover all pixels and build local min/max.
-    [loop]
-    for (uint y = groupThreadID.y; y < pc.height; y += 16)
+    // Stride by the full dispatch so groups tile the image.
+    uint strideX = pc.numGroupsX * 16;
+
+    float lMin = 1.0;
+    float lMax = 0.0;
+
+    // X stride loop handles widths that aren't a multiple of (numGroupsX * 16).
+    for (uint x = startX; x < pc.width; x += strideX)
     {
-        [loop]
-        for (uint x = groupThreadID.x; x < pc.width; x += 16)
+        uint y = startY;
+        if (y < pc.height)
         {
-            float depth = TextureBindless2DLoad(pc.depthTextureID, int2(x, y)).r;
-
-            // Skip only true clear values. Using a loose threshold can incorrectly
-            // drop valid far geometry that naturally lands very close to 1.0.
-            if (depth >= 1.0)
+            float d = TextureBindless2DLoad(pc.depthTextureID, int2(x, y)).r;
+            if (d < 1.0) // skip clear / sky pixels
             {
-                continue;
+                lMin = min(lMin, d);
+                lMax = max(lMax, d);
             }
-
-            minDepth = min(minDepth, depth);
-            maxDepth = max(maxDepth, depth);
         }
     }
 
-    // If no valid depth was found (minDepth > maxDepth), fall back to full depth range.
-    if (minDepth > maxDepth)
-    {
-        minDepth = 0.0;
-        maxDepth = 1.0;
-    }
+    // thread only saw sky/clear pixels.
+    if (lMin > lMax) { lMin = 1.0; lMax = 0.0; }
 
-    // Publish each lane's local result into group-shared memory.
-    gsMinDepth[localIndex] = minDepth;
-    gsMaxDepth[localIndex] = maxDepth;
+    gsMinDepth[localIndex] = lMin;
+    gsMaxDepth[localIndex] = lMax;
 
-    // Barrier + sync is required so all threads see fully written shared data
-    // before any lane starts reading neighbors for reduction.
     GroupMemoryBarrierWithGroupSync();
 
-    // Parallel reduction in stages: 256 -> 128 -> 64.
+    // ---------------------------------------------------------------------------
+    // Phase 2 — standard LDS reduction down to 32 threads. (1 warp)
+    // ---------------------------------------------------------------------------
+
+    // each group of 256 threads reduces to 128
     if (localIndex < 128)
     {
         gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 128]);
@@ -82,6 +87,7 @@ void computeMain(uint3 groupThreadID : SV_GroupThreadID)
     }
     GroupMemoryBarrierWithGroupSync();
 
+    // then 128 to 64
     if (localIndex < 64)
     {
         gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 64]);
@@ -89,36 +95,41 @@ void computeMain(uint3 groupThreadID : SV_GroupThreadID)
     }
     GroupMemoryBarrierWithGroupSync();
 
-    // Final reduction inside first warp (32 lanes). This is unrolled to keep
-    // overhead low and reduce branch/control cost.
+    // then 64 to 32
     if (localIndex < 32)
     {
         gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 32]);
         gsMaxDepth[localIndex] = max(gsMaxDepth[localIndex], gsMaxDepth[localIndex + 32]);
-        gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 16]);
-        gsMaxDepth[localIndex] = max(gsMaxDepth[localIndex], gsMaxDepth[localIndex + 16]);
-        gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 8]);
-        gsMaxDepth[localIndex] = max(gsMaxDepth[localIndex], gsMaxDepth[localIndex + 8]);
-        gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 4]);
-        gsMaxDepth[localIndex] = max(gsMaxDepth[localIndex], gsMaxDepth[localIndex + 4]);
-        gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 2]);
-        gsMaxDepth[localIndex] = max(gsMaxDepth[localIndex], gsMaxDepth[localIndex + 2]);
-        gsMinDepth[localIndex] = min(gsMinDepth[localIndex], gsMinDepth[localIndex + 1]);
-        gsMaxDepth[localIndex] = max(gsMaxDepth[localIndex], gsMaxDepth[localIndex + 1]);
     }
-
     GroupMemoryBarrierWithGroupSync();
 
-    // Lane 0 owns the final reduced result and writes it to the output buffer.
-    if (localIndex != 0)
+    // ---------------------------------------------------------------------------
+    // Phase 3 — warp reduction via wave intrinsics. No barriers needed inside a single warp
+    // https://github.com/microsoft/directxshadercompiler/wiki/wave-intrinsics
+    // ---------------------------------------------------------------------------
+    if (localIndex < 32)
     {
-        return;
-    }
+        // As GPU lanes are typically grouped in 32s or less, and we have 32 or fewer lanes left at this point,
+        // this wave reduction will cover all remaining lanes in the group.
+        float waveMin = WaveActiveMin(gsMinDepth[localIndex]);
+        float waveMax = WaveActiveMax(gsMaxDepth[localIndex]);
 
-    DepthReductionData result;
-    result.minDepth = gsMinDepth[0];
-    result.maxDepth = gsMaxDepth[0];
-    result.pad0 = 0.0;
-    result.pad1 = 0.0;
-    *((Ptr<DepthReductionData>)pc.depthRangePtr) = result;
+        // after setting all lanes to the same value,
+        // we only want one lane to write to the output buffer, so we pick lane 0.
+        if (WaveIsFirstLane())
+        {
+            Ptr<DepthReductionData> outPtr = (Ptr<DepthReductionData>)pc.depthRangePtr;
+
+            // Atomic float min/max via bit-cast tricks (valid for [0,1] depths):
+            //https://www.jeremyong.com/graphics/2023/09/05/f32-interlocked-min-max-hlsl/
+
+            // minDepth atomic: flip bits so uint order matches inverse float order.
+            uint minBits = ~asuint(waveMin);
+            InterlockedMin(((Ptr<uint>)outPtr)[0], minBits); // performs an atomic min of value to memory
+
+            // maxDepth atomic: [0,1] floats sort identically to their uint bits.
+            uint maxBits = asuint(waveMax);
+            InterlockedMax(((Ptr<uint>)outPtr)[1], maxBits); // performs an atomic max of value to memory
+        }
+    }
 }
