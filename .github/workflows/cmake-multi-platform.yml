@@ -1,11 +1,18 @@
 name: CMake Build
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
   VULKAN_VERSION: 1.4.304.1
   VULKAN_COMPONENTS: Vulkan-Headers, Vulkan-Loader
   BUILD_TYPE: Release
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,6 +22,7 @@ jobs:
   linux-lib:
     name: Linux Lib (${{ matrix.display_server }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -38,22 +46,43 @@ jobs:
             sudo apt-get install -y libwayland-dev wayland-protocols libxkbcommon-dev
           fi
 
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: dependencies/
+          key: ${{ runner.os }}-eos-deps-${{ hashFiles('cmake/deps-lock.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-eos-deps-
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ${{ runner.os }}-eos-${{ matrix.display_server }}
+
       - name: Configure
-        run: cmake -B build -DEOS_BUILD_EXAMPLES=OFF -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }} -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        run: >
+          cmake -B build -DEOS_BUILD_EXAMPLES=OFF
+          -DUSE_WAYLAND=${{ matrix.display_server == 'Wayland' && 'ON' || 'OFF' }}
+          -DUSE_X11=${{ matrix.display_server == 'X11' && 'ON' || 'OFF' }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: eos-linux-${{ matrix.display_server }}
-          path: build/
+          path: lib/
           retention-days: 7
+          if-no-files-found: error
 
   windows-lib:
     name: Windows Lib
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -64,17 +93,26 @@ jobs:
           vulkan-components: ${{ env.VULKAN_COMPONENTS }}
           vulkan-use-cache: true
 
-      - uses: lukka/get-cmake@latest
+      - uses: lukka/get-cmake@v3.31.6
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: dependencies/
+          key: ${{ runner.os }}-eos-deps-${{ hashFiles('cmake/deps-lock.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-eos-deps-
 
       - name: Configure
         run: cmake -B build -DEOS_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: eos-windows
-          path: build/
+          path: build/${{ env.BUILD_TYPE }}/
           retention-days: 7
+          if-no-files-found: error
