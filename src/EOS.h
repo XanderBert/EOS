@@ -603,6 +603,24 @@ namespace EOS
     };
 
     /**
+     * @brief Opaque handles into the graphics API underneath an IContext.
+     *
+     * EOS's own RHI (Holder<Handle<T>>, ICommandBuffer, cmdBeginRendering, ...) is deliberately
+     * backend-agnostic and stays that way - this struct exists purely as an escape hatch for
+     * third-party libraries that bring their own render backend and need to talk to the real
+     * graphics API directly (a UI toolkit's own renderer, a profiler overlay, ...).
+    struct NativeGraphicsHandles final
+    {
+#if defined(EOS_VULKAN)
+        void* Instance{};              // VkInstance
+        void* PhysicalDevice{};        // VkPhysicalDevice
+        void* Device{};                // VkDevice
+        uint32_t QueueFamilyIndex{};   // Graphics queue family
+        void* GetInstanceProcAddr{};   // PFN_vkGetInstanceProcAddr
+#endif
+    };
+
+    /**
      * @brief Main graphics context interface for resource creation and submission.
      */
     class IContext
@@ -842,6 +860,36 @@ namespace EOS
          * @param handle The submission handle to wait on.
          */
         virtual void Wait(const EOS::SubmitHandle handle) = 0;
+
+        /**
+         * @brief Gets the raw native handles (VkInstance/VkDevice/... on EOS_VULKAN) backing
+         *        this context. See NativeGraphicsHandles - this is an
+         *        escape hatch for third-party render backends, not part of EOS's own RHI.
+         */
+        [[nodiscard]] virtual NativeGraphicsHandles GetNativeGraphicsHandles() const = 0;
+
+        /**
+         * @brief Gets the native command buffer (VkCommandBuffer, cast through void*) that
+         *        commandBuffer records into. See GetNativeGraphicsHandles.
+         * @param commandBuffer A commandbuffer previously returned by AcquireCommandBuffer().
+         */
+        [[nodiscard]] virtual void* GetNativeCommandBuffer(ICommandBuffer& commandBuffer) = 0;
+
+        /**
+         * @brief Gets a native view onto a texture's base mip/layer (VkImageView, cast through
+         *        void*) suitable for building a native framebuffer/render-target binding
+         *        outside EOS's own RHI. See GetNativeGraphicsHandles.
+         * @param handle The texture to get a native view of.
+         */
+        [[nodiscard]] virtual void* GetNativeImageView(TextureHandle handle) = 0;
+
+        /**
+         * @brief Gets a texture's format as the backend's own raw enum value (VkFormat on
+         *        EOS_VULKAN), for building native render-pass/pipeline
+         *        descriptions outside EOS's own RHI. See GetNativeGraphicsHandles.
+         * @param handle The texture to get the native format of.
+         */
+        [[nodiscard]] virtual uint32_t GetNativeFormat(TextureHandle handle) const = 0;
 
     protected:
         IContext() = default;

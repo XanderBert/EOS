@@ -3686,6 +3686,39 @@ void VulkanContext::Wait(const EOS::SubmitHandle handle)
     VulkanCommandPool->Wait(handle);
 }
 
+EOS::NativeGraphicsHandles VulkanContext::GetNativeGraphicsHandles() const
+{
+    return EOS::NativeGraphicsHandles
+    {
+        .Instance           = VulkanInstance,
+        .PhysicalDevice     = VulkanPhysicalDevice,
+        .Device             = VulkanDevice,
+        .QueueFamilyIndex   = VulkanDeviceQueues.Graphics.QueueFamilyIndex,
+        .GetInstanceProcAddr = reinterpret_cast<void*>(vkGetInstanceProcAddr),
+    };
+}
+
+void* VulkanContext::GetNativeCommandBuffer(EOS::ICommandBuffer& commandBuffer)
+{
+    auto* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+    CHECK(vulkanCommandBuffer && vulkanCommandBuffer->CommandBufferImpl, "Invalid command buffer");
+    return vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer;
+}
+
+void* VulkanContext::GetNativeImageView(EOS::TextureHandle handle)
+{
+    VulkanImage* image = TexturePool.Get(handle);
+    CHECK(image, "The texture of this handle is not valid");
+    return image->GetImageViewForFramebuffer(VulkanDevice, 0, 0, 1);
+}
+
+uint32_t VulkanContext::GetNativeFormat(EOS::TextureHandle handle) const
+{
+    const VulkanImage* image = TexturePool.Get(handle);
+    CHECK(image, "The texture of this handle is not valid");
+    return static_cast<uint32_t>(image->ImageFormat);
+}
+
 void VulkanContext::ProcessDeferredTasks() const
 {
     while (!DeferredTasks.empty() && VulkanCommandPool->IsReady(DeferredTasks.front().Handle, true))

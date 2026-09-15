@@ -484,6 +484,11 @@ public:
 
     void Wait(const EOS::SubmitHandle handle) override;
 
+    [[nodiscard]] EOS::NativeGraphicsHandles GetNativeGraphicsHandles() const override;
+    [[nodiscard]] void* GetNativeCommandBuffer(EOS::ICommandBuffer& commandBuffer) override;
+    [[nodiscard]] void* GetNativeImageView(EOS::TextureHandle handle) override;
+    [[nodiscard]] uint32_t GetNativeFormat(EOS::TextureHandle handle) const override;
+
     //Deferred Tasks
     void ProcessDeferredTasks() const;
     void WaitOnDeferredTasks() const;
