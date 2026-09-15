@@ -70,6 +70,13 @@ public:
     InputState Input;
     float DeltaTime{};
 
+    // Return true when the cursor (GLFW window coordinates) is over UI, so a click there goes to
+    // the UI instead of starting mouse-look. Defaults to ImGui's WantCaptureMouse
+    std::function<bool(double xpos, double ypos)> WantCaptureMouse = [](double, double)
+    {
+        return ImGui::GetIO().WantCaptureMouse;
+    };
+
     template <typename Function>
     void Run(Function&& renderLoop)
     {
@@ -160,7 +167,12 @@ private:
 
             if (action == GLFW_PRESS)
             {
-                if (ImGui::GetIO().WantCaptureMouse) return;
+                if (WantCaptureMouse)
+                {
+                    double xpos, ypos;
+                    glfwGetCursorPos(Window.GlfwWindow, &xpos, &ypos);
+                    if (WantCaptureMouse(xpos, ypos)) return;
+                }
                 SetMouseLookMode(true);
             }
             else if (action == GLFW_RELEASE && Input.rightMouse)
