@@ -31,7 +31,10 @@ namespace EOS::TexturePipeline
         CHECK(!textureLoadingDescription.InputFilePath.empty() || std::filesystem::exists(textureLoadingDescription.InputFilePath), "{} : Is not a valid Texture Path.", textureLoadingDescription.InputFilePath.string());
         CHECK(std::filesystem::is_regular_file(textureLoadingDescription.InputFilePath), "{} : Is not a valid Texture file.", textureLoadingDescription.InputFilePath.string());
         CHECK(!textureLoadingDescription.OutputFilePath.empty(), "Please Specify a output path for the texture compression");
-        CHECK(std::filesystem::is_directory(textureLoadingDescription.OutputFilePath), "{} : Is not a valid compression directory", textureLoadingDescription.OutputFilePath.string());
+
+        std::error_code directoryError;
+        std::filesystem::create_directories(textureLoadingDescription.OutputFilePath, directoryError);
+        CHECK(!directoryError && std::filesystem::is_directory(textureLoadingDescription.OutputFilePath), "{} : Is not a valid compression directory", textureLoadingDescription.OutputFilePath.string());
 
         ktxTexture2* texture = nullptr;
         const std::filesystem::path compressedPath = textureLoadingDescription.OutputFilePath / textureLoadingDescription.InputFilePath.filename().replace_extension("ktx2");
