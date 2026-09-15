@@ -609,6 +609,7 @@ namespace EOS
      * backend-agnostic and stays that way - this struct exists purely as an escape hatch for
      * third-party libraries that bring their own render backend and need to talk to the real
      * graphics API directly (a UI toolkit's own renderer, a profiler overlay, ...).
+     */
     struct NativeGraphicsHandles final
     {
 #if defined(EOS_VULKAN)
