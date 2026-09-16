@@ -81,6 +81,8 @@ namespace EOS
         glfwSetKeyCallback(GlfwWindow, DispatchKeyCallback);
         glfwSetMouseButtonCallback(GlfwWindow, DispatchMouseButtonCallback);
         glfwSetCursorPosCallback(GlfwWindow, DispatchCursorPosCallback);
+        glfwSetScrollCallback(GlfwWindow, DispatchScrollCallback);
+        glfwSetCharCallback(GlfwWindow, DispatchCharCallback);
 
         glfwFocusWindow(GlfwWindow);
 
@@ -164,6 +166,24 @@ namespace EOS
         return callbackSubscription;
     }
 
+    CallbackSubscription Window::OnScroll(ScrollCallback callback)
+    {
+        if (!callback) return {};
+
+        const CallbackSubscription callbackSubscription = MakeSubscriptionID();
+        ScrollSubscriptions.push_back({callbackSubscription, std::move(callback)});
+        return callbackSubscription;
+    }
+
+    CallbackSubscription Window::OnChar(CharCallback callback)
+    {
+        if (!callback) return {};
+
+        const CallbackSubscription callbackSubscription = MakeSubscriptionID();
+        CharSubscriptions.push_back({callbackSubscription, std::move(callback)});
+        return callbackSubscription;
+    }
+
     void Window::UnsubscribeKey(const CallbackSubscription callbackSubscription)
     {
         std::erase_if(KeySubscriptions,[callbackSubscription](const KeySubscription& subscription)
@@ -191,6 +211,22 @@ namespace EOS
     void Window::UnsubscribeResize(CallbackSubscription callbackSubscription)
     {
         std::erase_if(ResizeSubscriptions,[callbackSubscription](const ResizeSubscription& subscription)
+        {
+            return subscription.ID.Value == callbackSubscription.Value;
+        });
+    }
+
+    void Window::UnsubscribeScroll(const CallbackSubscription callbackSubscription)
+    {
+        std::erase_if(ScrollSubscriptions,[callbackSubscription](const ScrollSubscription& subscription)
+        {
+            return subscription.ID.Value == callbackSubscription.Value;
+        });
+    }
+
+    void Window::UnsubscribeChar(const CallbackSubscription callbackSubscription)
+    {
+        std::erase_if(CharSubscriptions,[callbackSubscription](const CharSubscription& subscription)
         {
             return subscription.ID.Value == callbackSubscription.Value;
         });
@@ -254,5 +290,32 @@ namespace EOS
             }
         }
     }
-}
 
+    void Window::DispatchScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+    {
+        const Window* self = FromGlfwWindow(window);
+        if (!self) return;
+
+        for (const ScrollSubscription& subscription : self->ScrollSubscriptions)
+        {
+            if (subscription.Callback)
+            {
+                subscription.Callback(xoffset, yoffset);
+            }
+        }
+    }
+
+    void Window::DispatchCharCallback(GLFWwindow* window, unsigned int codepoint)
+    {
+        const Window* self = FromGlfwWindow(window);
+        if (!self) return;
+
+        for (const CharSubscription& subscription : self->CharSubscriptions)
+        {
+            if (subscription.Callback)
+            {
+                subscription.Callback(codepoint);
+            }
+        }
+    }
+}
