@@ -3673,6 +3673,14 @@ void VulkanContext::Upload(EOS::TextureHandle handle, const EOS::TextureRangeDes
     }
 }
 
+uint32_t VulkanContext::GetNumMipLevels(EOS::TextureHandle handle) const
+{
+    const VulkanImage* texture = TexturePool.Get(handle);
+    CHECK(texture, "The texture of this handle is not valid");
+
+    return texture->Levels;
+}
+
 EOS::Format VulkanContext::GetFormat(EOS::TextureHandle handle) const
 {
     const VulkanImage* texture = TexturePool.Get(handle);
@@ -3710,6 +3718,13 @@ void* VulkanContext::GetNativeImageView(EOS::TextureHandle handle)
     VulkanImage* image = TexturePool.Get(handle);
     CHECK(image, "The texture of this handle is not valid");
     return image->GetImageViewForFramebuffer(VulkanDevice, 0, 0, 1);
+}
+
+void* VulkanContext::GetNativeImage(EOS::TextureHandle handle) const
+{
+    const VulkanImage* image = TexturePool.Get(handle);
+    CHECK(image, "The texture of this handle is not valid");
+    return image->Image;
 }
 
 uint32_t VulkanContext::GetNativeFormat(EOS::TextureHandle handle) const

@@ -456,6 +456,7 @@ public:
     [[nodiscard]] EOS::ColorSpace GetSwapchainColorSpace() const override;
     void ResizeSwapChain(uint32_t width, uint32_t height) override;
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
+    [[nodiscard]] uint32_t GetNumMipLevels(EOS::TextureHandle handle) const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage) override;
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
     [[nodiscard]] EOS::Holder<EOS::ComputePipelineHandle> CreateComputePipeline(const EOS::ComputePipelineDescription& description) override;
@@ -487,6 +488,7 @@ public:
     [[nodiscard]] EOS::NativeGraphicsHandles GetNativeGraphicsHandles() const override;
     [[nodiscard]] void* GetNativeCommandBuffer(EOS::ICommandBuffer& commandBuffer) override;
     [[nodiscard]] void* GetNativeImageView(EOS::TextureHandle handle) override;
+    [[nodiscard]] void* GetNativeImage(EOS::TextureHandle handle) const override;
     [[nodiscard]] uint32_t GetNativeFormat(EOS::TextureHandle handle) const override;
 
     //Deferred Tasks

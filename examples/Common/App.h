@@ -77,6 +77,13 @@ public:
         return ImGui::GetIO().WantCaptureMouse;
     };
 
+    // Return true while UI wants keyboard input (e.g. a focused text box), so key presses don't
+    // drive the camera. Defaults to ImGui's WantCaptureKeyboard.
+    std::function<bool()> WantCaptureKeyboard = []()
+    {
+        return ImGui::GetIO().WantCaptureKeyboard;
+    };
+
     template <typename Function>
     void Run(Function&& renderLoop)
     {
@@ -149,11 +156,19 @@ private:
         Window.OnKey([this](int key, int, int action, int)
         {
             const bool pressed = action != GLFW_RELEASE;
-            Input.forward = key == GLFW_KEY_W && pressed;
-            Input.backward = key == GLFW_KEY_S && pressed;
-            Input.left = key == GLFW_KEY_A && pressed;
-            Input.right = key == GLFW_KEY_D && pressed;
-            Input.space = key == GLFW_KEY_SPACE && pressed;
+
+            // Releases always go through so a key held before UI took focus doesn't get stuck.
+            if (pressed && WantCaptureKeyboard && WantCaptureKeyboard()) return;
+
+            switch (key)
+            {
+                case GLFW_KEY_W:     Input.forward = pressed; break;
+                case GLFW_KEY_S:     Input.backward = pressed; break;
+                case GLFW_KEY_A:     Input.left = pressed; break;
+                case GLFW_KEY_D:     Input.right = pressed; break;
+                case GLFW_KEY_SPACE: Input.space = pressed; break;
+                default: break;
+            }
 
             if (key == GLFW_KEY_MINUS)
             {

@@ -695,6 +695,12 @@ namespace EOS
         virtual Dimensions GetDimensions(TextureHandle handle) const = 0;
 
         /**
+         * @brief Gets the number of mip levels a texture was created with.
+         * @param handle The handle of the texture to query.
+         */
+        [[nodiscard]] virtual uint32_t GetNumMipLevels(TextureHandle handle) const = 0;
+
+        /**
         * @brief Creates shader module from a compiled shader.
         * @param fileName The name of the shader.
         * @param shaderStage The stage of the shader
@@ -883,6 +889,14 @@ namespace EOS
          * @param handle The texture to get a native view of.
          */
         [[nodiscard]] virtual void* GetNativeImageView(TextureHandle handle) = 0;
+
+        /**
+         * @brief Gets the native image (VkImage, cast through void*) backing a texture, e.g. for
+         *        a third-party renderer to sample an engine texture directly. EOS keeps ownership;
+         *        sampled textures are in SHADER_READ_ONLY_OPTIMAL layout. See GetNativeGraphicsHandles.
+         * @param handle The texture to get the native image of.
+         */
+        [[nodiscard]] virtual void* GetNativeImage(TextureHandle handle) const = 0;
 
         /**
          * @brief Gets a texture's format as the backend's own raw enum value (VkFormat on
