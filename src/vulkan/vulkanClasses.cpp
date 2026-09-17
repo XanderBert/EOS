@@ -2288,35 +2288,24 @@ VulkanContext::~VulkanContext()
     vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
     DummyTexture.Reset();
 
-    if (TexturePool.NumObjects())
+    const auto clearPool = [](auto& pool, const char* leakedObjectName)
     {
-        EOS::Logger->error("{} Leaked textures", TexturePool.NumObjects());
-    }
-    TexturePool.Clear();
+        if (pool.NumObjects())
+        {
+            EOS::Logger->error("{} Leaked {}", pool.NumObjects(), leakedObjectName);
+        }
+        pool.Clear();
+    };
 
-    if (ShaderModulePool.NumObjects())
-    {
-        EOS::Logger->error("{} Leaked Shader Modules", ShaderModulePool.NumObjects());
-    }
-    ShaderModulePool.Clear();
-
-    if (RenderPipelinePool.NumObjects())
-    {
-        EOS::Logger->error("{} Leaked Render Pipelines", RenderPipelinePool.NumObjects());
-    }
-    RenderPipelinePool.Clear();
-
-    if (BufferPool.NumObjects())
-    {
-        EOS::Logger->error("{} Leaked Buffers", BufferPool.NumObjects());
-    }
-    BufferPool.Clear();
-
-    if (SamplerPool.NumObjects())
-    {
-        EOS::Logger->error("{} Leaked Samplers", SamplerPool.NumObjects());
-    }
-    SamplerPool.Clear();
+    // AccelerationStructurePool goes first: VulkanAccelerationStructure owns two EOS::BufferHolders, so
+    // clearing it destroys buffers and therefore has to happen while BufferPool still holds them.
+    clearPool(AccelerationStructurePool, "Acceleration Structures");
+    clearPool(TexturePool, "textures");
+    clearPool(ShaderModulePool, "Shader Modules");
+    clearPool(RenderPipelinePool, "Render Pipelines");
+    clearPool(ComputePipelinePool, "Compute Pipelines");
+    clearPool(BufferPool, "Buffers");
+    clearPool(SamplerPool, "Samplers");
 
     WaitOnDeferredTasks();
 
@@ -3764,6 +3753,7 @@ void VulkanContext::ProcessDeferredTasks() const
 //Defer something until after a commandBuffer was submitted to the GPU
 void VulkanContext::Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle) const
 {
+    CHECK(VulkanCommandPool, "Destroying a resource after the context has been torn down. An EOS::Holder is outliving its context.");
     if (handle.Empty())
     {
         handle = VulkanCommandPool->GetNextSubmitHandle();
