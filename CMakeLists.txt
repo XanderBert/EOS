@@ -22,11 +22,6 @@ option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
 set(EOS_PROJECT_SHADER_PATH "" CACHE PATH "Path to project shaders used by examples. Leave empty to use each example's src/shaders directory")
 set(EOS_SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin" CACHE PATH "Path where compiled shader binaries are written")
 
-# Skip prebuild in GitHub Actions
-if(DEFINED ENV{GITHUB_ACTIONS} AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
-    set(EOS_SHADER_TOOLS OFF CACHE BOOL "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" FORCE)
-    message(STATUS "GitHub Actions detected") 
-endif()
 
 EOS_PRINT_CONFIGURATION_SUMMARY()
 
@@ -106,14 +101,20 @@ if(EOS_SHADER_TOOLS)
 
     set(ENGINE_SHADER_PATH "${CMAKE_SOURCE_DIR}/src/shaders")
     target_compile_definitions(EOS PRIVATE EOS_SHADER_TOOLS)
-    target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
-    target_sources(EOS PRIVATE
-        "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCompiler.cpp"
-        "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReloader.cpp"
-    )
     target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_ENGINE_SHADER_PATH="${ENGINE_SHADER_PATH}")
     eos_require_slang(EOS)
 endif ()
+
+# ShaderCompiler and ShaderReloader are always part of the library, whether or not EOS_SHADER_TOOLS is set.
+# Both translation units wrap every body in #if defined(EOS_SHADER_TOOLS), so with the option off they still
+# provide the same classes with stub implementations: no Slang, no hot reload, shaders loaded from the cache
+# only. src/ constructs and calls them unconditionally, so leaving them out of the build breaks compilation
+# rather than disabling a feature.
+target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
+target_sources(EOS PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCompiler.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReloader.cpp"
+)
 
 if(EOS_USE_TRACY)
     target_compile_definitions(EOS PUBLIC EOS_USE_TRACY)

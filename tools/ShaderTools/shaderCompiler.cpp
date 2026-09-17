@@ -249,8 +249,7 @@ namespace EOS
 
         return false;
 #else
-        //We never want to recompile shaders when there is no compiler
-        // First we check if the corresponding shaderfile and all of its entry points have been compiled yet,
+        const std::filesystem::path cachedFilePath = OutputFolder / (std::string(fileName) + ShaderStageToString(shaderStage) + ShaderFileFormat);
         std::ifstream cachedFile(cachedFilePath, std::ios::in | std::ios::binary);
         if (cachedFile.is_open())
         {
@@ -260,6 +259,8 @@ namespace EOS
             LoadShaderFromCache(cachedFilePath, outShaderInfo);
             return true;
         }
+
+        EOS::Logger->error("{} shader is not in the shader cache, and this build has no shader compiler to produce it.", fileName);
         return false;
 #endif
     }
