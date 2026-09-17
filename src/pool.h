@@ -1,6 +1,10 @@
 #pragma once
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <memory>
 #include <vector>
 
 #include "defines.h"
@@ -12,17 +16,25 @@
 //std::vector<PoolEntry> HotObjects;
 //std::vector<PoolEntry> ColdObjects;
 
-//TODO: this will perform runtime copies and move if we create things at runtime with this pool
-
 //TODO: The current free list uses a linked list, For very large pools use a stack-based free list (std::vector<uint32_t> FreeIndices) for O(1) access.
 namespace EOS
 {
+    // A handle based object pool with stable object addresses.
+    //
+    // The backing store is a paged array rather than a std::vector on purpose. Get() hands out a pointer
+    // straight into the storage, and callers keep that pointer alive across other pool calls.
+    // A vector reallocates when it grows past its capacity, which would turn every outstanding pointer into
+    // a dangling one, so growing the pool would silently break unrelated code. Growing here allocates a new
+    // page instead and never touches the pages that already exist, so a pointer stays valid until that
+    // object is destroyed or the pool is cleared.
     template<typename ObjectType, typename ObjectType_Impl>
     class Pool final
     {
     private:
         struct PoolEntry
         {
+            PoolEntry() = default;
+
             explicit PoolEntry(ObjectType_Impl& object)
             : Object(std::move(object)) {}
 
@@ -31,8 +43,58 @@ namespace EOS
             uint32_t NextFree       = ListEnd;
         };
 
+        //Round down so that the page index and the offset inside the page are a shift and a mask.
+        static constexpr uint32_t RoundDownToPowerOfTwo(uint32_t value)
+        {
+            uint32_t result = 1;
+            while (result <= value / 2) { result *= 2; }
+            return result;
+        }
+
+        //Aim for a page of roughly this many bytes, but never fewer than MinEntriesPerPage entries, so that
+        //pools of large objects still get pages worth walking rather than one entry each.
+        static constexpr uint32_t TargetPageBytes   = 16 * 1024;
+        static constexpr uint32_t MinEntriesPerPage = 16;
+        static constexpr uint32_t EntriesPerPage    = RoundDownToPowerOfTwo(std::max(static_cast<uint32_t>(TargetPageBytes / sizeof(PoolEntry)), MinEntriesPerPage));
+        static constexpr uint32_t PageIndexShift    = [] { uint32_t shift = 0; while ((1u << shift) != EntriesPerPage) { ++shift; } return shift; }();
+        static constexpr uint32_t PageOffsetMask    = EntriesPerPage - 1;
+
+        using Page = std::array<PoolEntry, EntriesPerPage>;
+
+        // Iterates the objects themselves instead of the entries wrapping them, so that PoolEntry can stay
+        // an implementation detail while the pool is still usable in a range based for loop.
+        template<typename PoolPointer, typename ValueType>
+        class ObjectIterator final
+        {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type        = ValueType;
+            using difference_type   = std::ptrdiff_t;
+            using pointer           = ValueType*;
+            using reference         = ValueType&;
+
+            ObjectIterator() = default;
+            ObjectIterator(PoolPointer owner, uint32_t index) : Owner(owner), Index(index) {}
+
+            reference operator*() const     { return Owner->At(Index); }
+            pointer operator->() const      { return &Owner->At(Index); }
+
+            ObjectIterator& operator++()    { ++Index; return *this; }
+            ObjectIterator operator++(int)  { ObjectIterator previous = *this; ++Index; return previous; }
+
+            bool operator==(const ObjectIterator& other) const { return Owner == other.Owner && Index == other.Index; }
+            bool operator!=(const ObjectIterator& other) const { return !(*this == other); }
+
+        private:
+            PoolPointer Owner = nullptr;
+            uint32_t Index    = 0;
+        };
+
     public:
-        explicit Pool(uint32_t initialReserve = 10);
+        using Iterator      = ObjectIterator<Pool*, ObjectType_Impl>;
+        using ConstIterator = ObjectIterator<const Pool*, const ObjectType_Impl>;
+
+        Pool() = default;
         ~Pool() = default;
         DELETE_COPY_MOVE(Pool)
 
@@ -40,13 +102,13 @@ namespace EOS
         [[nodiscard]] Handle<ObjectType> Create(ObjectType_Impl&& object);
 
         // Batch-create objects, returning handles for all created objects
-        template<typename Iterator>
-        [[nodiscard]] std::vector<Handle<ObjectType>> CreateBatch(Iterator first, Iterator last);
+        template<typename InputIterator>
+        [[nodiscard]] std::vector<Handle<ObjectType>> CreateBatch(InputIterator first, InputIterator last);
 
         //Destroy the given object
         void Destroy(Handle<ObjectType> handle);
 
-        //Get the given implementation
+        //Get the given implementation. The pointer stays valid until this object is destroyed or the pool is cleared.
         [[nodiscard]] ObjectType_Impl* Get(const Handle<ObjectType> handle);
         [[nodiscard]] const ObjectType_Impl* Get(const Handle<ObjectType> handle) const;
 
@@ -59,29 +121,52 @@ namespace EOS
         //Clear the pool. All handles to objects become stale
         void Clear();
 
-        //Returns the number of objects
+        //Returns the number of objects that are currently alive
         [[nodiscard]] uint32_t NumObjects() const;
 
-        //Tries to reserve a the amount.
-        void Reserve(uint32_t capacity);
+        //Returns the number of slots, which includes slots whose object has been destroyed.
+        //Handles index into this range, so this is the size that an array indexed by handle needs to have.
+        [[nodiscard]] size_t NumSlots() const;
 
+        //Access a slot by its raw index instead of by handle. A slot whose object was destroyed holds a
+        //default constructed object, so iterating or indexing the pool can hand back objects that are not alive.
+        [[nodiscard]] ObjectType_Impl& At(uint32_t index);
+        [[nodiscard]] const ObjectType_Impl& At(uint32_t index) const;
 
+        //Iterate every slot in index order, destroyed slots included. See At() for what those slots hold.
+        [[nodiscard]] Iterator begin()              { return Iterator(this, 0); }
+        [[nodiscard]] Iterator end()                { return Iterator(this, NumberOfSlots); }
+        [[nodiscard]] ConstIterator begin() const   { return ConstIterator(this, 0); }
+        [[nodiscard]] ConstIterator end() const     { return ConstIterator(this, NumberOfSlots); }
 
-        std::vector<PoolEntry> Objects;
-        
     private:
-        //It’s an invalid index (since Objects_size() can’t reach 2^32 - 1), making it a safe "end" marker.
+        //It’s an invalid index (since the slot count can’t reach 2^32 - 1), making it a safe "end" marker.
         static constexpr uint32_t ListEnd = 0xFFFFFFFF;
+
+        [[nodiscard]] PoolEntry& EntryAt(uint32_t index)                { return (*Pages[index >> PageIndexShift])[index & PageOffsetMask]; }
+        [[nodiscard]] const PoolEntry& EntryAt(uint32_t index) const    { return (*Pages[index >> PageIndexShift])[index & PageOffsetMask]; }
+
+        //Append a slot, allocating a page when the last one is full. Existing pages are never touched, which
+        //is what keeps the pointers handed out by Get() valid.
+        [[nodiscard]] uint32_t AppendSlot(ObjectType_Impl&& object);
+
+        std::vector<std::unique_ptr<Page>> Pages;
+        uint32_t NumberOfSlots{};
         uint32_t FreeListHead = ListEnd;
-        uint32_t FreeList{};
         uint32_t NumberOfObjects{};
     };
 
-
     template<typename ObjectType, typename ObjectType_Impl>
-    Pool<ObjectType, ObjectType_Impl>::Pool(const uint32_t initialReserve)
+    uint32_t Pool<ObjectType, ObjectType_Impl>::AppendSlot(ObjectType_Impl&& object)
     {
-        Reserve(initialReserve);
+        if (NumberOfSlots == Pages.size() * EntriesPerPage)
+        {
+            Pages.emplace_back(std::make_unique<Page>());
+        }
+
+        const uint32_t index = NumberOfSlots++;
+        EntryAt(index).Object = std::move(object);
+        return index;
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
@@ -93,42 +178,24 @@ namespace EOS
         if (FreeListHead != ListEnd)
         {
             index = FreeListHead;
-            FreeListHead = Objects[index].NextFree;
-            Objects[index].Object = std::move(object);
+            FreeListHead = EntryAt(index).NextFree;
+            EntryAt(index).Object = std::move(object);
         }
 
         //Else if the pool doesn't have a free slot
-
         else
         {
-#if defined(EOS_DEBUG)
-            size_t oldCapacity = Objects.capacity();
-#endif
-            index = static_cast<uint32_t>(Objects.size());
-            Objects.emplace_back(object);
-
-
-
-#if defined(EOS_DEBUG)
-            //Log only in debug, whenever we do reallocations,
-            //This can be interesting to tweak the initial pool size to avoid as much runtime reallocations as possible
-            if (Objects.capacity() != oldCapacity)
-            {
-                //TODO: What we can do is: write to a file in the destructor what the biggest capacity was of this pool.
-                //Next time we try to read from that file and initialize our pool with that size.
-                EOS::Logger->warn("Pool did reallocation, Old Capacity:{} , New Capacity:{}", oldCapacity, Objects.capacity());
-            }
-#endif
+            index = AppendSlot(std::move(object));
         }
 
         //increase the objects and return a handle to the Object in the pool
         ++NumberOfObjects;
-        return Handle<ObjectType>(index, Objects[index].Generation);
+        return Handle<ObjectType>(index, EntryAt(index).Generation);
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
-    template<typename Iterator>
-    std::vector<Handle<ObjectType>> Pool<ObjectType, ObjectType_Impl>::CreateBatch(Iterator first, Iterator last)
+    template<typename InputIterator>
+    std::vector<Handle<ObjectType>> Pool<ObjectType, ObjectType_Impl>::CreateBatch(InputIterator first, InputIterator last)
     {
         std::vector<Handle<ObjectType>> handles;
         const size_t batchSize = std::distance(first, last);
@@ -142,26 +209,19 @@ namespace EOS
         while (FreeListHead != ListEnd && reused < batchSize)
         {
             const uint32_t index = FreeListHead;
-            FreeListHead = Objects[index].NextFree;
-            Objects[index].Object = std::move(*first++);
-            handles.emplace_back(Handle<ObjectType>(index, Objects[index].Generation));
+            FreeListHead = EntryAt(index).NextFree;
+            EntryAt(index).Object = std::move(*first++);
+            handles.emplace_back(Handle<ObjectType>(index, EntryAt(index).Generation));
             ++NumberOfObjects;
             ++reused;
         }
 
         // Allocate new entries for remaining objects
-        const size_t remaining = batchSize - reused;
-        if (remaining > 0)
+        for (size_t remaining = batchSize - reused; remaining > 0; --remaining, ++first)
         {
-            const size_t currentSize = Objects.size();
-            Reserve(currentSize + remaining); // Reserve in one shot
-
-            for (size_t i{}; i < remaining; ++i, ++first)
-            {
-                Objects.emplace_back(PoolEntry(std::move(*first)));
-                handles.emplace_back(Handle<ObjectType>(static_cast<uint32_t>(currentSize + i),Objects[currentSize + i].Generation));
-                ++NumberOfObjects;
-            }
+            const uint32_t index = AppendSlot(std::move(*first));
+            handles.emplace_back(Handle<ObjectType>(index, EntryAt(index).Generation));
+            ++NumberOfObjects;
         }
 
         return handles;
@@ -176,19 +236,19 @@ namespace EOS
         CHECK(NumberOfObjects > 0, "There are no objects left in the pool");
 
         const uint32_t index = handle.Index();
-        CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
+        CHECK(index < NumberOfSlots, "The index is bigger then the amount of objects in the pool");
 
         //Check if the version in the pool is the same as the version we are referencing
-        CHECK(handle.Gen() == Objects[index].Generation, "The generation of the handle is not the same as the one in the pool");
+        CHECK(handle.Gen() == EntryAt(index).Generation, "The generation of the handle is not the same as the one in the pool");
 
         //Reset to a default state
-        Objects[index].Object = ObjectType_Impl{};
+        EntryAt(index).Object = ObjectType_Impl{};
 
         //Increase the amount it has been reused (generation)
-        ++Objects[index].Generation;
+        ++EntryAt(index).Generation;
 
         //Update the next free pool object in this object
-        Objects[index].NextFree = FreeListHead;
+        EntryAt(index).NextFree = FreeListHead;
 
         //markt this object as free
         FreeListHead = index;
@@ -203,12 +263,12 @@ namespace EOS
         if (handle.Empty()) { return nullptr; }
 
         const uint32_t index = handle.Index();
-        CHECK(index < Objects.size(), "The index: {} is bigger then the amount of objects in the pool: {}", index, Objects.size());
+        CHECK(index < NumberOfSlots, "The index: {} is bigger then the amount of objects in the pool: {}", index, NumberOfSlots);
 
         //Check if the version in the pool is the same as the version we are referencing
-        CHECK(handle.Gen() == Objects[index].Generation, "The generation of the handle is not the same as the one in the pool");
+        CHECK(handle.Gen() == EntryAt(index).Generation, "The generation of the handle is not the same as the one in the pool");
 
-        return &Objects[index].Object;
+        return &EntryAt(index).Object;
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
@@ -217,21 +277,21 @@ namespace EOS
         if (handle.Empty()) { return nullptr; }
 
         const uint32_t index = handle.Index();
-        CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
+        CHECK(index < NumberOfSlots, "The index is bigger then the amount of objects in the pool");
 
         //Check if the version in the pool is the same as the version we are referencing
-        CHECK(handle.Gen() == Objects[index].Generation, "The generation of the handle is not the same as the one in the pool");
+        CHECK(handle.Gen() == EntryAt(index).Generation, "The generation of the handle is not the same as the one in the pool");
 
-        return &Objects[index].Object;
+        return &EntryAt(index).Object;
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
     Handle<ObjectType> Pool<ObjectType, ObjectType_Impl>::GetHandle(uint32_t index) const
     {
-        CHECK(index < Objects.size(), "The index is bigger then the amount of objects in the pool");
-        if (index >= Objects.size()) { return {}; }
+        CHECK(index < NumberOfSlots, "The index is bigger then the amount of objects in the pool");
+        if (index >= NumberOfSlots) { return {}; }
 
-        return Handle<ObjectType>(index, Objects[index].Generation);
+        return Handle<ObjectType>(index, EntryAt(index).Generation);
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
@@ -239,11 +299,11 @@ namespace EOS
     {
         if (!object) { return {}; }
 
-        for (size_t idx{}; idx != Objects.size(); ++idx)
+        for (uint32_t idx{}; idx != NumberOfSlots; ++idx)
         {
-            if (Objects[idx].Object == *object)
+            if (EntryAt(idx).Object == *object)
             {
-                return Handle<ObjectType>(static_cast<uint32_t>(idx), Objects[idx].Generation);
+                return Handle<ObjectType>(idx, EntryAt(idx).Generation);
             }
         }
 
@@ -253,7 +313,8 @@ namespace EOS
     template<typename ObjectType, typename ObjectType_Impl>
     void Pool<ObjectType, ObjectType_Impl>::Clear()
     {
-        Objects.clear();
+        Pages.clear();
+        NumberOfSlots = 0;
         FreeListHead = ListEnd;
         NumberOfObjects = 0;
     }
@@ -265,8 +326,22 @@ namespace EOS
     }
 
     template<typename ObjectType, typename ObjectType_Impl>
-    void Pool<ObjectType, ObjectType_Impl>::Reserve(uint32_t capacity)
+    size_t Pool<ObjectType, ObjectType_Impl>::NumSlots() const
     {
-        Objects.reserve(capacity);
+        return NumberOfSlots;
+    }
+
+    template<typename ObjectType, typename ObjectType_Impl>
+    ObjectType_Impl& Pool<ObjectType, ObjectType_Impl>::At(uint32_t index)
+    {
+        CHECK(index < NumberOfSlots, "The index: {} is bigger then the amount of objects in the pool: {}", index, NumberOfSlots);
+        return EntryAt(index).Object;
+    }
+
+    template<typename ObjectType, typename ObjectType_Impl>
+    const ObjectType_Impl& Pool<ObjectType, ObjectType_Impl>::At(uint32_t index) const
+    {
+        CHECK(index < NumberOfSlots, "The index: {} is bigger then the amount of objects in the pool: {}", index, NumberOfSlots);
+        return EntryAt(index).Object;
     }
 }

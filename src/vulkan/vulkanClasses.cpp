@@ -3901,14 +3901,14 @@ void VulkanContext::GrowDescriptorPool(DescriptorSetState& descriptorSetState, u
 
     // Invalidate descriptor-set layout compatibility markers.
     // Pipelines are rebuilt lazily when they are requested or bound next time.
-    for (auto& entry : RenderPipelinePool.Objects)
+    for (VulkanRenderPipelineState& pipeline : RenderPipelinePool)
     {
-        entry.Object.LastDescriptorSetLayout = VK_NULL_HANDLE;
+        pipeline.LastDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
-    for (auto& entry : ComputePipelinePool.Objects)
+    for (ComputePipelineState& pipeline : ComputePipelinePool)
     {
-        entry.Object.LastVkDescriptorSetLayout = VK_NULL_HANDLE;
+        pipeline.LastVkDescriptorSetLayout = VK_NULL_HANDLE;
     }
 }
 
@@ -4241,9 +4241,10 @@ void VulkanContext::UpdateDescriptorSet()
     uint32_t newMaxSamplers = std::max(activeDescriptorSetState.MaxSamplers, 16u);
     uint32_t newMaxAccelStructs = std::max(activeDescriptorSetState.MaxAccelStructs, 1u);
 
-    while (TexturePool.Objects.size() > newMaxTextures) newMaxTextures *= 2;
-    while (SamplerPool.Objects.size() > newMaxSamplers) newMaxSamplers *= 2;
-    while (AccelerationStructurePool.Objects.size() > newMaxAccelStructs) newMaxAccelStructs *= 2;
+    // The descriptor arrays are indexed by handle, so they have to cover every slot, not just the live ones.
+    while (TexturePool.NumSlots() > newMaxTextures) newMaxTextures *= 2;
+    while (SamplerPool.NumSlots() > newMaxSamplers) newMaxSamplers *= 2;
+    while (AccelerationStructurePool.NumSlots() > newMaxAccelStructs) newMaxAccelStructs *= 2;
 
     GrowDescriptorPool(activeDescriptorSetState, newMaxTextures, newMaxSamplers, newMaxAccelStructs);
 
@@ -4257,31 +4258,29 @@ void VulkanContext::UpdateDescriptorSet()
     infoStorageImages.reserve(TexturePool.NumObjects());
 
     // use dummies to avoid sparse arrays
-    VkImageView dummyImageView = TexturePool.Objects[DummyTexture.Index()].Object.ImageView;
-    VkSampler dummySampler = SamplerPool.Objects[0].Object;
+    VkImageView dummyImageView = TexturePool.At(DummyTexture.Index()).ImageView;
+    VkSampler dummySampler = SamplerPool.At(0);
 
     VkImageView dummyImageView2DArray = VK_NULL_HANDLE;
-    for (const auto& obj : TexturePool.Objects)
+    for (const VulkanImage& img : TexturePool)
     {
-        const VulkanImage& img = obj.Object;
         const bool isSwapChain = VulkanImage::IsSwapChainImage(img);
         const bool isTextureAvailable = !isSwapChain && (img.Samples & VK_SAMPLE_COUNT_1_BIT) == VK_SAMPLE_COUNT_1_BIT;
         const bool isYUVImage = isTextureAvailable && VulkanImage::IsSampledImage(img) && VkContext::GetNumberOfImagePlanes(img.ImageFormat) > 1;
         const bool isSampledImage2DArray = isTextureAvailable && VulkanImage::IsSampledImage(img) && !isYUVImage && img.ImageType == EOS::ImageType::Image_2D_Array;
         if (isSampledImage2DArray)
         {
-            dummyImageView2DArray = obj.Object.ImageView;
+            dummyImageView2DArray = img.ImageView;
             break;
         }
     }
 
 
     // 1. Sampled and Storage images
-    for (const auto& obj : TexturePool.Objects)
+    for (const VulkanImage& img : TexturePool)
     {
-        const VulkanImage& img = obj.Object;
-        const VkImageView view = obj.Object.ImageView;
-        const VkImageView storageView = obj.Object.ImageViewStorage ? obj.Object.ImageViewStorage : view;
+        const VkImageView view = img.ImageView;
+        const VkImageView storageView = img.ImageViewStorage ? img.ImageViewStorage : view;
 
         // Swapchains should not be in the DescriptorSet
         const bool isSwapChain = VulkanImage::IsSwapChainImage(img);
@@ -4323,13 +4322,13 @@ void VulkanContext::UpdateDescriptorSet()
 
     // 2. Samplers
     std::vector<VkDescriptorImageInfo> infoSamplers;
-    infoSamplers.reserve(SamplerPool.Objects.size());
+    infoSamplers.reserve(SamplerPool.NumSlots());
 
-    for (const auto& sampler : SamplerPool.Objects)
+    for (const VkSampler& sampler : SamplerPool)
     {
         infoSamplers.push_back(
     {
-            .sampler = sampler.Object ? sampler.Object : dummySampler,
+            .sampler = sampler ? sampler : dummySampler,
             .imageView = VK_NULL_HANDLE,
             .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         });
@@ -4337,22 +4336,22 @@ void VulkanContext::UpdateDescriptorSet()
 
     // 3. Acceleration structures
     std::vector<VkAccelerationStructureKHR> handlesAccelStructs;
-    handlesAccelStructs.reserve(AccelerationStructurePool.Objects.size());
+    handlesAccelStructs.reserve(AccelerationStructurePool.NumSlots());
 
     // use the first valid TLAS as a dummy
     const VkAccelerationStructureKHR dummyTLAS = [this]() -> VkAccelerationStructureKHR
     {
-        for (const auto& as : AccelerationStructurePool.Objects)
+        for (const VulkanAccelerationStructure& as : AccelerationStructurePool)
         {
-            if (as.Object.Handle && as.Object.IsTLAS) return as.Object.Handle;
+            if (as.Handle && as.IsTLAS) return as.Handle;
         }
 
         return VK_NULL_HANDLE;
     }();
 
-    for (const auto& as : AccelerationStructurePool.Objects)
+    for (const VulkanAccelerationStructure& as : AccelerationStructurePool)
     {
-        handlesAccelStructs.push_back(as.Object.IsTLAS ? as.Object.Handle : dummyTLAS);
+        handlesAccelStructs.push_back(as.IsTLAS ? as.Handle : dummyTLAS);
     }
 
     VkWriteDescriptorSetAccelerationStructureKHR writeAccelStruct =
