@@ -200,7 +200,12 @@ namespace EOS
         ImDrawData* drawData = ImGui::GetDrawData();
         const float framebufferWidth = drawData->DisplaySize.x * drawData->FramebufferScale.x;
         const float framebufferHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;
-        if (framebufferWidth <= 0 || framebufferHeight <= 0 || drawData->CmdListsCount == 0)  return;
+        if (framebufferWidth <= 0 || framebufferHeight <= 0 || drawData->CmdListsCount == 0)
+        {
+            cmdEndRendering(cmd);
+            cmdPopMarker(cmd);
+            return;
+        }
 
         cmdSetDepthState(cmd, {});
         cmdBindViewport(cmd, {.X = 0.0f, .Y = 0.0f, .Width = framebufferWidth, .Height = framebufferHeight});
