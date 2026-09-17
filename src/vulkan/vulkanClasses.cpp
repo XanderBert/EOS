@@ -1868,17 +1868,16 @@ void VulkanStagingDevice::EnsureSize(uint32_t sizeNeeded)
     const uint32_t alignedSize = std::max(EOS::GetSizeAligned(sizeNeeded, Alignment), MinBufferSize);
     sizeNeeded = alignedSize < MaxBufferSize ? alignedSize : MaxBufferSize;
 
+    // Check if the current staging buffer is large enough
     if (!StagingBuffer.Empty())
     {
         const bool isEnoughSize = sizeNeeded <= Size;
         const bool isMaxSize = Size == MaxBufferSize;
 
-        if (isEnoughSize || isMaxSize)
-        {
-            return;
-        }
+        if (isEnoughSize || isMaxSize) return;
     }
 
+    // Wait for all memory regions to be uploaded through the staging device
     WaitAndReset();
 
     // deallocate the previous staging buffer
@@ -1893,8 +1892,8 @@ void VulkanStagingDevice::EnsureSize(uint32_t sizeNeeded)
 
     Size = sizeNeeded;
 
+    // Create new staging buffer
     const std::string debugName = fmt::format("Buffer: staging buffer {}", ++Counter);
-
     EOS::BufferHandle bufferHandle = VkContext->CreateBuffer(Size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, debugName.c_str());
     StagingBuffer = {VkContext, bufferHandle };
 
@@ -1916,24 +1915,37 @@ void VulkanStagingDevice::WaitAndReset()
 void VulkanStagingDevice::BufferSubData(const EOS::Handle<EOS::Buffer> &buffer, size_t dstOffset, size_t size, const void *data)
 {
     EOS_PROFILER_FUNCTION();
+
     VulkanBuffer* vulkanBuffer = VkContext->BufferPool.Get(buffer);
     CHECK(vulkanBuffer, "The buffer from the handle is not valid");
     CHECK(dstOffset + size <= vulkanBuffer->BufferSize, "The data you want to upload is too big for the buffer");
 
     if (vulkanBuffer->IsMapped())
     {
+        // Host visible buffers are written directly and never touch the staging buffer, so nothing below applies.
         vulkanBuffer->BufferSubData(VkContext, dstOffset, size, data);
         return;
     }
 
-    VulkanBuffer* stagingBuffer = VkContext->BufferPool.Get(StagingBuffer);
-    CHECK(stagingBuffer, "Staging buffer is not valid");
+    // Size the staging buffer once for the whole upload instead of letting the loop grow it per chunk.
+    // This is only a sizing hint: AcquireStagingRegion calls EnsureSize itself and fetches its pointer
+    // afterwards, so the loop below is safe with or without this call.
+    EnsureSize(static_cast<uint32_t>(std::min<size_t>(size, MaxBufferSize)));
 
+    // EnsureSize above, and AcquireStagingRegion below, mutate BufferPool and invalidate every pointer it
+    // handed out. vulkanBuffer is stale from here on and has to be re-fetched on each iteration.
+    vulkanBuffer = nullptr;
     while (size)
     {
-        // get next staging buffer free offset
-        MemoryRegionDescription desc = GetNextFreeOffset(static_cast<uint32_t>(size));
+        // reserve the next free chunk of the staging buffer, and get a fresh pointer to it
+        StagingAllocation staging = AcquireStagingRegion(static_cast<uint32_t>(size));
+        VulkanBuffer* stagingBuffer = staging.Buffer;
+        MemoryRegionDescription& desc = staging.Region;
         const uint32_t chunkSize = std::min(static_cast<uint32_t>(size), static_cast<uint32_t>(desc.Size));
+
+        // the destination buffer pointer fetched above may be stale by now as well
+        vulkanBuffer = VkContext->BufferPool.Get(buffer);
+        CHECK(vulkanBuffer, "The buffer from the handle is not valid");
 
         // copy data into staging buffer
         stagingBuffer->BufferSubData(VkContext, desc.Offset, chunkSize, data);
@@ -2017,22 +2029,22 @@ void VulkanStagingDevice::ImageData2D(const VulkanImage &image, const VkRect2D &
     {
         EOS::Logger->warn("Texture larger than 256MB, this might not be optimal for a staging buffer");
     }
-    MemoryRegionDescription desc = GetNextFreeOffset(storageSize);
+    StagingAllocation staging = AcquireStagingRegion(storageSize);
 
     // No support for copying image in multiple smaller chunk sizes. If we get smaller buffer size than storageSize, we will wait for GPU idle
     // and get bigger chunk.
-    if (desc.Size < storageSize)
+    if (staging.Region.Size < storageSize)
     {
         WaitAndReset();
-        desc = GetNextFreeOffset(storageSize);
+        staging = AcquireStagingRegion(storageSize);
     }
+    MemoryRegionDescription& desc = staging.Region;
     CHECK(desc.Size >= storageSize, "the needed size is bigger then the storageSize");
 
     CommandBufferData* wrapper = VkContext->VulkanCommandPool->AcquireCommandBuffer();
     CHECK(wrapper, "The Acquired CommandBuffer is not valid.");
 
-    VulkanBuffer* stagingBuffer = VkContext->BufferPool.Get(StagingBuffer);
-    CHECK(stagingBuffer, "The staging buffer handle does not hold a valid staging buffer");
+    VulkanBuffer* stagingBuffer = staging.Buffer;
     stagingBuffer->BufferSubData(VkContext, desc.Offset, storageSize, data);
 
     uint32_t offset = 0;
@@ -2107,12 +2119,16 @@ void VulkanStagingDevice::ImageData2D(const VulkanImage &image, const VkRect2D &
     Regions.emplace_back(desc);
 }
 
-VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOffset(uint32_t size)
+VulkanStagingDevice::StagingAllocation VulkanStagingDevice::AcquireStagingRegion(uint32_t size)
 {
     const uint32_t requestedAlignedSize = EOS::GetSizeAligned(size, Alignment);
 
+    // This can destroy and recreate the staging buffer, so the pool pointer below has to be fetched afterwards.
     EnsureSize(requestedAlignedSize);
     CHECK(!Regions.empty(), "Memory Regions are empty");
+
+    VulkanBuffer* stagingBuffer = VkContext->BufferPool.Get(StagingBuffer);
+    CHECK(stagingBuffer, "Staging buffer is not valid");
 
     for (auto it = Regions.begin(); it != Regions.end(); ++it)
     {
@@ -2138,7 +2154,7 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
                 }
 
                 // Return the stored offset
-                return {oldOffset, requestedAlignedSize, EOS::SubmitHandle()};
+                return {MemoryRegionDescription{oldOffset, requestedAlignedSize, EOS::SubmitHandle()}, stagingBuffer};
             }
         }
     }
@@ -2156,9 +2172,8 @@ VulkanStagingDevice::MemoryRegionDescription VulkanStagingDevice::GetNextFreeOff
 
     return
     {
-        .Offset = 0,
-        .Size = Size - unusedSize,
-        .Handle = EOS::SubmitHandle(),
+        .Region = {.Offset = 0, .Size = Size - unusedSize, .Handle = EOS::SubmitHandle()},
+        .Buffer = stagingBuffer,
     };
 }
 

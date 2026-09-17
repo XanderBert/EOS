@@ -413,6 +413,17 @@ class VulkanStagingDevice final
         EOS::SubmitHandle Handle{};
     };
 
+    // A reserved chunk of the staging buffer, together with the staging buffer it lives in.
+    // Reserving a chunk can grow the staging buffer, which destroys and recreates the pool entry and can
+    // reallocate the pool's backing storage. Every VulkanBuffer* handed out by VulkanContext::BufferPool
+    // before that point is then dangling. The pointer is therefore handed back by the same call that
+    // reserves the chunk, so a caller cannot end up using one that was fetched too early.
+    struct StagingAllocation
+    {
+        MemoryRegionDescription Region{};
+        VulkanBuffer* Buffer = nullptr;
+    };
+
 public:
     explicit VulkanStagingDevice(VulkanContext* context);
     ~VulkanStagingDevice() = default;
@@ -425,7 +436,7 @@ public:
 private:
     void EnsureSize(uint32_t sizeNeeded);
     void WaitAndReset();
-    [[nodiscard]] MemoryRegionDescription GetNextFreeOffset(uint32_t size);
+    [[nodiscard]] StagingAllocation AcquireStagingRegion(uint32_t size);
 
 private:
     VulkanContext* VkContext;
