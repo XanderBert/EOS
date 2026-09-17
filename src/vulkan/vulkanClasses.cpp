@@ -915,7 +915,7 @@ void VulkanImage::GenerateMipmaps(VkCommandBuffer commandBuffer) const
     }
 
     // Transition all levels and layers (faces) to their final layout
-    InsertMemoryBarrier(commandBuffer, EOS::CopySource, EOS::Undefined, {imageAspectFlags, 0, Levels, 0, Layers});
+    InsertMemoryBarrier(commandBuffer, EOS::CopySource, EOS::ShaderResource, {imageAspectFlags, 0, Levels, 0, Layers});
     vkCmdEndDebugUtilsLabelEXT(commandBuffer);
 }
 
