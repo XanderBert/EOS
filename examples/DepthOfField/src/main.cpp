@@ -611,26 +611,26 @@ int main()
         cmdPopMarker(cmdBuffer);
 
         // --- Pass 8: UI
-        App.ImGuiRenderer->BeginFrame(cmdBuffer);
+        App.UIRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(420, 360), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Deferred Lighting + DOF");
-            ImGui::SliderFloat3("Light direction", &lightDirection.x, -1.0f, 1.0f);
+            EOS::UI::SetNextWindowSize(420, 360);
+            EOS::UI::Begin("Deferred Lighting + DOF");
+            EOS::UI::SliderFloat3("Light direction", &lightDirection.x, -1.0f, 1.0f);
             if (glm::length(lightDirection) > 0.0001f)
             {
                 lightDirection = glm::normalize(lightDirection);
             }
-            ImGui::SliderFloat("Light intensity", &lightIntensity, 0.0f, 2.0f);
-            ImGui::ColorEdit3("Light color", &lightColor.x);
-            ImGui::Separator();
-            ImGui::SliderFloat("Focus distance", &focusDistance, 0.1f, 25.0f);
-            ImGui::SliderFloat("Focus range", &focusRange, 0.1f, 20.0f);
-            ImGui::SliderFloat("Max blur radius", &maxBlurRadius, 0.0f, 12.0f);
+            EOS::UI::SliderFloat("Light intensity", &lightIntensity, 0.0f, 2.0f);
+            EOS::UI::ColorEdit3("Light color", &lightColor.x);
+            EOS::UI::Separator();
+            EOS::UI::SliderFloat("Focus distance", &focusDistance, 0.1f, 25.0f);
+            EOS::UI::SliderFloat("Focus range", &focusRange, 0.1f, 20.0f);
+            EOS::UI::SliderFloat("Max blur radius", &maxBlurRadius, 0.0f, 12.0f);
             constexpr const char* debugModes[] = {"Lit", "Albedo", "Normals", "Roughness", "World Position"};
-            ImGui::Combo("Debug view", &debugView, debugModes, IM_ARRAYSIZE(debugModes));
-            ImGui::End();
+            EOS::UI::Combo("Debug view", &debugView, debugModes);
+            EOS::UI::End();
         }
-        App.ImGuiRenderer->EndFrame(cmdBuffer);
+        App.UIRenderer->EndFrame(cmdBuffer);
 
         cmdPipelineBarrier(cmdBuffer, {}, {{ swapChainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present }});
         App.Context->Submit(cmdBuffer, swapChainTexture);

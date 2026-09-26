@@ -323,19 +323,19 @@ int main()
 
 
         //Render UI
-        App.ImGuiRenderer->BeginFrame(cmdBuffer);
+        App.UIRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(300, 300), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Light Settings");
+            EOS::UI::SetNextWindowSize(300, 300);
+            EOS::UI::Begin("Light Settings");
 
-            ImGui::DragFloat3("Light Position", glm::value_ptr(lightPos));
-            ImGui::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
-            const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(Handles.ShadowDepthTexture);
-            ImGui::Image(shadowArrayLayerTextureID, {200,200});
+            EOS::UI::DragFloat3("Light Position", glm::value_ptr(lightPos));
+            EOS::UI::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
+            const uint64_t shadowArrayLayerTextureID = EOS::UI::MakeTextureID(Handles.ShadowDepthTexture);
+            EOS::UI::Image(shadowArrayLayerTextureID, 200,200);
 
-            ImGui::End();
+            EOS::UI::End();
         }
-        App.ImGuiRenderer->EndFrame(cmdBuffer);
+        App.UIRenderer->EndFrame(cmdBuffer);
 
 
         cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});

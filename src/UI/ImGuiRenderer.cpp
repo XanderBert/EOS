@@ -1,7 +1,9 @@
-#include "ImGuiRenderer.h"
+#include "UI/ImGuiRenderer.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
+
 #include "ShaderTools/shaderCompiler.h"
+#include "UI/Theme.h"
 
 namespace EOS
 {
@@ -62,6 +64,8 @@ namespace EOS
     :Context(context)
     {
         ImGui::CreateContext();
+
+        UI::Internal::ApplyTheme(UI::Theme::Modern);
 
         ImGuiIO& io = ImGui::GetIO();
         io.BackendRendererName = "imgui-EOS";
@@ -149,6 +153,10 @@ namespace EOS
     {
         //Reset Styling
         ImGui::GetStyle() = ImGuiStyle();
+
+        //The reset above wiped the theme, so put it back before the sizes get scaled, otherwise scaling
+        //would be applied to ImGui's default metrics instead of the theme's.
+        UI::Internal::ReapplyCurrentTheme();
 
         //Set Scale
         Scale = PendingScale;

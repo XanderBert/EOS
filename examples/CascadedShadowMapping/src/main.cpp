@@ -397,16 +397,16 @@ void PassCascadeSetupCompute(EOS::ICommandBuffer& cmdBuffer, const CascadeSetupP
     cmdPopMarker(cmdBuffer);
 }
 
-void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::ImGuiRenderer* UIRenderer)
+void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::UI::Renderer* UIRenderer)
 {
     //Render UI
     UIRenderer->BeginFrame(cmdBuffer);
     {
         UIRenderer->SetScale(1.5f);
-        ImGui::SetNextWindowSize(ImVec2(450, 520), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Light Settings");
+        EOS::UI::SetNextWindowSize(450, 520);
+        EOS::UI::Begin("Light Settings");
 
-        ImGui::DragFloat2("Light Rotation", glm::value_ptr(g_LightRotation));
+        EOS::UI::DragFloat2("Light Rotation", glm::value_ptr(g_LightRotation));
         static const char* shadowDebugModeItems[] =
         {
             "Normal Shading",
@@ -424,45 +424,45 @@ void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::ImGuiRenderer* UIRenderer)
             "RayQuery",
         };
 
-        ImGui::Combo("Shadow Technique", &g_ShadowTechnique, shadowTechniqueItems, IM_ARRAYSIZE(shadowTechniqueItems));
+        EOS::UI::Combo("Shadow Technique", &g_ShadowTechnique, shadowTechniqueItems);
         const bool isCascadeTechnique = g_ShadowTechnique == ShadowTechniqueCpuCascade || g_ShadowTechnique == ShadowTechniqueComputeCascade;
         const bool isComputeCascadeTechnique = g_ShadowTechnique == ShadowTechniqueComputeCascade;
 
         if (isCascadeTechnique)
         {
-            ImGui::Separator();
-            ImGui::Text("Cascade Controls");
-            ImGui::Combo("Shadow Debug Mode", &g_ShadowDebugMode, shadowDebugModeItems, IM_ARRAYSIZE(shadowDebugModeItems));
-            ImGui::SliderInt("Force Cascade", &g_ForceShadowCascade, -1, CASCADES - 1);
+            EOS::UI::Separator();
+            EOS::UI::Text("Cascade Controls");
+            EOS::UI::Combo("Shadow Debug Mode", &g_ShadowDebugMode, shadowDebugModeItems);
+            EOS::UI::SliderInt("Force Cascade", &g_ForceShadowCascade, -1, CASCADES - 1);
             if (g_ForceShadowCascade < 0)
             {
-                ImGui::Text("Force Cascade: Auto");
+                EOS::UI::Text("Force Cascade: Auto");
             }
 
-            const uint64_t shadowArrayLayerTextureID = EOS::MakeImGuiTextureID(Handles.ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::ImGuiTextureView::Texture2DArray);
-            ImGui::Image(shadowArrayLayerTextureID, {400,400});
-            ImGui::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
+            const uint64_t shadowArrayLayerTextureID = EOS::UI::MakeTextureID(Handles.ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::UI::TextureView::Texture2DArray);
+            EOS::UI::Image(shadowArrayLayerTextureID, 400,400);
+            EOS::UI::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
 
             if (isComputeCascadeTechnique)
             {
-                ImGui::Separator();
-                ImGui::Text("Compute Options");
-                ImGui::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
-                ImGui::Text("Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction" : "Camera Planes");
+                EOS::UI::Separator();
+                EOS::UI::Text("Compute Options");
+                EOS::UI::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
+                EOS::UI::Text("Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction" : "Camera Planes");
             }
             else
             {
-                ImGui::Separator();
-                ImGui::Text("CPU Cascade path active");
+                EOS::UI::Separator();
+                EOS::UI::Text("CPU Cascade path active");
             }
         }
         else
         {
-            ImGui::Separator();
-            ImGui::Text("RayQuery mode active");
-            ImGui::Text("Cascade debug/image controls are hidden in this mode.");
+            EOS::UI::Separator();
+            EOS::UI::Text("RayQuery mode active");
+            EOS::UI::Text("Cascade debug/image controls are hidden in this mode.");
         }
-        ImGui::End();
+        EOS::UI::End();
     }
     UIRenderer->EndFrame(cmdBuffer);
 }
@@ -931,7 +931,7 @@ int main()
 
 
         PassShade(cmdBuffer, swapChainTexture);
-        PassUI(cmdBuffer, App.ImGuiRenderer.get());
+        PassUI(cmdBuffer, App.UIRenderer.get());
 
         cmdPipelineBarrier(cmdBuffer, {}, {{swapChainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
 

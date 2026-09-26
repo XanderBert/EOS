@@ -413,25 +413,25 @@ int main()
         cmdPopMarker(cmdBuffer);
 
         // --- Pass 3: UI
-        App.ImGuiRenderer->BeginFrame(cmdBuffer);
+        App.UIRenderer->BeginFrame(cmdBuffer);
         {
-            ImGui::SetNextWindowSize(ImVec2(360, 220), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Deferred Edge Detection");
-            ImGui::SliderFloat3("Light direction", &lightDirection.x, -1.0f, 1.0f);
+            EOS::UI::SetNextWindowSize(360, 220);
+            EOS::UI::Begin("Deferred Edge Detection");
+            EOS::UI::SliderFloat3("Light direction", &lightDirection.x, -1.0f, 1.0f);
             if (glm::length(lightDirection) > 0.0001f)
             {
                 lightDirection = glm::normalize(lightDirection);
             }
-            ImGui::SliderFloat("Light intensity", &lightIntensity, 0.0f, 2.0f);
-            ImGui::ColorEdit3("Light color", &lightColor.x);
-            ImGui::Separator();
-            ImGui::SliderFloat("Edge threshold", &edgeThreshold, 2.0f, 8.0f);
-            ImGui::Checkbox("Edges only", &showEdgesOnly);
+            EOS::UI::SliderFloat("Light intensity", &lightIntensity, 0.0f, 2.0f);
+            EOS::UI::ColorEdit3("Light color", &lightColor.x);
+            EOS::UI::Separator();
+            EOS::UI::SliderFloat("Edge threshold", &edgeThreshold, 2.0f, 8.0f);
+            EOS::UI::Checkbox("Edges only", &showEdgesOnly);
             constexpr const char* debugModes[] = {"Lit", "Albedo", "Normals", "Roughness", "World Position"};
-            ImGui::Combo("Debug view", &debugView, debugModes, IM_ARRAYSIZE(debugModes));
-            ImGui::End();
+            EOS::UI::Combo("Debug view", &debugView, debugModes);
+            EOS::UI::End();
         }
-        App.ImGuiRenderer->EndFrame(cmdBuffer);
+        App.UIRenderer->EndFrame(cmdBuffer);
 
         cmdPipelineBarrier(cmdBuffer, {}, {{ swapChainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present }});
         App.Context->Submit(cmdBuffer, swapChainTexture);

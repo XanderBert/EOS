@@ -3,8 +3,7 @@
 #include "ExampleHelpers.h"
 #include "Camera.h"
 #include "EOS.h"
-#include "imgui.h"
-#include "ImGuiRenderer.h"
+#include "UI/UI.h"
 #include "glm/gtc/type_ptr.hpp"
 
 struct InputState final
@@ -45,7 +44,7 @@ public:
         SetupInputCallbacks();
 
 
-        ImGuiRenderer = std::make_unique<EOS::ImGuiRenderer>(Context.get(), Window);
+        UIRenderer = std::make_unique<EOS::UI::Renderer>(Context.get(), Window);
     }
 
     DELETE_COPY_MOVE(ExampleApp)
@@ -65,23 +64,24 @@ public:
     Camera MainCamera;
     EOS::Window Window;
     std::unique_ptr<EOS::IContext> Context;
-    std::unique_ptr<EOS::ImGuiRenderer> ImGuiRenderer;
+    std::unique_ptr<EOS::UI::Renderer> UIRenderer;
     EOS::Holder<EOS::SamplerHandle> DefaultSampler;
     InputState Input;
     float DeltaTime{};
 
     // Return true when the cursor (GLFW window coordinates) is over UI, so a click there goes to
-    // the UI instead of starting mouse-look. Defaults to ImGui's WantCaptureMouse
+    // the UI instead of starting mouse-look. Defaults to the UI's own answer, which is false in a build
+    // without a UI.
     std::function<bool(double xpos, double ypos)> WantCaptureMouse = [](double, double)
     {
-        return ImGui::GetIO().WantCaptureMouse;
+        return EOS::UI::WantCaptureMouse();
     };
 
     // Return true while UI wants keyboard input (e.g. a focused text box), so key presses don't
-    // drive the camera. Defaults to ImGui's WantCaptureKeyboard.
+    // drive the camera. Defaults to the UI's own answer.
     std::function<bool()> WantCaptureKeyboard = []()
     {
-        return ImGui::GetIO().WantCaptureKeyboard;
+        return EOS::UI::WantCaptureKeyboard();
     };
 
     template <typename Function>
@@ -134,15 +134,8 @@ private:
         Input.rightMouse = enabled;
         FirstMouseSample = true;
 
-        ImGuiIO& io = ImGui::GetIO();
-        if (enabled)
-        {
-            io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
-        }
-        else
-        {
-            io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
-        }
+        // While the application owns the cursor for mouse look, the UI should not react to it.
+        EOS::UI::SetMouseInputEnabled(!enabled);
 
         glfwSetInputMode(Window.GlfwWindow, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
         if (glfwRawMouseMotionSupported())
