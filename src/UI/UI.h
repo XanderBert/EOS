@@ -78,5 +78,8 @@ namespace EOS
         [[nodiscard]] bool WantCaptureKeyboard();
 
         void SetMouseInputEnabled(bool enabled);
+
+        // Drops focus from every UI window so keyboard input goes back to the application.
+        void ClearFocus();
     }
 }

@@ -12,6 +12,8 @@ struct InputState final
     bool backward{};
     bool left{};
     bool right{};
+    bool up{};
+    bool down{};
     bool rightMouse{};
     bool space{};
 };
@@ -114,7 +116,7 @@ public:
                 MainCamera.SetPosition(StartingCameraPosition);
                 MainCamera.SetRotation(StartingCameraRotation);
             }
-            glm::vec3 direction{Input.right - Input.left, 0.0f, Input.forward - Input.backward};
+            glm::vec3 direction{Input.right - Input.left, Input.up - Input.down, Input.forward - Input.backward};
             MainCamera.Update(direction, DeltaTime);
 
 
@@ -136,6 +138,10 @@ private:
 
         // While the application owns the cursor for mouse look, the UI should not react to it.
         EOS::UI::SetMouseInputEnabled(!enabled);
+
+        // Keyboard navigation makes a focused UI window capture WASD, and unlike a left click
+        // the right click that starts mouse look doesn't unfocus it, so drop focus explicitly.
+        if (enabled) EOS::UI::ClearFocus();
 
         glfwSetInputMode(Window.GlfwWindow, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
         if (glfwRawMouseMotionSupported())
@@ -159,6 +165,8 @@ private:
                 case GLFW_KEY_S:     Input.backward = pressed; break;
                 case GLFW_KEY_A:     Input.left = pressed; break;
                 case GLFW_KEY_D:     Input.right = pressed; break;
+                case GLFW_KEY_Q:     Input.up = pressed; break;
+                case GLFW_KEY_E:     Input.down = pressed; break;
                 case GLFW_KEY_SPACE: Input.space = pressed; break;
                 default: break;
             }
@@ -171,7 +179,7 @@ private:
 
         Window.OnMouseButton([this](int button, int action, int)
         {
-            if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+            if (button != GLFW_MOUSE_BUTTON_RIGHT) return;
 
             if (action == GLFW_PRESS)
             {

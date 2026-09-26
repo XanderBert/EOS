@@ -229,4 +229,11 @@ namespace EOS::UI
         }
 #endif
     }
+
+    void ClearFocus()
+    {
+#if defined(EOS_USE_IMGUI)
+        ImGui::SetWindowFocus(nullptr);
+#endif
+    }
 }
