@@ -446,4 +446,28 @@ function(eos_require_slang TARGET_NAME)
     endif()
 
     target_link_libraries(${TARGET_NAME} PUBLIC EOS::slang)
+
+    if(WIN32)
+        get_filename_component(slang_layout_root "${slang_lib_dir}" DIRECTORY)
+        set(EOS_SLANG_RUNTIME_DIR "${slang_layout_root}/bin" CACHE INTERNAL "Directory containing Slang runtime DLLs")
+    endif()
+endfunction()
+
+# Slang ships its runtime as DLLs on Windows (lib/ only holds the import .lib), so anything that links
+# EOS::slang needs those DLLs copied next to its own executable.
+function(eos_copy_slang_runtime TARGET_NAME)
+    if(NOT WIN32 OR NOT EOS_SLANG_RUNTIME_DIR)
+        return()
+    endif()
+
+    file(GLOB slang_runtime_dlls "${EOS_SLANG_RUNTIME_DIR}/*.dll")
+    if(NOT slang_runtime_dlls)
+        return()
+    endif()
+
+    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${slang_runtime_dlls} "$<TARGET_FILE_DIR:${TARGET_NAME}>"
+        COMMENT "Copying Slang runtime DLLs next to ${TARGET_NAME}"
+        VERBATIM
+    )
 endfunction()

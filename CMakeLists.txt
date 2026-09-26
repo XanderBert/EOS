@@ -122,8 +122,14 @@ if(EOS_USE_TRACY)
 endif()
 
 if(EOS_USE_IMGUI)
-    target_compile_definitions(EOS PRIVATE EOS_USE_IMGUI)
+    target_compile_definitions(EOS PUBLIC EOS_USE_IMGUI)
     eos_require_imgui(EOS)
+else()
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/src/UI/ImGuiRenderer.cpp"
+        "${CMAKE_SOURCE_DIR}/src/UI/Theme.cpp"
+        PROPERTIES HEADER_FILE_ONLY ON
+    )
 endif()
 
 if(EOS_BUILD_TEXTURE_TOOLS OR EOS_SHADER_TOOLS)

@@ -160,6 +160,7 @@ macro(CREATE_EXAMPLE name)
     set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "Examples")
 
     target_link_libraries(${PROJECT_NAME} PRIVATE EOS)
+    eos_copy_slang_runtime(${PROJECT_NAME})
 
     set(PROJECT_SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
     set(SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
