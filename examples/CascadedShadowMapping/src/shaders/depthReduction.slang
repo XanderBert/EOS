@@ -120,16 +120,12 @@ void computeMain(
         {
             Ptr<DepthReductionData> outPtr = (Ptr<DepthReductionData>)pc.depthRangePtr;
 
-            // Atomic float min/max via bit-cast tricks (valid for [0,1] depths):
-            //https://www.jeremyong.com/graphics/2023/09/05/f32-interlocked-min-max-hlsl/
-
-            // minDepth atomic: flip bits so uint order matches inverse float order.
-            uint minBits = ~asuint(waveMin);
-            InterlockedMin(((Ptr<uint>)outPtr)[0], minBits); // performs an atomic min of value to memory
-
-            // maxDepth atomic: [0,1] floats sort identically to their uint bits.
-            uint maxBits = asuint(waveMax);
-            InterlockedMax(((Ptr<uint>)outPtr)[1], maxBits); // performs an atomic max of value to memory
+            // Atomic float min/max via uint bit-cast. Depths are non-negative, and non-negative
+            // IEEE floats sort identically to their uint bits, so no bit flipping is needed and the
+            // buffer holds plain floats (reset to {1.0, 0.0} on the CPU, read as floats in cascadeSetup).
+            // https://www.jeremyong.com/graphics/2023/09/05/f32-interlocked-min-max-hlsl/
+            InterlockedMin(((Ptr<uint>)outPtr)[0], asuint(waveMin)); // performs an atomic min of value to memory
+            InterlockedMax(((Ptr<uint>)outPtr)[1], asuint(waveMax)); // performs an atomic max of value to memory
         }
     }
 }

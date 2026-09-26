@@ -52,7 +52,8 @@ public float3 GetShadingNormal(float3 n, float3 v, float2 normalSample, float2 u
 {
     float3 tangentNormal = ReconstructNormal(normalSample);
     float3 N = normalize(n);
-    float3 T = normalize(tangent);
+    // Re-orthogonalize: the interpolated tangent drifts off perpendicular to the interpolated normal.
+    float3 T = normalize(tangent - N * dot(N, tangent));
     float3 B = normalize(cross(N, T));
 
     float3x3 TBN = transpose(float3x3(T, B, N));
@@ -85,6 +86,17 @@ public float3 FresnelSchlick(float cosTheta, float3 f0)
 public float3 FresnelSchlickRoughness(float cosTheta, float3 f0, float roughness)
 {
     return f0 + (max((1.0 - roughness).xxx, f0) - f0) * pow(1.0 - cosTheta, 5.0);
+}
+
+// Analytic fit of the split-sum environment BRDF LUT (Karis, "Physically Based Shading on Mobile").
+// Returns (scale, bias) so that specular = f0 * scale + bias.
+public float2 EnvBRDFApprox(float dotNV, float roughness)
+{
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    float4 r = roughness * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * dotNV)) * r.x + r.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
 }
 
 public Material SampleMaterial(MaterialTextureSet textures, uint samplerId, float2 uv)
@@ -126,24 +138,26 @@ public float3 EvaluatePBR(PBRSurface surface)
     float dotNH = clamp(dot(n, h), 0.0, 1.0);
     float dotNV = clamp(dot(n, v), 0.0, 1.0);
     float dotNL = clamp(dot(n, l), 0.0, 1.0);
+    float dotVH = clamp(dot(v, h), 0.0, 1.0);
 
     float3 f0 = lerp(float3(0.04), material.albedo, material.metallic);
 
     float d = DistributionGGX(dotNH, material.roughness);
     float g = GeometrySchlickSmithGGX(dotNL, dotNV, material.roughness);
-    float3 f = FresnelSchlick(dotNV, f0);
+    float3 f = FresnelSchlick(dotVH, f0); // microfacet Fresnel uses the half-vector angle, not N.V
     float3 spec = d * f * g / (4.0 * dotNL * dotNV + 0.001);
 
     float3 kd = (1.0 - f) * (1.0 - material.metallic);
     float3 lo = (kd * material.albedo / PBR_PI + spec) * dotNL;
 
-    float2 brdf = (0.88 * float2(max(dot(n, v), 0.0), material.roughness)).rg;
+    // Constant-environment stand-in for IBL. brdf = split-sum (scale, bias) applied as f0 * scale + bias.
+    float2 brdf = EnvBRDFApprox(dotNV, material.roughness);
     float3 reflection = float3(0.3);
     float3 diffuse = 0.7 * material.albedo;
-    float3 fr = FresnelSchlickRoughness(max(dot(n, v), 0.0), f0, material.roughness);
+    float3 fr = FresnelSchlickRoughness(dotNV, f0, material.roughness);
 
     float3 ambientKd = (1.0 - fr) * (1.0 - material.metallic);
-    float3 ambientSpecular = reflection * (fr * brdf.x + brdf.y);
+    float3 ambientSpecular = reflection * (f0 * brdf.x + brdf.y);
     float3 ambient = ambientKd * diffuse + ambientSpecular;
 
     return ambient + lo;

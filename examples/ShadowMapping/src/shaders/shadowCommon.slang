@@ -6,6 +6,7 @@ public struct PerFrameData
     public float4x4 MVP;
     public float4x4 depthMVP;
     public float4   lightPos;
+    public float4   lightDir; // xyz = direction the light travels (directional light)
     public float3   cameraPos;
     public uint     shadowMapID;
 };

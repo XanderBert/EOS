@@ -844,7 +844,8 @@ int main()
         // Reset min and max depth values
         if (useComputeCascades)
         {
-            constexpr DepthReductionData sentinel{ 0.0f, 0.0f };
+            // Identity values for the atomic min/max: min starts at the far plane, max at the near plane.
+            constexpr DepthReductionData sentinel{ .minDepth = 1.0f, .maxDepth = 0.0f };
             App.Context->Upload(Handles.DepthReductionBuffer, &sentinel, sizeof(DepthReductionData), 0);
         }
 

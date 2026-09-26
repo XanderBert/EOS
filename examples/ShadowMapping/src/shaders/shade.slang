@@ -1,6 +1,7 @@
 import bindings;
 import shading;
 import shadowCommon;
+import math;
 
 struct MaterialHandles
 {
@@ -26,8 +27,6 @@ struct VSOutput
     float3 Tangent  : TANGENT;
     float2 UV       : TEXCOORD0;
     uint   DrawIndex : TEXCOORD3;
-    float3 ViewVec;
-    float3 LightVec;
     float4 ShadowCoord;
 };
 
@@ -40,6 +39,9 @@ struct DrawData
     float4x4 transform;
 };
 
+
+// Must match the shadow depth texture created in main.cpp.
+static const float kShadowMapSize = 4096.0;
 
 [[vk::push_constant]] PushConstants pc;
 [shader("vertex")]
@@ -58,8 +60,6 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     output.Tangent      = mul(input.Tangent.xyz, normalMatrix);
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
-    output.ViewVec      = -output.Pos.xyz;
-    output.LightVec     = normalize(frameData.lightPos.xyz - output.WorldPos);
     output.ShadowCoord  = mul(localTransformed, frameData.depthMVP);
 
     return output;
@@ -84,37 +84,41 @@ float4 fragmentMain(VSOutput input)
     pbrInput.tangent = input.Tangent;
     pbrInput.uv = input.UV;
     pbrInput.cameraPos = frameData.cameraPos;
-    pbrInput.lightPos = frameData.lightPos.xyz;
+
+    // The shadow map uses an orthographic projection, so the light is directional:
+    // shade with the same direction the shadow map is rendered from, not with lightPos - worldPos.
+    float3 L = SafeNormalize(-frameData.lightDir.xyz, float3(0.0, 1.0, 0.0));
+    pbrInput.lightPos = input.WorldPos + L * 100000.0;
 
     Material material = SampleMaterial(materialTextures, 0, input.UV);
     float3 shadingNormal = SampleNormal(materialTextures, 0, input.UV, input.Normal, input.WorldPos, input.Tangent);
     PBRSurface pbrSurface = BuildPBRSurface(pbrInput, material, shadingNormal);
+    pbrSurface.lightDir = L;
     float3 color = EvaluatePBR(pbrSurface);
-
-    float3 N = pbrSurface.normal;
-    float3 L = normalize(frameData.lightPos.xyz - input.WorldPos);
 
     float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
 
-    //If the coord is outside the light frustum don't shadow it.
-    if(projCoords.z > 1.0) return float4(color, 1.0);
-    
     // Only remap XY -> Vulkan depth already stays in [0, 1].
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
 
     // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
     projCoords.y = 1.0 - projCoords.y;
 
-    float bias = max(0.0005 * (1.0 - dot(N, L)), 0.00005);
+    // If the coord is outside the light frustum don't shadow it (the border colour would read as occluded).
+    if (projCoords.z > 1.0 || any(projCoords.xy < 0.0) || any(projCoords.xy > 1.0)) return float4(color, 1.0);
+
+    // Slope bias from the geometric normal; normal-map detail shouldn't move the depth comparison.
+    float ndotl = saturate(dot(normalize(input.Normal), L));
+    float bias = max(0.0005 * (1.0 - ndotl), 0.00005);
     float currentDepth = projCoords.z;
     float shadow = 0.0;
-    float2 texelSize = 1.0 / float2(2000.0, 2000.0);
+    float2 texelSize = 1.0 / float2(kShadowMapSize, kShadowMapSize);
 
     for(int x = -1; x <= 1; ++x)
     {
         for(int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy).r;
+            float pcfDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy + float2(x, y) * texelSize).r;
             shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
         }
     }

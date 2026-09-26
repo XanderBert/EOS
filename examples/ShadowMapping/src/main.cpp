@@ -8,6 +8,7 @@ struct PerFrameData final
     glm::mat4 mvp;
     glm::mat4 depthMVP;
     glm::vec4 lightPos;
+    glm::vec4 lightDir;
     glm::vec3 cameraPos;
     uint32_t  shadowMapID;
 };
@@ -250,6 +251,7 @@ int main()
             .mvp = mvp,
             .depthMVP = depthMVP,
             .lightPos = glm::vec4(lightPos, 1.0f),
+            .lightDir = glm::vec4(lightForward, 0.0f),
             .cameraPos = App.MainCamera.GetPosition(),
             .shadowMapID = Handles.ShadowDepthTexture.Index(),
         };
