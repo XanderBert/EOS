@@ -43,20 +43,19 @@ struct PerFrameData final
     glm::vec4 lightDir;
     glm::vec4 cascadeSplits;
     glm::vec3 cameraPos;
-    uint32_t  shadowMapID;
-    uint32_t  sceneTLASID;
+    EOS::DescriptorHandle shadowMap;
+    EOS::DescriptorHandle shadowSampler;
+    EOS::DescriptorHandle sceneTLAS;
     int32_t   shadowDebugMode;
     int32_t   shadowForceCascade;
     int32_t   shadowTechnique;
 };
 
+// DrawData in shadowCommon.slang
 struct DrawData final
 {
-    uint32_t albedoID;
-    uint32_t normalID;
-    uint32_t metallicRoughnessID;
-    uint32_t pad;
-    glm::mat4 transform;
+    glm::mat4 transform{};
+    EOS::StandardMaterialData material{};
 };
 
 struct Vertex final
@@ -89,7 +88,7 @@ struct DepthReductionData final
 struct DepthReductionPushConstants final
 {
     uint64_t depthRangePtr;
-    uint32_t depthTextureID;
+    EOS::DescriptorHandle depthTexture;
     uint32_t width;
     uint32_t height;
     uint32_t numGroupsX;
@@ -127,9 +126,14 @@ constexpr EOS::VertexInputData VertexInputDataShade
     }
 };
 
+// Position, plus the uv alpha-tested materials need to cut their holes into depth.
 constexpr EOS::VertexInputData VertexInputDataShadowDepth
 {
-    .Attributes{{ .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) }},
+    .Attributes
+    {
+    { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) },
+    { .Location = 1, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) },
+    },
     .InputBindings{{ .Stride = sizeof(Vertex) }}
 };
 #pragma endregion
@@ -155,8 +159,10 @@ struct Resources final
     EOS::AccelStructHolder SceneTLAS;
 
     EOS::RenderPipelineHolder RenderPipelineEarlyZ;
+    EOS::RenderPipelineHolder RenderPipelineEarlyZAlphaTested;
     EOS::RenderPipelineHolder RenderPipelineShade;
     EOS::RenderPipelineHolder RenderPipelineShadow;
+    EOS::RenderPipelineHolder RenderPipelineShadowAlphaTested;
     EOS::ComputePipelineHolder ComputePipelineDepthReduction;
     EOS::ComputePipelineHolder ComputePipelineCascadeSetup;
 
@@ -175,6 +181,7 @@ Resources Handles;
 FramePointers FramePointersData;
 
 int32_t nMeshes;
+uint32_t nOpaqueMeshes;     // meshes [0, nOpaqueMeshes) are opaque, the rest alpha-tested (see PartitionMeshesByAlphaTest)
 
 // Lights
 glm::vec2 g_LightRotation     = {-73, -90};
@@ -309,6 +316,34 @@ constexpr EOS::RenderPass ShadeRenderPass
 };
 
 
+// Depth-only passes draw the opaque meshes with a fragment shader that never discards, which keeps the fast depth-only
+// path, and only the alpha-tested meshes with the one that does. Draw indices restart at 0 in the second indirect draw,
+// so its push constants point the draw data at the first alpha-tested mesh.
+void DrawDepthSplitByAlphaTest(EOS::ICommandBuffer& cmdBuffer, EOS::RenderPipelineHandle opaquePipeline, EOS::RenderPipelineHandle alphaTestedPipeline)
+{
+    const uint32_t nAlphaTestedMeshes = static_cast<uint32_t>(nMeshes) - nOpaqueMeshes;
+
+    if (nOpaqueMeshes > 0)
+    {
+        cmdBindRenderPipeline(cmdBuffer, opaquePipeline);
+        cmdPushConstants(cmdBuffer, FramePointersData);
+        cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nOpaqueMeshes);
+    }
+
+    if (nAlphaTestedMeshes > 0)
+    {
+        const FramePointers alphaTestedPointers
+        {
+            .frameDataPtr = FramePointersData.frameDataPtr,
+            .drawDataPtr = FramePointersData.drawDataPtr + nOpaqueMeshes * sizeof(DrawData),
+        };
+
+        cmdBindRenderPipeline(cmdBuffer, alphaTestedPipeline);
+        cmdPushConstants(cmdBuffer, alphaTestedPointers);
+        cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, nOpaqueMeshes * sizeof(EOS::DrawIndexedIndirectCommand), nAlphaTestedMeshes);
+    }
+}
+
 void PassEarlyZ(EOS::ICommandBuffer& cmdBuffer)
 {
     EOS::Framebuffer framebufferEarlyZ
@@ -322,10 +357,8 @@ void PassEarlyZ(EOS::ICommandBuffer& cmdBuffer)
     {
         cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
         cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-        cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineEarlyZ);
-        cmdPushConstants(cmdBuffer, FramePointersData);
         cmdSetDepthState(cmdBuffer, DepthStateWrite);
-        cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nMeshes);
+        DrawDepthSplitByAlphaTest(cmdBuffer, Handles.RenderPipelineEarlyZ, Handles.RenderPipelineEarlyZAlphaTested);
     }
     cmdEndRendering(cmdBuffer);
     cmdPopMarker(cmdBuffer);
@@ -344,10 +377,8 @@ void PassShadowDepth(EOS::ICommandBuffer& cmdBuffer)
     {
         cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
         cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-        cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShadow);
-        cmdPushConstants(cmdBuffer, FramePointersData);
         cmdSetDepthState(cmdBuffer, DepthStateWrite);
-        cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nMeshes);
+        DrawDepthSplitByAlphaTest(cmdBuffer, Handles.RenderPipelineShadow, Handles.RenderPipelineShadowAlphaTested);
     }
     cmdEndRendering(cmdBuffer);
     cmdPopMarker(cmdBuffer);
@@ -366,6 +397,7 @@ void PassShade(EOS::ICommandBuffer& cmdBuffer, const EOS::TextureHandle& swapCha
     cmdBeginRendering(cmdBuffer, ShadeRenderPass, framebufferShade);
     {
         cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShade);
+        cmdPushConstants(cmdBuffer, FramePointersData);
         cmdSetDepthState(cmdBuffer, DepthStateRead);
         cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nMeshes);
     }
@@ -534,6 +566,7 @@ int main()
 
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
     const glm::mat4 m = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+    nOpaqueMeshes = PartitionMeshesByAlphaTest(scene);
 
     std::vector<Vertex> vertices = BuildVerticesFromScene<Vertex>(scene);
 
@@ -679,7 +712,7 @@ int main()
     });
 
     nMeshes = scene.meshes.size();
-    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene, App.DefaultSampler);
 
     Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
@@ -736,25 +769,33 @@ int main()
     {
         .VertexInput = VertexInputDataShadowDepth,
         .VertexShader = {Handles.EarlyZShader, "vertexMain"},
-        .FragmentShader = {Handles.EarlyZShader, "fragmentMain"},
+        .FragmentShader = {Handles.EarlyZShader, "fragmentOpaque"},
         .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "EarlyZ Render Pipeline",
     };
     Handles.RenderPipelineEarlyZ = App.Context->CreateRenderPipeline(renderPipelineEarlyZDesc);
 
+    renderPipelineEarlyZDesc.FragmentShader = {Handles.EarlyZShader, "fragmentMasked"};
+    renderPipelineEarlyZDesc.DebugName = "EarlyZ Alpha Tested Render Pipeline";
+    Handles.RenderPipelineEarlyZAlphaTested = App.Context->CreateRenderPipeline(renderPipelineEarlyZDesc);
+
     EOS::RenderPipelineDescription renderPipelineShadow
     {
         .VertexInput = VertexInputDataShadowDepth,
         .VertexShader = {Handles.ShadowShader, "vertexMain"},
         .GeometryShader = {Handles.ShadowShader, "geometryMain"},
-        .FragmentShader = {Handles.ShadowShader, "fragmentMain"},
+        .FragmentShader = {Handles.ShadowShader, "fragmentOpaque"},
         .DepthFormat = App.Context->GetFormat(Handles.ShadowDepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DepthClamping = true,
         .DebugName = "ShadowMap Render Pipeline",
     };
     Handles.RenderPipelineShadow = App.Context->CreateRenderPipeline(renderPipelineShadow);
+
+    renderPipelineShadow.FragmentShader = {Handles.ShadowShader, "fragmentMasked"};
+    renderPipelineShadow.DebugName = "ShadowMap Alpha Tested Render Pipeline";
+    Handles.RenderPipelineShadowAlphaTested = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
     const EOS::ComputePipelineDescription computeDepthReductionDesc
     {
@@ -806,8 +847,9 @@ int main()
             .view = view,
             .lightDir = glm::vec4(lightForward, 0.0f),
             .cameraPos = App.MainCamera.GetPosition(),
-            .shadowMapID = Handles.ShadowDepthTexture.Index(),
-            .sceneTLASID = Handles.SceneTLAS.Valid() ? Handles.SceneTLAS.Index() : 0u,
+            .shadowMap = Handles.ShadowDepthTexture,
+            .shadowSampler = Handles.DepthMapSampler,
+            .sceneTLAS = Handles.SceneTLAS,
             .shadowDebugMode = g_ShadowDebugMode,
             .shadowForceCascade = g_ForceShadowCascade,
             .shadowTechnique = g_ShadowTechnique,
@@ -858,7 +900,7 @@ int main()
             const DepthReductionPushConstants depthReductionPC
             {
                 .depthRangePtr  = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
-                .depthTextureID = Handles.DepthTexture.Index(),
+                .depthTexture   = Handles.DepthTexture,
                 .width          = static_cast<uint32_t>(App.Window.Width),
                 .height         = static_cast<uint32_t>(App.Window.Height),
                 .numGroupsX     = gx,

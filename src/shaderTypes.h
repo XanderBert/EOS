@@ -95,6 +95,7 @@ namespace EOS
         UniformBuffer,
         StorageBuffer,
         AccelerationStructure,
+        Bindless,               // an untyped bindless array (eos.bindless); the descriptor type depends on how it is used
     };
 
     /**

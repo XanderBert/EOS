@@ -58,6 +58,9 @@ namespace EOS
                 hash = ShaderCache::HashString(define.Value, hash);
             }
 
+            hash = ShaderCache::HashString("|linked|", hash);
+            for (const std::string& linkedModule : options.LinkedModules) hash = ShaderCache::HashString(linkedModule, hash);
+
             return hash;
         }
 
@@ -77,9 +80,9 @@ namespace EOS
     ShaderCompilerOptions ShaderCompilerOptions::Default()
     {
 #if defined(EOS_DEBUG)
-        return {.DebugInfo = true, .Optimization = ShaderOptimizationLevel::None};
+        return {.DebugInfo = true, .Optimization = ShaderOptimizationLevel::None, .LinkedModules = {"eos.bindless"}};
 #else
-        return {.DebugInfo = false, .Optimization = ShaderOptimizationLevel::High};
+        return {.DebugInfo = false, .Optimization = ShaderOptimizationLevel::High, .LinkedModules = {"eos.bindless"}};
 #endif
     }
 
@@ -109,6 +112,33 @@ namespace EOS
             }
 
             return SLANG_OPTIMIZATION_LEVEL_DEFAULT;
+        }
+
+        // Modules are named as in an import ("eos.imgui"), but loadModule takes the path below a search path ("eos/imgui").
+        [[nodiscard]] slang::IModule* LoadModule(slang::ISession* session, const std::string& moduleName, const std::vector<std::filesystem::path>& searchPaths, std::string& outDiagnostics)
+        {
+            std::string modulePath = moduleName;
+            std::ranges::replace(modulePath, '.', '/');
+
+            Slang::ComPtr<ISlangBlob> diagnostics;
+            slang::IModule* module = session->loadModule(modulePath.c_str(), diagnostics.writeRef());
+            AppendDiagnostics(outDiagnostics, diagnostics);
+            if (!module)
+            {
+                std::string searched;
+                for (const std::filesystem::path& searchPath : searchPaths) searched += "\n    " + searchPath.string();
+                outDiagnostics += "error: could not load shader module '" + moduleName + "'. Searched:" + searched + "\n";
+            }
+
+            return module;
+        }
+
+        void AddDependencies(slang::IModule* module, std::set<std::filesystem::path>& inOutPaths)
+        {
+            for (SlangInt32 i = 0; i < module->getDependencyFileCount(); ++i)
+            {
+                if (const char* path = module->getDependencyFilePath(i)) inOutPaths.insert(std::filesystem::absolute(FromUtf8(path)).lexically_normal());
+            }
         }
 
         [[nodiscard]] std::string ListDefinedEntryPoints(slang::IModule* module)
@@ -307,16 +337,18 @@ namespace EOS
         slang::ISession* session = Slang->GetSession(Options, SearchPaths, description.Defines, outDiagnostics);
         if (!session) return nullptr;
 
-        Slang::ComPtr<ISlangBlob> diagnostics;
-        slang::IModule* module = session->loadModule(description.Module.c_str(), diagnostics.writeRef());
-        AppendDiagnostics(outDiagnostics, diagnostics);
-        if (!module)
+        slang::IModule* module = LoadModule(session, description.Module, SearchPaths, outDiagnostics);
+        if (!module) return nullptr;
+
+        std::vector<slang::IModule*> linkedModules;
+        for (const std::string& linkedModuleName : Options.LinkedModules)
         {
-            std::string searched;
-            for (const std::filesystem::path& searchPath : SearchPaths) searched += "\n    " + searchPath.string();
-            outDiagnostics += "error: could not load shader module '" + description.Module + "'. Searched:" + searched + "\n";
-            return nullptr;
+            slang::IModule* linkedModule = LoadModule(session, linkedModuleName, SearchPaths, outDiagnostics);
+            if (!linkedModule) return nullptr;
+            linkedModules.push_back(linkedModule);
         }
+
+        Slang::ComPtr<ISlangBlob> diagnostics;
 
         std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints;
         if (description.EntryPoints.empty())
@@ -349,10 +381,8 @@ namespace EOS
 
         // Every source file the module was built from, including imported modules, for staleness checks and hot reload.
         std::set<std::filesystem::path> dependencyPaths;
-        for (SlangInt32 i = 0; i < module->getDependencyFileCount(); ++i)
-        {
-            if (const char* path = module->getDependencyFilePath(i)) dependencyPaths.insert(std::filesystem::absolute(FromUtf8(path)).lexically_normal());
-        }
+        AddDependencies(module, dependencyPaths);
+        for (slang::IModule* linkedModule : linkedModules) AddDependencies(linkedModule, dependencyPaths);
 
         for (const std::filesystem::path& path : dependencyPaths)
         {
@@ -370,6 +400,10 @@ namespace EOS
             // Link all entry points together: shared imports are linked once, and each entry point still gets its own
             // SPIR-V module with everything it does not use stripped out.
             std::vector<slang::IComponentType*> components{module};
+            for (slang::IModule* linkedModule : linkedModules)
+            {
+                if (linkedModule != module) components.push_back(linkedModule);
+            }
             for (const Slang::ComPtr<slang::IEntryPoint>& entryPoint : entryPoints) components.push_back(entryPoint);
 
             Slang::ComPtr<slang::IComponentType> composite;

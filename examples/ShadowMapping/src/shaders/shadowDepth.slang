@@ -1,43 +1,44 @@
-import bindings;
+import eos.material;
 import shadowCommon;
 
-struct DrawData
-{
-    uint albedo;
-    uint normal;
-    uint metallicRoughness;
-    uint pad;
-    float4x4 transform;
-};
-
-//TODO: Reduce to just Pos
 struct VSInput
 {
     uint vertexID   : SV_VertexID;
     float3 Pos      : POSITION;
+    float2 UV       : TEXCOORD0;
 };
 
 struct VSOutput
 {
-    float4 Pos      : SV_Position;
+    float4 Pos       : SV_Position;
+    float2 UV        : TEXCOORD0;
+    uint   DrawIndex : TEXCOORD1;
 }
 
 [[vk::push_constant]] PushConstants pc;
+
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
+    const float4 localTransformed = mul(float4(input.Pos, 1.0), pc.draws[drawIndex].transform);
+
     VSOutput output;
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, drawIndex);
-
-    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
-    output.Pos = mul(localTransformed, frameData.depthMVP);
-
+    output.Pos = mul(localTransformed, pc.perFrame->depthMVP);
+    output.UV = input.UV;
+    output.DrawIndex = drawIndex;
     return output;
 }
 
+// Opaque draws: no discard, so the GPU keeps its early depth test and fast depth-only path.
 [shader("fragment")]
-float4 fragmentMain()
+void fragmentOpaque()
 {
-	return float4(1.0, 0.1, 0.1, 1.0);
+}
+
+// Alpha-tested draws only cast shadows where they are not cut away.
+[shader("fragment")]
+void fragmentMasked(VSOutput input)
+{
+    const StandardMaterial material = StandardMaterial(pc.draws[input.DrawIndex].material);
+    if (!material.PassesAlphaTest(material.EvaluateOpacity(SurfaceData.FromUV(input.UV), ImplicitLodSampler()))) discard;
 }

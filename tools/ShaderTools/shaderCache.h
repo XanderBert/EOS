@@ -20,7 +20,7 @@ namespace EOS::ShaderCache
     [[nodiscard]] uint64_t HashDescription(const ShaderProgramDescription& description);
     [[nodiscard]] bool HashFile(const std::filesystem::path& path, uint64_t& outHash);
 
-    // Programs compiled with the default entry points and no defines are stored as "<module>.eosprog", so the cache
+    // Programs compiled with the default entry points and no defines are stored as "<module>.EOS", so the cache
     // directory stays readable. Anything else gets the description hash appended.
     [[nodiscard]] std::filesystem::path GetFilePath(const std::filesystem::path& cacheDirectory, const ShaderProgramDescription& description);
 

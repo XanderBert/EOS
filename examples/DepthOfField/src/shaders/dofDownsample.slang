@@ -1,51 +1,44 @@
-import bindings;
 import dofCommon;
 
 public struct DofDownsamplePC
 {
-    public uint  sceneColorID;
-    public uint  worldPosID;
-    public uint  samplerID;
-    public uint  outputImageID;
+    public DescriptorHandle<Texture2D>           sceneColor;
+    public DescriptorHandle<Texture2D>           worldPos;
+    public DescriptorHandle<SamplerState>        samplerState;
+    public DescriptorHandle<RWTexture2D<float4>> outputImage;
     public float focusDistance;
     public float focusRange;
-    public float pad0;
-    public float pad1;
 };
 
 [[vk::push_constant]] DofDownsamplePC pc;
-
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    uint2 pixelCoord = dispatchThreadID.xy;
-    int2 imageSize = ImageBindless2DSize(pc.outputImageID);
+    const RWTexture2D<float4> outputImage = pc.outputImage;
+    uint2 imageSize;
+    outputImage.GetDimensions(imageSize.x, imageSize.y);
 
-    if (pixelCoord.x >= imageSize.x || pixelCoord.y >= imageSize.y)
-    {
-        return;
-    }
+    const uint2 pixelCoord = dispatchThreadID.xy;
+    if (any(pixelCoord >= imageSize)) return;
 
-    float2 uv = (float2(pixelCoord) + float2(0.5, 0.5)) / float2(imageSize);
+    const float2 uv = (float2(pixelCoord) + 0.5) / float2(imageSize);
     // Source is full-res, output is half-res.
-    float2 texel = 1.0 / float2(imageSize * 2);
+    const float2 texel = 1.0 / float2(imageSize * 2);
 
-    float3 color = float3(0.0, 0.0, 0.0);
+    float3 color = float3(0.0);
     float coc = 0.0;
 
     // 2x2 box downsample; keep max CoC to preserve blur intent.
-    float2 offsets[4] = { float2(-0.25, -0.25), float2(0.25, -0.25), float2(-0.25, 0.25), float2(0.25, 0.25) };
+    const float2 offsets[4] = { float2(-0.25, -0.25), float2(0.25, -0.25), float2(-0.25, 0.25), float2(0.25, 0.25) };
     for (int i = 0; i < 4; ++i)
     {
-        float2 sampleUV = uv + offsets[i] * texel;
-        float3 worldPos = TextureBindless2D(pc.worldPosID, pc.samplerID, sampleUV).xyz;
-        float dist = length(worldPos);
-        coc = max(coc, ComputeCoC(dist, pc.focusDistance, pc.focusRange));
-        color += TextureBindless2D(pc.sceneColorID, pc.samplerID, sampleUV).rgb;
+        const float2 sampleUV = uv + offsets[i] * texel;
+        const float3 worldPos = pc.worldPos.SampleLevel(pc.samplerState, sampleUV, 0.0).xyz;
+        coc = max(coc, ComputeCoC(length(worldPos), pc.focusDistance, pc.focusRange));
+        color += pc.sceneColor.SampleLevel(pc.samplerState, sampleUV, 0.0).rgb;
     }
 
-    color *= 0.25;
-    ImageBindless2DStore(pc.outputImageID, int2(pixelCoord), float4(color, coc));
+    outputImage[pixelCoord] = float4(color * 0.25, coc);
 }

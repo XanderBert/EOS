@@ -1,12 +1,9 @@
-import bindings;
-import fullscreen;
+import eos.fullscreen;
 
 public struct PresentPC
 {
-    public uint sceneColorID;
-    public uint samplerID;
-    public uint pad0;
-    public uint pad1;
+    public DescriptorHandle<Texture2D>    sceneColor;
+    public DescriptorHandle<SamplerState> samplerState;
 };
 
 [[vk::push_constant]] PresentPC pc;
@@ -26,9 +23,9 @@ VSOutput vertexMain(uint id : SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(VSOutput input)
+float4 fragmentMain(VSOutput input) : SV_Target
 {
     float2 uv = input.UV;
     uv.y = 1.0 - uv.y;
-    return TextureBindless2D(pc.sceneColorID, pc.samplerID, uv);
+    return pc.sceneColor.Sample(pc.samplerState, uv);
 }

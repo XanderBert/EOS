@@ -1,13 +1,12 @@
-import bindings;
 import dofCommon;
 
 public struct DofCompositePC
 {
-    public uint  sceneColorID;
-    public uint  blurredID;
-    public uint  worldPosID;
-    public uint  samplerID;
-    public uint  outputImageID;
+    public DescriptorHandle<Texture2D>           sceneColor;
+    public DescriptorHandle<Texture2D>           blurred;
+    public DescriptorHandle<Texture2D>           worldPos;
+    public DescriptorHandle<SamplerState>        samplerState;
+    public DescriptorHandle<RWTexture2D<float4>> outputImage;
     public float focusDistance;
     public float focusRange;
     public float maxBlurRadius;
@@ -15,30 +14,25 @@ public struct DofCompositePC
 
 [[vk::push_constant]] DofCompositePC pc;
 
-
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    uint2 pixelCoord = dispatchThreadID.xy;
-    int2 imageSize = ImageBindless2DSize(pc.outputImageID);
+    const RWTexture2D<float4> outputImage = pc.outputImage;
+    uint2 imageSize;
+    outputImage.GetDimensions(imageSize.x, imageSize.y);
 
-    if (pixelCoord.x >= imageSize.x || pixelCoord.y >= imageSize.y)
-    {
-        return;
-    }
+    const uint2 pixelCoord = dispatchThreadID.xy;
+    if (any(pixelCoord >= imageSize)) return;
 
-    float2 uv = (float2(pixelCoord) + float2(0.5, 0.5)) / float2(imageSize);
+    const float2 uv = (float2(pixelCoord) + 0.5) / float2(imageSize);
 
-    float3 worldPos = TextureBindless2D(pc.worldPosID, pc.samplerID, uv).xyz;
-    float dist = length(worldPos);
-    float coc = ComputeCoC(dist, pc.focusDistance, pc.focusRange);
+    const float3 worldPos = pc.worldPos.SampleLevel(pc.samplerState, uv, 0.0).xyz;
+    const float coc = ComputeCoC(length(worldPos), pc.focusDistance, pc.focusRange);
 
-    float3 sharp = TextureBindless2D(pc.sceneColorID, pc.samplerID, uv).rgb;
-    float3 blurred = TextureBindless2D(pc.blurredID, pc.samplerID, uv).rgb;
+    const float3 sharp = pc.sceneColor.SampleLevel(pc.samplerState, uv, 0.0).rgb;
+    const float3 blurred = pc.blurred.SampleLevel(pc.samplerState, uv, 0.0).rgb;
 
-    float blend = smoothstep(0.2, 1.0, coc);
-    float3 finalColor = lerp(sharp, blurred, blend);
-
-    ImageBindless2DStore(pc.outputImageID, int2(pixelCoord), float4(finalColor, 1.0));
+    const float blend = smoothstep(0.2, 1.0, coc);
+    outputImage[pixelCoord] = float4(lerp(sharp, blurred, blend), 1.0);
 }

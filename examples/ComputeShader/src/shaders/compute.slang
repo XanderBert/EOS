@@ -1,5 +1,3 @@
-import bindings;
-
 struct ComputePayload
 {
     uint lhs;
@@ -10,7 +8,7 @@ struct ComputePayload
 
 struct PushConstants
 {
-    uint64_t payloadPtr;
+    ComputePayload* payload;
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -24,7 +22,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     }
 
-    ComputePayload payload = LoadBuffer<ComputePayload>(pc.payloadPtr);
+    ComputePayload payload = *pc.payload;
     payload.result = payload.lhs * payload.rhs;
-    *((Ptr<ComputePayload>)pc.payloadPtr) = payload;
+    *pc.payload = payload;
 }

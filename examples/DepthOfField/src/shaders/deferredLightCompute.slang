@@ -1,77 +1,74 @@
-import bindings;
-import shading;
+import eos.math;
+import eos.bsdf;
+import eos.lighting;
 
 public struct DeferredLightingPC
 {
-    public uint   gbufferAlbedoID;
-    public uint   gbufferNormalID;
-    public uint   gbufferWorldPosID;
-    public uint   samplerID;
-    public uint   outputImageID;
+    public DescriptorHandle<Texture2D>           gbufferAlbedo;
+    public DescriptorHandle<Texture2D>           gbufferNormal;
+    public DescriptorHandle<Texture2D>           gbufferWorldPos;
+    public DescriptorHandle<SamplerState>        samplerState;
+    public DescriptorHandle<RWTexture2D<float4>> outputImage;
     public uint   debugView;
-    public uint   pad0;
-    public uint   pad1;
     public float4 cameraPos;
-    public float4 lightDirIntensity;
-    public float4 lightColorAmbient;
+    public float4 lightDirIntensity;    // xyz: direction the light travels, w: intensity
+    public float4 lightColorAmbient;    // rgb: light color, w: ambient radiance
 };
 
 [[vk::push_constant]] DeferredLightingPC pc;
-
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    uint2 pixelCoord = dispatchThreadID.xy;
-    int2 imageSize = ImageBindless2DSize(pc.outputImageID);
-    float2 uv = (float2(pixelCoord) + float2(0.5, 0.5)) / float2(imageSize);
+    const RWTexture2D<float4> outputImage = pc.outputImage;
+    uint2 imageSize;
+    outputImage.GetDimensions(imageSize.x, imageSize.y);
 
-    float4 albedoMetallic = TextureBindless2D(pc.gbufferAlbedoID, pc.samplerID, uv);
-    float4 normalRoughness = TextureBindless2D(pc.gbufferNormalID, pc.samplerID, uv);
-    float3 worldPos = TextureBindless2D(pc.gbufferWorldPosID, pc.samplerID, uv).xyz;
+    const uint2 pixelCoord = dispatchThreadID.xy;
+    if (any(pixelCoord >= imageSize)) return;
 
-    float3 albedo = albedoMetallic.rgb;
-    float metallic = albedoMetallic.a;
-    float3 normal = DecodeNormal(normalRoughness.rgb);
-    float roughness = saturate(normalRoughness.a);
+    const float2 uv = (float2(pixelCoord) + 0.5) / float2(imageSize);
+
+    const float4 albedoMetallic = pc.gbufferAlbedo.SampleLevel(pc.samplerState, uv, 0.0);
+    const float4 normalRoughness = pc.gbufferNormal.SampleLevel(pc.samplerState, uv, 0.0);
+    const float3 worldPos = pc.gbufferWorldPos.SampleLevel(pc.samplerState, uv, 0.0).xyz;
+
+    const float3 albedo = albedoMetallic.rgb;
+    const float3 normal = UnpackNormalUnorm(normalRoughness.rgb);
+    const float roughness = saturate(normalRoughness.a);
 
     float4 result;
-
-    if (pc.debugView == 1) 
+    if (pc.debugView == 1)
     {
         result = float4(albedo, 1.0);
     }
-    else if (pc.debugView == 2) 
+    else if (pc.debugView == 2)
     {
         result = float4(normal * 0.5 + 0.5, 1.0);
     }
-    else if (pc.debugView == 3) 
+    else if (pc.debugView == 3)
     {
         result = roughness.xxxx;
     }
-    else if (pc.debugView == 4) 
+    else if (pc.debugView == 4)
     {
         result = float4(abs(worldPos) * 0.05, 1.0);
     }
     else
     {
-        Material material;
-        material.albedo = albedo;
-        material.metallic = metallic;
-        material.roughness = roughness;
+        const StandardBSDF bsdf = StandardBSDF(albedo, albedoMetallic.a, roughness);
+        const ShadingFrame frame = ShadingFrame.FromNormal(normal);
+        const float3 viewDirection = normalize(pc.cameraPos.xyz - worldPos);
 
-        PBRSurface surface;
-        surface.material = material;
-        surface.normal = normal;
-        surface.viewDir = normalize(pc.cameraPos.xyz - worldPos);
-        surface.lightDir = normalize(-pc.lightDirIntensity.xyz);
+        DirectionalLight sun;
+        sun.direction = normalize(pc.lightDirIntensity.xyz);
+        sun.radiance = pc.lightColorAmbient.rgb * pc.lightDirIntensity.w;
 
-        float3 color = EvaluatePBR(surface);
-        color *= pc.lightColorAmbient.rgb * pc.lightDirIntensity.w;
-
+        const float3 color = EvaluateDirectionalLight(bsdf, frame, viewDirection, sun)
+                           + EvaluateConstantAmbient(bsdf, frame, viewDirection, pc.lightColorAmbient.www, 1.0);
         result = float4(color, 1.0);
     }
 
-    ImageBindless2DStore(pc.outputImageID, int2(pixelCoord), result);
+    outputImage[pixelCoord] = result;
 }

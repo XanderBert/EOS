@@ -1,4 +1,4 @@
-module debugDraw;
+module "eos/debugDraw";
 
 static const float kDebugMinSmoothWidth = 1e-5f;
 static const float kDebugMinSegmentLengthSq = 1e-8f;

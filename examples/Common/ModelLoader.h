@@ -16,6 +16,8 @@ struct TextureHandles final
     EOS::Holder<EOS::TextureHandle> albedo;
     EOS::Holder<EOS::TextureHandle> normal;
     EOS::Holder<EOS::TextureHandle> metallicRoughness;
+    EOS::Holder<EOS::TextureHandle> emissive;
+    EOS::Holder<EOS::TextureHandle> occlusion;
 };
 
 struct MeshEntry final
@@ -25,9 +27,7 @@ struct MeshEntry final
     uint32_t indexCount;
     uint32_t drawDataIndex;         // index into the DrawData buffer
 
-    uint32_t albedoTextureIdx               = 0;
-    uint32_t normalTextureIdx               = 0;
-    uint32_t metallicRoughnessTextureIdx    = 0;
+    EOS::StandardMaterialData material{};   // its Sampler is left empty; BuildDrawDataFromScene fills it in
 
     glm::mat4 transform{};
 };
@@ -61,6 +61,8 @@ struct Scene final
             if (texture.albedo.Valid()) texture.albedo.Reset();
             if (texture.metallicRoughness.Valid()) texture.metallicRoughness.Reset();
             if (texture.normal.Valid()) texture.normal.Reset();
+            if (texture.emissive.Valid()) texture.emissive.Reset();
+            if (texture.occlusion.Valid()) texture.occlusion.Reset();
         }
     }
 
@@ -165,9 +167,7 @@ inline Scene LoadModel(const std::filesystem::path& modelPath, EOS::IContext* co
         uint32_t vertexOffset;
         uint32_t indexOffset;
         uint32_t indexCount;
-        uint32_t albedoIdx              = 0;
-        uint32_t normalIdx              = 0;
-        uint32_t metallicRoughnessIdx   = 0;
+        EOS::StandardMaterialData material{};
     };
 
     Scene importedScene{};
@@ -311,9 +311,40 @@ inline Scene LoadModel(const std::filesystem::path& modelPath, EOS::IContext* co
                     EOS::Compression::BC7,
                     context);
 
-                geometry.albedoIdx = textureHandles.albedo.Index();
-                geometry.normalIdx = textureHandles.normal.Index();
-                geometry.metallicRoughnessIdx = textureHandles.metallicRoughness.Index();
+                textureHandles.emissive = LoadGltfTexture(
+                    asset,
+                    modelPath.parent_path(),
+                    material.emissiveTexture.has_value()
+                        ? std::optional<std::size_t>(material.emissiveTexture->textureIndex)
+                        : std::nullopt,
+                    EOS::Compression::BC7,
+                    context);
+
+                textureHandles.occlusion = LoadGltfTexture(
+                    asset,
+                    modelPath.parent_path(),
+                    material.occlusionTexture.has_value()
+                        ? std::optional<std::size_t>(material.occlusionTexture->textureIndex)
+                        : std::nullopt,
+                    EOS::Compression::BC7,
+                    context);
+
+                EOS::StandardMaterialData& materialData = geometry.material;
+                for (int i = 0; i < 4; ++i) materialData.BaseColorFactor[i] = material.pbrData.baseColorFactor[i];
+                for (int i = 0; i < 3; ++i) materialData.EmissiveFactor[i] = material.emissiveFactor[i] * material.emissiveStrength;
+                materialData.MetallicFactor = material.pbrData.metallicFactor;
+                materialData.RoughnessFactor = material.pbrData.roughnessFactor;
+                materialData.NormalScale = material.normalTexture.has_value() ? material.normalTexture->scale : 1.0f;
+                materialData.OcclusionStrength = material.occlusionTexture.has_value() ? material.occlusionTexture->strength : 1.0f;
+                materialData.AlphaCutoff = material.alphaCutoff;
+                materialData.Alpha = material.alphaMode == fastgltf::AlphaMode::Mask  ? EOS::AlphaMode::Mask
+                                   : material.alphaMode == fastgltf::AlphaMode::Blend ? EOS::AlphaMode::Blend
+                                                                                      : EOS::AlphaMode::Opaque;
+                materialData.BaseColorTexture = textureHandles.albedo;
+                materialData.MetallicRoughnessTexture = textureHandles.metallicRoughness;
+                materialData.NormalTexture = textureHandles.normal;
+                materialData.EmissiveTexture = textureHandles.emissive;
+                materialData.OcclusionTexture = textureHandles.occlusion;
             }
 
             const uint32_t geometryIndex = static_cast<uint32_t>(geomCache.size());
@@ -345,9 +376,7 @@ inline Scene LoadModel(const std::filesystem::path& modelPath, EOS::IContext* co
                 .indexOffset = geometry.indexOffset,
                 .indexCount = geometry.indexCount,
                 .drawDataIndex = 0,
-                .albedoTextureIdx = geometry.albedoIdx,
-                .normalTextureIdx = geometry.normalIdx,
-                .metallicRoughnessTextureIdx = geometry.metallicRoughnessIdx,
+                .material = geometry.material,
                 .transform = worldTransform,
             });
         }

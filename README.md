@@ -65,18 +65,19 @@ Shaders are written in [Slang](https://shader-slang.org). Every `.slang` file wi
 program; the other files are modules it imports.
 
 - **Compilation**: before an example builds, `EOSShaderCompilerTool` compiles its programs and the engine's into
-  `bin/shaders/<Example>/<Debug|Release>/<module>.eosprog`. Each file holds the SPIR-V of every entry point plus the
+  `bin/shaders/<Example>/<Debug|Release>/<module>.EOS`. Each file holds the SPIR-V of every entry point plus the
   reflection (push-constant size, thread-group size, specialization constants, vertex inputs, color outputs, bindings).
   A program is only recompiled when one of its source files (imports included), the compiler options or the Slang
-  version changed. Pass `--force` to recompile everything, or `--reflect <module>` to print a program's reflection.
+  version changed. `--force` recompiles everything, `--reflect <module>` prints a program's reflection and
+  `--dump-spirv <dir>` writes its SPIR-V.
 - **Runtime**: `IContext::CreateShaderProgram({.Module = "shade"})` loads a program from the cache and falls back to
   compiling it when the cache is stale (only with `EOS_SHADER_TOOLS=ON`). Pipelines pick its entry points by name:
   `.VertexShader = {shade, "vertexMain"}`. `IContext::GetShaderProgram(handle)` returns the reflection, and
   `cmdDispatchThreads` uses the reflected `[numthreads]` to size a dispatch.
-- **Pipeline layout**: every pipeline shares one layout: the bindless descriptor set (`src/shaders/bindings.slang`) plus
-  one push-constant range visible to all stages (`IContext::GetMaxPushConstantSize()`, 256 bytes on desktop GPUs).
-  Programs are checked against it when they are created: larger push constants or bindings outside the bindless set
-  are rejected with an error. Pipeline creation also checks that every vertex shader input has a matching attribute.
+- **Pipeline layout**: every pipeline shares one layout: the bindless descriptor set plus one push-constant range
+  visible to all stages (`IContext::GetMaxPushConstantSize()`, 256 bytes on desktop GPUs). Programs are checked
+  against it when they are created: larger push constants or bindings outside the bindless set are rejected with an
+  error. Pipeline creation also checks that every vertex shader input has a matching attribute.
 - **Hot reload**: `IContext::ReloadShaders()` recompiles every program in use whose source files, imports included,
   changed on disk, and rebuilds the pipelines that use it. A program that fails to compile or validate keeps its
   previous version.
@@ -84,6 +85,37 @@ program; the other files are modules it imports.
   buffers use scalar layout. Debug builds compile shaders with debug info and without optimization, so they can be
   stepped through in RenderDoc or Nsight.
 
+## Shader library
+The engine's modules live in `src/shaders/eos/` and are imported as `eos.<name>`:
+
+| Module | Contents |
+|---|---|
+| `eos.bindless` | `DescriptorHandle<T>` routing onto the bindless descriptor set; `IsValid(handle)` |
+| `eos.core`, `eos.math`, `eos.color` | constants, math helpers, sRGB conversion and luminance |
+| `eos.sampling` | PCG random numbers, hemisphere and GGX visible-normal sampling, MIS weights |
+| `eos.brdf` | GGX distribution, height-correlated Smith masking-shadowing, Fresnel |
+| `eos.bsdf` | `IBSDF` (`Eval`, `Sample`, `EvalPdf`, `Albedo`), `ShadingFrame` and the glTF 2.0 `StandardBSDF` |
+| `eos.material` | `IMaterial`, `SurfaceData`, texture samplers for implicit and explicit mip levels, and the glTF 2.0 `StandardMaterial` |
+| `eos.lighting` | directional and point lights, constant ambient light for any `IBSDF` |
+| `eos.fullscreen`, `eos.debugDraw`, `eos.imgui` | fullscreen triangle, debug shapes, the ImGui program |
+
+**Bindless resources**: textures, samplers, storage images and acceleration structures are referenced with
+`DescriptorHandle<T>` in shaders and `EOS::DescriptorHandle` in C++, an 8-byte value built from a `TextureHandle`,
+`SamplerHandle` or `AccelStructHandle`. Put it in push constants or buffers and use it like the resource itself:
+`albedo.Sample(linearSampler, uv)`. Every texture type shares one index space, so a texture must be read as the type it
+was created as (`Texture2D`, `Texture2DArray`, `TextureCube`, ...). Buffers are passed as device addresses and read
+through pointers (`MyStruct*`). `eos.bindless` is linked into every program, so this works without importing it.
+
+**Materials**: `StandardMaterial` evaluates a glTF 2.0 metallic-roughness material (`StandardMaterialData`, mirrored by
+`EOS::StandardMaterialData` in C++) into a `StandardBSDF`, shading frame, emission, opacity and occlusion. Textures are
+optional: an empty handle means the factor alone is used. The rasterizer evaluates the BSDF per light (`eos.lighting`);
+a path tracer uses `Sample` and `EvalPdf` from the same BSDF.
+
+Alpha-tested (glTF `MASK`) materials are cut with `PassesAlphaTest(EvaluateOpacity(...))`, which also has to run in
+depth-only passes, otherwise the cut-away parts still write depth and cast shadows. A fragment shader that can `discard`
+turns off early depth testing for the whole draw, so depth-only passes draw the opaque meshes with a fragment shader
+that never discards and only the alpha-tested ones with one that does. `PartitionMeshesByAlphaTest` in the example
+helpers orders the meshes so that is two indirect draws (see the shadow-mapping examples).
 
 # Building
 This project is built using CMake and Ninja.

@@ -29,6 +29,11 @@ namespace EOS
         ShaderOptimizationLevel Optimization = ShaderOptimizationLevel::High;
         std::vector<ShaderMacro> GlobalDefines{};
 
+        // Modules linked into every program, whether it imports them or not. eos.bindless is one: it provides the
+        // getDescriptorFromHandle that maps DescriptorHandle<T> onto EOS's descriptor set, and a program that used a
+        // DescriptorHandle without it would silently get Slang's default bindings instead.
+        std::vector<std::string> LinkedModules{};
+
         // Debug builds of EOS: full debug info and no optimization, so shaders can be stepped through in RenderDoc / Nsight.
         // Other builds: optimized, without debug info.
         [[nodiscard]] static ShaderCompilerOptions Default();

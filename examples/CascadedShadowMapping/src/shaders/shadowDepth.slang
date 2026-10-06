@@ -1,35 +1,39 @@
-import bindings;
+import eos.material;
 import shadowCommon;
 
 struct VSInput
 {
     uint vertexID   : SV_VertexID;
     float3 Pos      : POSITION;
+    float2 UV       : TEXCOORD0;
 };
 
 struct VSOutput
 {
-    float4 WorldPos : TEXCOORD0;
+    float4 WorldPos  : TEXCOORD0;
+    float2 UV        : TEXCOORD1;
+    uint   DrawIndex : TEXCOORD2;
 };
 
 struct GSOutput
 {
-    float4 Pos   : SV_Position;
-    uint Layer   : SV_RenderTargetArrayIndex;
+    float4 Pos       : SV_Position;
+    uint   Layer     : SV_RenderTargetArrayIndex;
+    float2 UV        : TEXCOORD1;
+    uint   DrawIndex : TEXCOORD2;
 };
 
 [[vk::push_constant]] PushConstants pc;
+
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
+    const float4 localTransformed = mul(float4(input.Pos, 1.0), pc.draws[drawIndex].transform);
+
     VSOutput output;
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, drawIndex);
-
-    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
-    float4 worldPos = mul(localTransformed, frameData.Model);
-    output.WorldPos = worldPos;
-
+    output.WorldPos = mul(localTransformed, pc.perFrame->Model);
+    output.UV = input.UV;
+    output.DrawIndex = drawIndex;
     return output;
 }
 
@@ -37,7 +41,7 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 [shader("geometry")]
 void geometryMain(triangle VSOutput input[3], inout TriangleStream<GSOutput> triangleStream)
 {
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
+    const PerFrameData frameData = *pc.perFrame;
 
     [unroll]
     for (uint cascadeID = 0; cascadeID < 4; ++cascadeID)
@@ -48,6 +52,8 @@ void geometryMain(triangle VSOutput input[3], inout TriangleStream<GSOutput> tri
             GSOutput output;
             output.Pos = mul(input[i].WorldPos, frameData.cascadeViewProj[cascadeID]);
             output.Layer = cascadeID;
+            output.UV = input[i].UV;
+            output.DrawIndex = input[i].DrawIndex;
             triangleStream.Append(output);
         }
 
@@ -55,8 +61,16 @@ void geometryMain(triangle VSOutput input[3], inout TriangleStream<GSOutput> tri
     }
 }
 
+// Opaque draws: no discard, so the GPU keeps its early depth test and fast depth-only path.
 [shader("fragment")]
-float4 fragmentMain()
+void fragmentOpaque()
 {
-	return float4(1.0, 0.1, 0.1, 1.0);
+}
+
+// Alpha-tested draws only cast shadows where they are not cut away.
+[shader("fragment")]
+void fragmentMasked(GSOutput input)
+{
+    const StandardMaterial material = StandardMaterial(pc.draws[input.DrawIndex].material);
+    if (!material.PassesAlphaTest(material.EvaluateOpacity(SurfaceData.FromUV(input.UV), ImplicitLodSampler()))) discard;
 }

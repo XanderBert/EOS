@@ -7,14 +7,15 @@ struct PerFrameData final
     glm::vec4 cameraPos;
 };
 
+// DrawData in indirectModel.slang
 struct DrawData final
 {
-    uint32_t albedoID{};
-    uint32_t normalID{};
-    uint32_t metallicRoughnessID{};
-    uint32_t pad{};
     glm::mat4 transform{};
+    EOS::StandardMaterialData material{};
 };
+
+// Radiance of the uniform environment that stands in for image-based lighting.
+constexpr float kAmbientRadiance = 0.3f;
 
 struct Vertex final
 {
@@ -30,31 +31,29 @@ struct FramePointers final
     uint64_t drawDataPtr;
 };
 
+// DeferredLightingPC in deferredLight.slang
 struct DeferredLightingPC final
 {
-    uint32_t gbufferAlbedoID;
-    uint32_t gbufferNormalID;
-    uint32_t gbufferWorldPosID;
-    uint32_t samplerID;
+    EOS::DescriptorHandle gbufferAlbedo;
+    EOS::DescriptorHandle gbufferNormal;
+    EOS::DescriptorHandle gbufferWorldPos;
+    EOS::DescriptorHandle samplerState;
     uint32_t debugView;
-    uint32_t pad0;
-    uint32_t pad1;
-    uint32_t pad2;
     glm::vec4 cameraPos;
     glm::vec4 lightDirIntensity;
     glm::vec4 lightColorAmbient;
 };
 
+// EdgeDetectPC in edgeDetect.slang
 struct EdgeDetectPC final
 {
-    uint32_t sceneColorID;
-    uint32_t sceneNormalID;
-    uint32_t samplerID;
+    EOS::DescriptorHandle sceneColor;
+    EOS::DescriptorHandle sceneNormal;
+    EOS::DescriptorHandle samplerState;
     float    threshold;
     uint32_t showEdgesOnly;
     float    texelW;
     float    texelH;
-    uint32_t pad0;
 };
 
 struct Resources final
@@ -175,7 +174,7 @@ int main()
         .DebugName = "Buffer: index"
     });
 
-    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene, App.DefaultSampler);
 
     Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
@@ -278,21 +277,21 @@ int main()
 
         const DeferredLightingPC lightingPC
         {
-            .gbufferAlbedoID   = Handles.GbufferAlbedoTexture.Index(),
-            .gbufferNormalID   = Handles.GbufferNormalTexture.Index(),
-            .gbufferWorldPosID = Handles.GbufferWorldPosTexture.Index(),
-            .samplerID         = App.DefaultSampler.Index(),
+            .gbufferAlbedo     = Handles.GbufferAlbedoTexture,
+            .gbufferNormal     = Handles.GbufferNormalTexture,
+            .gbufferWorldPos   = Handles.GbufferWorldPosTexture,
+            .samplerState      = App.DefaultSampler,
             .debugView         = static_cast<uint32_t>(debugView),
             .cameraPos         = glm::vec4(App.MainCamera.GetPosition(), 1.0f),
             .lightDirIntensity = glm::vec4(lightDirection, lightIntensity),
-            .lightColorAmbient = glm::vec4(lightColor, 0.0f),
+            .lightColorAmbient = glm::vec4(lightColor, kAmbientRadiance),
         };
 
         const EdgeDetectPC edgePC
         {
-            .sceneColorID   = Handles.SceneLitTexture.Index(),
-            .sceneNormalID  = Handles.GbufferNormalTexture.Index(),
-            .samplerID      = App.DefaultSampler.Index(),
+            .sceneColor     = Handles.SceneLitTexture,
+            .sceneNormal    = Handles.GbufferNormalTexture,
+            .samplerState   = App.DefaultSampler,
             .threshold      = edgeThreshold,
             .showEdgesOnly  = showEdgesOnly ? 1u : 0u,
             .texelW         = rcpW,

@@ -1,17 +1,12 @@
 #include "../../Common/App.h"
 
+// PerFrameData in modelAlbedo.slang
 struct PerFrameData final
 {
     glm::mat4 model;
     glm::mat4 mvp;
-
     glm::vec3 cameraPos;
-    uint32_t  albedoID;
-
-    uint32_t normalID;
-    uint32_t metallicRoughnessID;
-    uint32_t pad01;
-    uint32_t pad02;
+    EOS::StandardMaterialData material;
 };
 
 struct Vertex final
@@ -131,15 +126,14 @@ int main()
         m = rotate(m, static_cast<float>(glfwGetTime()), glm::vec3(0.0f, 0.0f, 1.0f));
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
 
-        const PerFrameData perFrameData
+        PerFrameData perFrameData
         {
             .model = m,
             .mvp = mvp,
             .cameraPos = App.MainCamera.GetPosition(),
-            .albedoID = scene.meshes[0].albedoTextureIdx,
-            .normalID = scene.meshes[0].normalTextureIdx,
-            .metallicRoughnessID = scene.meshes[0].metallicRoughnessTextureIdx,
+            .material = scene.meshes[0].material,
         };
+        perFrameData.material.Sampler = App.DefaultSampler;
 
 
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();

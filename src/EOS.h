@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -1046,6 +1047,75 @@ namespace EOS
         HandleType Handle = {};
     };
     static_assert(sizeof(Holder<Handle<class Foo>>) == sizeof(uint64_t) + PTR_SIZE);
+
+    /**
+     * @brief A bindless reference to a texture, sampler or acceleration structure: the C++ side of Slang's
+     *        DescriptorHandle<T> (see src/shaders/eos/bindless.slang). Put it in push constants or GPU buffers; shaders
+     *        use it like the resource itself, e.g. albedo.Sample(linearSampler, uv).
+     *        A default-constructed handle refers to nothing, which shaders can test with IsValid(handle).
+     */
+    struct DescriptorHandle final
+    {
+        static constexpr uint32_t InvalidIndex = 0xFFFFFFFF;
+
+        uint32_t Index = InvalidIndex;  // index into the bindless array of the resource's kind
+        uint32_t Reserved = 0;          // Slang's DescriptorHandle is a uint2; EOS only uses the first component
+
+        constexpr DescriptorHandle() = default;
+        constexpr explicit DescriptorHandle(uint32_t index) : Index(index) {}
+
+        DescriptorHandle(const TextureHandle& texture) : Index(ToIndex(texture)) {}
+        DescriptorHandle(const SamplerHandle& sampler) : Index(ToIndex(sampler)) {}
+        DescriptorHandle(const AccelStructHandle& accelerationStructure) : Index(ToIndex(accelerationStructure)) {}
+        DescriptorHandle(const TextureHolder& texture) : DescriptorHandle(static_cast<TextureHandle>(texture)) {}
+        DescriptorHandle(const SamplerHolder& sampler) : DescriptorHandle(static_cast<SamplerHandle>(sampler)) {}
+        DescriptorHandle(const AccelStructHolder& accelerationStructure) : DescriptorHandle(static_cast<AccelStructHandle>(accelerationStructure)) {}
+
+        [[nodiscard]] bool Valid() const { return Index != InvalidIndex; }
+
+    private:
+        template<typename HandleType>
+        [[nodiscard]] static uint32_t ToIndex(const HandleType& handle) { return handle.Valid() ? handle.Index() : InvalidIndex; }
+    };
+    static_assert(sizeof(DescriptorHandle) == 8, "Must match the size of Slang's DescriptorHandle<T> (a uint2)");
+
+    /**
+     * @brief glTF alphaMode, as eos.material reads it.
+     */
+    enum class AlphaMode : uint32_t
+    {
+        Opaque = 0,
+        Mask = 1,
+        Blend = 2,
+    };
+
+    /**
+     * @brief Parameters of a glTF 2.0 core metallic-roughness material: the C++ side of StandardMaterialData in
+     *        src/shaders/eos/material.slang (scalar layout). Defaults are glTF's. Textures are optional; an empty
+     *        DescriptorHandle means the factor alone is used. Base color and emissive textures must use an sRGB format.
+     */
+    struct StandardMaterialData final
+    {
+        float BaseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};     // linear RGB, A = alpha
+        float EmissiveFactor[3] = {0.0f, 0.0f, 0.0f};            // linear RGB
+        float MetallicFactor = 1.0f;
+        float RoughnessFactor = 1.0f;
+        float NormalScale = 1.0f;
+        float OcclusionStrength = 1.0f;
+        float AlphaCutoff = 0.5f;                                // only used with AlphaMode::Mask
+        AlphaMode Alpha = AlphaMode::Opaque;
+
+        DescriptorHandle BaseColorTexture{};                     // RGB color, A alpha
+        DescriptorHandle MetallicRoughnessTexture{};             // G roughness, B metallic
+        DescriptorHandle NormalTexture{};                        // tangent-space normal in RG or RGB
+        DescriptorHandle EmissiveTexture{};
+        DescriptorHandle OcclusionTexture{};                     // R occlusion
+        DescriptorHandle Sampler{};
+    };
+    static_assert(sizeof(StandardMaterialData) == 100, "Must match StandardMaterialData in eos/material.slang");
+    static_assert(offsetof(StandardMaterialData, Alpha) == 48, "Must match StandardMaterialData in eos/material.slang");
+    static_assert(offsetof(StandardMaterialData, BaseColorTexture) == 52, "Must match StandardMaterialData in eos/material.slang");
+    static_assert(offsetof(StandardMaterialData, Sampler) == 92, "Must match StandardMaterialData in eos/material.slang");
 
 
     /**

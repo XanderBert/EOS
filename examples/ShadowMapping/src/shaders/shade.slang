@@ -1,14 +1,7 @@
-import bindings;
-import shading;
+import eos.math;
+import eos.material;
+import eos.lighting;
 import shadowCommon;
-import math;
-
-struct MaterialHandles
-{
-    uint albedo;
-    uint normal;
-    uint metallicRoughness;
-}
 
 struct VSInput
 {
@@ -21,82 +14,47 @@ struct VSInput
 
 struct VSOutput
 {
-    float4 Pos      : SV_Position;
-    float3 WorldPos : TEXCOORD1;
-    float3 Normal   : TEXCOORD2;
-    float3 Tangent  : TANGENT;
-    float2 UV       : TEXCOORD0;
-    uint   DrawIndex : TEXCOORD3;
-    float4 ShadowCoord;
+    float4 Pos         : SV_Position;
+    float3 WorldPos    : TEXCOORD1;
+    float3 Normal      : TEXCOORD2;
+    float4 Tangent     : TANGENT;
+    float2 UV          : TEXCOORD0;
+    uint   DrawIndex   : TEXCOORD3;
+    float4 ShadowCoord : TEXCOORD4;
 };
-
-struct DrawData
-{
-    uint albedo;
-    uint normal;
-    uint metallicRoughness;
-    uint pad;
-    float4x4 transform;
-};
-
 
 // Must match the shadow depth texture created in main.cpp.
 static const float kShadowMapSize = 4096.0;
 
+static const float3 kSunRadiance = float3(3.0);
+static const float3 kAmbientRadiance = float3(0.3);
+
 [[vk::push_constant]] PushConstants pc;
+
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, drawIndex);
+    const PerFrameData frameData = *pc.perFrame;
+    const float4x4 transform = pc.draws[drawIndex].transform;
 
-    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
-    float3x3 normalMatrix   = float3x3(mul(draw.transform, frameData.Model));
+    const float4 localTransformed = mul(float4(input.Pos, 1.0), transform);
+    const float3x3 normalMatrix   = float3x3(mul(transform, frameData.Model));
 
     VSOutput output;
     output.Pos          = mul(localTransformed, frameData.MVP);
     output.WorldPos     = mul(localTransformed, frameData.Model).xyz;
-    output.Normal       = normalize(mul(input.Normal, normalMatrix));
-    output.Tangent      = mul(input.Tangent.xyz, normalMatrix);
+    output.Normal       = mul(input.Normal, normalMatrix);
+    output.Tangent      = float4(mul(input.Tangent.xyz, normalMatrix), input.Tangent.w);
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
     output.ShadowCoord  = mul(localTransformed, frameData.depthMVP);
-
     return output;
 }
 
-[shader("fragment")]
-float4 fragmentMain(VSOutput input)
+// Fraction of the light that reaches the point: 1 lit, 0 fully shadowed. 3x3 PCF.
+float SampleShadowVisibility(PerFrameData frameData, float4 shadowCoord, float3 geometricNormal, float3 lightDirection)
 {
-    // Sample textures
-    PerFrameData frameData = LoadBuffer<PerFrameData>(pc.PerFramePointer);
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, input.DrawIndex);
-
-
-    MaterialTextureSet materialTextures;
-    materialTextures.albedo = draw.albedo;
-    materialTextures.normal = draw.normal;
-    materialTextures.metallicRoughness = draw.metallicRoughness;
-
-    PBRShadingInput pbrInput;
-    pbrInput.worldPos = input.WorldPos;
-    pbrInput.geometricNormal = input.Normal;
-    pbrInput.tangent = input.Tangent;
-    pbrInput.uv = input.UV;
-    pbrInput.cameraPos = frameData.cameraPos;
-
-    // The shadow map uses an orthographic projection, so the light is directional:
-    // shade with the same direction the shadow map is rendered from, not with lightPos - worldPos.
-    float3 L = SafeNormalize(-frameData.lightDir.xyz, float3(0.0, 1.0, 0.0));
-    pbrInput.lightPos = input.WorldPos + L * 100000.0;
-
-    Material material = SampleMaterial(materialTextures, 0, input.UV);
-    float3 shadingNormal = SampleNormal(materialTextures, 0, input.UV, input.Normal, input.WorldPos, input.Tangent);
-    PBRSurface pbrSurface = BuildPBRSurface(pbrInput, material, shadingNormal);
-    pbrSurface.lightDir = L;
-    float3 color = EvaluatePBR(pbrSurface);
-
-    float3 projCoords = input.ShadowCoord.xyz / input.ShadowCoord.w;
+    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
     // Only remap XY -> Vulkan depth already stays in [0, 1].
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
@@ -104,25 +62,44 @@ float4 fragmentMain(VSOutput input)
     // EOS uses a flipped Vulkan viewport, so shadow-map UV Y must be flipped.
     projCoords.y = 1.0 - projCoords.y;
 
-    // If the coord is outside the light frustum don't shadow it (the border colour would read as occluded).
-    if (projCoords.z > 1.0 || any(projCoords.xy < 0.0) || any(projCoords.xy > 1.0)) return float4(color, 1.0);
+    // Outside the light frustum nothing is shadowed (the border colour would read as occluded).
+    if (projCoords.z > 1.0 || any(projCoords.xy < 0.0) || any(projCoords.xy > 1.0)) return 1.0;
 
     // Slope bias from the geometric normal; normal-map detail shouldn't move the depth comparison.
-    float ndotl = saturate(dot(normalize(input.Normal), L));
-    float bias = max(0.0005 * (1.0 - ndotl), 0.00005);
-    float currentDepth = projCoords.z;
-    float shadow = 0.0;
-    float2 texelSize = 1.0 / float2(kShadowMapSize, kShadowMapSize);
+    const float ndotl = saturate(dot(geometricNormal, -lightDirection));
+    const float bias = max(0.0005 * (1.0 - ndotl), 0.00005);
+    const float2 texelSize = 1.0 / float2(kShadowMapSize, kShadowMapSize);
 
-    for(int x = -1; x <= 1; ++x)
+    float visibility = 0.0;
+    for (int x = -1; x <= 1; ++x)
     {
-        for(int y = -1; y <= 1; ++y)
+        for (int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = TextureBindless2D(frameData.shadowMapID, 1, projCoords.xy + float2(x, y) * texelSize).r;
-            shadow += currentDepth - bias > pcfDepth ? 0.3 : 1.0;
+            const float occluderDepth = frameData.shadowMap.Sample(frameData.shadowSampler, projCoords.xy + float2(x, y) * texelSize).r;
+            visibility += projCoords.z - bias > occluderDepth ? 0.0 : 1.0;
         }
     }
-    shadow /= 9.0;
 
-    return float4(color * shadow, 1.0);
+    return visibility / 9.0;
+}
+
+[shader("fragment")]
+float4 fragmentMain(VSOutput input) : SV_Target
+{
+    const PerFrameData frameData = *pc.perFrame;
+    const SurfaceData surface = SurfaceData.FromVertex(input.WorldPos, input.Normal, input.Tangent, input.UV, frameData.cameraPos);
+    const StandardMaterial material = StandardMaterial(pc.draws[input.DrawIndex].material);
+    let point = material.Evaluate(surface, ImplicitLodSampler());
+    if (!material.PassesAlphaTest(point.opacity)) discard;
+
+    // The shadow map uses an orthographic projection, so the light is directional.
+    DirectionalLight sun;
+    sun.direction = SafeNormalize(frameData.lightDir.xyz, float3(0.0, -1.0, 0.0));
+    sun.radiance = kSunRadiance;
+
+    const float visibility = SampleShadowVisibility(frameData, input.ShadowCoord, surface.geometricNormal, sun.direction);
+    const float3 color = EvaluateDirectionalLight(point.bsdf, point.frame, surface.viewDirection, sun) * visibility
+                       + EvaluateConstantAmbient(point.bsdf, point.frame, surface.viewDirection, kAmbientRadiance, point.occlusion)
+                       + point.emission;
+    return float4(color, 1.0);
 }

@@ -1,4 +1,4 @@
-import bindings;
+import eos.bindless;
 
 struct DepthReductionData
 {
@@ -10,11 +10,11 @@ struct DepthReductionData
 
 struct PushConstants
 {
-    uint64_t depthRangePtr;
-    uint      depthTextureID;
-    uint      width;
-    uint      height;
-    uint      numGroupsX;
+    DepthReductionData*          depthRange;
+    DescriptorHandle<Texture2D>  depthTexture;
+    uint                         width;
+    uint                         height;
+    uint                         numGroupsX;
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -58,7 +58,7 @@ void computeMain(
         uint y = startY;
         if (y < pc.height)
         {
-            float d = TextureBindless2DLoad(pc.depthTextureID, int2(x, y)).r;
+            float d = pc.depthTexture.Load(int3(x, y, 0)).r;
             if (d < 1.0) // skip clear / sky pixels
             {
                 lMin = min(lMin, d);
@@ -118,7 +118,7 @@ void computeMain(
         // we only want one lane to write to the output buffer, so we pick lane 0.
         if (WaveIsFirstLane())
         {
-            Ptr<DepthReductionData> outPtr = (Ptr<DepthReductionData>)pc.depthRangePtr;
+            Ptr<DepthReductionData> outPtr = pc.depthRange;
 
             // Atomic float min/max via uint bit-cast. Depths are non-negative, and non-negative
             // IEEE floats sort identically to their uint bits, so no bit flipping is needed and the

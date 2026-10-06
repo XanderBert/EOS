@@ -282,16 +282,15 @@ namespace EOS
         AlwaysPass
     };
 
-    // The bindless descriptor set (set 0) every pipeline shares. src/shaders/bindings.slang declares the same bindings;
-    // shader reflection rejects a program that binds anything else.
+    // The bindless descriptor set (set 0) every pipeline shares. src/shaders/eos/bindless.slang resolves
+    // DescriptorHandle<T> to these bindings; shader reflection rejects a program that binds anything else.
     enum Bindings : uint8_t
     {
-        Textures = 0,
+        Textures = 0,                   // every sampled texture, in its own view type (2D, 2D array, cube, 3D)
         Samplers = 1,
         StorageImages = 2,
-        Textures2DArray = 3,
-        AccelerationStructures = 4,
-        Count = 5,
+        AccelerationStructures = 3,
+        Count = 4,
     };
 
     enum class LoadOp : uint8_t

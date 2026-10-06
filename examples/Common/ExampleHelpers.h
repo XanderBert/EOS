@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <iterator>
 #include <vector>
 
 #include "EOS.h"
@@ -24,19 +26,33 @@ inline std::vector<VertexT> BuildVerticesFromScene(const Scene& scene)
     return vertices;
 }
 
+// Orders the meshes so every opaque mesh comes before every alpha-tested (glTF MASK) one, and returns how many are
+// opaque. Call it before building any per-mesh buffer. Depth-only passes can then draw the opaque range with a
+// fragment shader that never discards, which keeps the GPU's early depth test, and pay for alpha testing only on the
+// alpha-tested range.
+inline uint32_t PartitionMeshesByAlphaTest(Scene& scene)
+{
+    const auto firstAlphaTested = std::stable_partition(scene.meshes.begin(), scene.meshes.end(), [](const MeshEntry& mesh)
+    {
+        return mesh.material.Alpha != EOS::AlphaMode::Mask;
+    });
+
+    return static_cast<uint32_t>(std::distance(scene.meshes.begin(), firstAlphaTested));
+}
+
+// DrawDataT needs a `material` (EOS::StandardMaterialData) and a `transform` member.
+// materialSampler is the sampler every material reads its textures with.
 template <typename DrawDataT>
-inline std::vector<DrawDataT> BuildDrawDataFromScene(const Scene& scene)
+inline std::vector<DrawDataT> BuildDrawDataFromScene(const Scene& scene, EOS::DescriptorHandle materialSampler)
 {
     std::vector<DrawDataT> drawData;
     drawData.reserve(scene.meshes.size());
     for (const auto& mesh : scene.meshes)
     {
-        drawData.push_back(DrawDataT{
-            .albedoID = mesh.albedoTextureIdx,
-            .normalID = mesh.normalTextureIdx,
-            .metallicRoughnessID = mesh.metallicRoughnessTextureIdx,
-            .transform = mesh.transform,
-        });
+        DrawDataT& draw = drawData.emplace_back();
+        draw.material = mesh.material;
+        draw.material.Sampler = materialSampler;
+        draw.transform = mesh.transform;
     }
     return drawData;
 }

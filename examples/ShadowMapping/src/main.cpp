@@ -10,16 +10,15 @@ struct PerFrameData final
     glm::vec4 lightPos;
     glm::vec4 lightDir;
     glm::vec3 cameraPos;
-    uint32_t  shadowMapID;
+    EOS::DescriptorHandle shadowMap;
+    EOS::DescriptorHandle shadowSampler;
 };
 
+// DrawData in shadowCommon.slang
 struct DrawData final
 {
-    uint32_t albedoID;
-    uint32_t normalID;
-    uint32_t metallicRoughnessID;
-    uint32_t pad;
-    glm::mat4 transform;
+    glm::mat4 transform{};
+    EOS::StandardMaterialData material{};
 };
 
 struct Vertex final
@@ -56,6 +55,7 @@ struct Resources final
     EOS::Holder<EOS::BufferHandle> IndirectBuffer;
     EOS::Holder<EOS::RenderPipelineHandle> RenderPipelineHandle;
     EOS::Holder<EOS::RenderPipelineHandle> RenderPipelineShadowHandle;
+    EOS::Holder<EOS::RenderPipelineHandle> RenderPipelineShadowAlphaTestedHandle;
 };
 
 Resources Handles;
@@ -107,7 +107,12 @@ int main()
 
     constexpr EOS::VertexInputData vertexDescriptionShadow
     {
-        .Attributes ={{ .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) }},
+        // Position, plus the uv alpha-tested materials need to cut their holes into the shadow map.
+        .Attributes =
+        {
+            { .Location = 0, .Format = EOS::VertexFormat::Float3, .Offset = offsetof(Vertex, position) },
+            { .Location = 1, .Format = EOS::VertexFormat::Float2, .Offset = offsetof(Vertex, uv) },
+        },
         .InputBindings ={{ .Stride = sizeof(Vertex) }}
     };
 
@@ -136,6 +141,7 @@ int main()
 
 
     Scene scene = LoadModel("../data/sponza/Sponza.gltf", App.Context.get());
+    const uint32_t nOpaqueMeshes = PartitionMeshesByAlphaTest(scene);  // meshes [0, nOpaqueMeshes) are opaque, the rest alpha-tested
     std::vector<Vertex> vertices = BuildVerticesFromScene<Vertex>(scene);
 
 
@@ -157,7 +163,7 @@ int main()
         .DebugName = "Buffer: index"
     });
 
-    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene, App.DefaultSampler);
 
     Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
@@ -203,12 +209,16 @@ int main()
     {
         .VertexInput = vertexDescriptionShadow,
         .VertexShader = {Handles.ShadowShader, "vertexMain"},
-        .FragmentShader = {Handles.ShadowShader, "fragmentMain"},
+        .FragmentShader = {Handles.ShadowShader, "fragmentOpaque"},
         .DepthFormat = App.Context->GetFormat(Handles.ShadowDepthTexture),
         .PipelineCullMode = EOS::CullMode::Front,
         .DebugName = "ShadowMap Render Pipeline",
     };
     Handles.RenderPipelineShadowHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
+
+    renderPipelineShadow.FragmentShader = {Handles.ShadowShader, "fragmentMasked"};
+    renderPipelineShadow.DebugName = "ShadowMap Alpha Tested Render Pipeline";
+    Handles.RenderPipelineShadowAlphaTestedHandle = App.Context->CreateRenderPipeline(renderPipelineShadow);
 
 
 
@@ -249,7 +259,8 @@ int main()
             .lightPos = glm::vec4(lightPos, 1.0f),
             .lightDir = glm::vec4(lightForward, 0.0f),
             .cameraPos = App.MainCamera.GetPosition(),
-            .shadowMapID = Handles.ShadowDepthTexture.Index(),
+            .shadowMap = Handles.ShadowDepthTexture,
+            .shadowSampler = Handles.DepthMapSampler,
         };
         App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
 
@@ -298,10 +309,28 @@ int main()
         {
             cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
             cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdSetDepthState(cmdBuffer, depthState);
+
+            // Opaque meshes go through a fragment shader that never discards, which keeps the fast depth-only path.
+            // Only the alpha-tested ones pay for the alpha test. Draw indices restart at 0 in the second indirect draw,
+            // so its push constants point the draw data at the first alpha-tested mesh.
             cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShadowHandle);
             cmdPushConstants(cmdBuffer, framePointers);
-            cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, scene.meshes.size());
+            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nOpaqueMeshes);
+
+            const uint32_t nAlphaTestedMeshes = static_cast<uint32_t>(scene.meshes.size()) - nOpaqueMeshes;
+            if (nAlphaTestedMeshes > 0)
+            {
+                const FramePointers alphaTestedPointers
+                {
+                    .frameDataPtr = framePointers.frameDataPtr,
+                    .drawDataPtr = framePointers.drawDataPtr + nOpaqueMeshes * sizeof(DrawData),
+                };
+
+                cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShadowAlphaTestedHandle);
+                cmdPushConstants(cmdBuffer, alphaTestedPointers);
+                cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, nOpaqueMeshes * sizeof(EOS::DrawIndexedIndirectCommand), nAlphaTestedMeshes);
+            }
         }
         cmdEndRendering(cmdBuffer);
         cmdPopMarker(cmdBuffer);
@@ -313,6 +342,7 @@ int main()
         cmdBeginRendering(cmdBuffer, renderPass, framebufferShade);
         {
             cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineHandle);
+            cmdPushConstants(cmdBuffer, framePointers);
             cmdSetDepthState(cmdBuffer, depthState);
             cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, scene.meshes.size());
         }

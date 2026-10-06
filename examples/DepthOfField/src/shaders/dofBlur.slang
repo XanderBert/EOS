@@ -1,15 +1,11 @@
-import bindings;
-
 public struct DofBlurPC
 {
-    public uint  inputImageID;
-    public uint  outputImageID;
-    public uint  samplerID;
+    public DescriptorHandle<Texture2D>           inputImage;
+    public DescriptorHandle<RWTexture2D<float4>> outputImage;
+    public DescriptorHandle<SamplerState>        samplerState;
     public float maxBlurRadius;
     public float texelSizeX;
     public float texelSizeY;
-    public float pad0;
-    public float pad1;
 };
 
 [[vk::push_constant]] DofBlurPC pc;
@@ -17,37 +13,34 @@ public struct DofBlurPC
 // One pass of a separable 5 tap Gaussian blur along axis, with the radius scaled by the circle of confusion.
 void Blur(uint2 pixelCoord, float2 axis)
 {
-    int2 imageSize = ImageBindless2DSize(pc.outputImageID);
+    const RWTexture2D<float4> outputImage = pc.outputImage;
+    uint2 imageSize;
+    outputImage.GetDimensions(imageSize.x, imageSize.y);
+    if (any(pixelCoord >= imageSize)) return;
 
-    if (pixelCoord.x >= imageSize.x || pixelCoord.y >= imageSize.y)
-    {
-        return;
-    }
+    const float2 uv = (float2(pixelCoord) + 0.5) / float2(imageSize);
+    const float4 center = pc.inputImage.SampleLevel(pc.samplerState, uv, 0.0);
+    const float coc = center.a;
 
-    float2 uv = (float2(pixelCoord) + float2(0.5, 0.5)) / float2(imageSize);
-    float4 center = TextureBindless2D(pc.inputImageID, pc.samplerID, uv);
-    float coc = center.a;
-
-    float radius = pc.maxBlurRadius * coc;
-    float2 step = axis * float2(pc.texelSizeX, pc.texelSizeY) * max(radius, 1.0);
+    const float radius = pc.maxBlurRadius * coc;
+    const float2 step = axis * float2(pc.texelSizeX, pc.texelSizeY) * max(radius, 1.0);
 
     float3 color = center.rgb * 0.227027;
     float weight = 0.227027;
 
     // Precomputed offsets and weights for a 5 tap Gaussian.
-    float offsets[2] = { 1.384615, 3.230769 };
-    float weights[2] = { 0.316216, 0.070270 };
+    const float offsets[2] = { 1.384615, 3.230769 };
+    const float weights[2] = { 0.316216, 0.070270 };
 
     for (int i = 0; i < 2; ++i)
     {
-        float2 offset = offsets[i] * step;
-        color += TextureBindless2D(pc.inputImageID, pc.samplerID, uv + offset).rgb * weights[i];
-        color += TextureBindless2D(pc.inputImageID, pc.samplerID, uv - offset).rgb * weights[i];
+        const float2 offset = offsets[i] * step;
+        color += pc.inputImage.SampleLevel(pc.samplerState, uv + offset, 0.0).rgb * weights[i];
+        color += pc.inputImage.SampleLevel(pc.samplerState, uv - offset, 0.0).rgb * weights[i];
         weight += 2.0 * weights[i];
     }
 
-    color /= weight;
-    ImageBindless2DStore(pc.outputImageID, int2(pixelCoord), float4(color, coc));
+    outputImage[pixelCoord] = float4(color / weight, coc);
 }
 
 [shader("compute")]

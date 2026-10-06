@@ -1,5 +1,5 @@
-import bindings;
-import shading;
+import eos.math;
+import eos.material;
 
 struct VSInput
 {
@@ -15,18 +15,15 @@ struct VSOutput
     float4 Pos      : SV_Position;
     float3 WorldPos : TEXCOORD1;
     float3 Normal   : TEXCOORD2;
-    float3 Tangent  : TANGENT;
+    float4 Tangent  : TANGENT;
     float2 UV       : TEXCOORD0;
     uint   DrawIndex : TEXCOORD3;
 };
 
 struct DrawData
 {
-    uint albedo;
-    uint normal;
-    uint metallicRoughness;
-    uint pad;
     float4x4 transform;
+    StandardMaterialData material;
 };
 
 struct PerFrameData
@@ -38,8 +35,8 @@ struct PerFrameData
 
 struct PushConstants
 {
-    ConstBufferPointer<PerFrameData> PerFramePointer;
-    uint64_t PerDrawPointer;
+    PerFrameData* perFrame;
+    DrawData* draws;
 };
 
 struct PSOutput
@@ -50,42 +47,38 @@ struct PSOutput
 };
 
 [[vk::push_constant]] PushConstants pc;
+
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 {
-    PerFrameData frameData = pc.PerFramePointer.get();
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, (uint64_t)drawIndex);
+    const PerFrameData frameData = *pc.perFrame;
+    const float4x4 transform = pc.draws[drawIndex].transform;
 
-    float4 localTransformed = mul(float4(input.Pos, 1.0), draw.transform);
-    float3x3 normalMatrix   = float3x3(mul(draw.transform, frameData.Model));
+    const float4 localTransformed = mul(float4(input.Pos, 1.0), transform);
+    const float3x3 normalMatrix   = float3x3(mul(transform, frameData.Model));
 
     VSOutput output;
     output.Pos          = mul(localTransformed, frameData.MVP);
     output.WorldPos     = mul(localTransformed, frameData.Model).xyz;
-    output.Normal       = normalize(mul(input.Normal, normalMatrix));
-    output.Tangent      = mul(input.Tangent.xyz, normalMatrix);
+    output.Normal       = mul(input.Normal, normalMatrix);
+    output.Tangent      = float4(mul(input.Tangent.xyz, normalMatrix), input.Tangent.w);
     output.UV           = input.UV;
     output.DrawIndex    = drawIndex;
-
     return output;
 }
 
+// Writes the parameters of the material's BSDF; the lighting pass rebuilds a StandardBSDF from them.
 [shader("fragment")]
 PSOutput fragmentMain(VSOutput input)
 {
-    DrawData draw = LoadBufferArray<DrawData>(pc.PerDrawPointer, (uint64_t)input.DrawIndex);
-
-    MaterialTextureSet materialTextures;
-    materialTextures.albedo = draw.albedo;
-    materialTextures.normal = draw.normal;
-    materialTextures.metallicRoughness = draw.metallicRoughness;
-
-    Material material = SampleMaterial(materialTextures, 0, input.UV);
-    float3 shadingNormal = SampleNormal(materialTextures, 0, input.UV, input.Normal, input.WorldPos, input.Tangent);
+    const SurfaceData surface = SurfaceData.FromVertex(input.WorldPos, input.Normal, input.Tangent, input.UV, pc.perFrame->cameraPos.xyz);
+    const StandardMaterial material = StandardMaterial(pc.draws[input.DrawIndex].material);
+    let point = material.Evaluate(surface, ImplicitLodSampler());
+    if (!material.PassesAlphaTest(point.opacity)) discard;
 
     PSOutput output;
-    output.AlbedoMetallic = float4(material.albedo, material.metallic);
-    output.NormalRoughness = float4(normalize(shadingNormal) * 0.5 + 0.5, material.roughness);
+    output.AlbedoMetallic = float4(point.bsdf.baseColor, point.bsdf.metallic);
+    output.NormalRoughness = float4(PackNormalUnorm(point.frame.N), point.bsdf.perceptualRoughness);
     output.WorldPosition = float4(input.WorldPos, 1.0);
     return output;
 }

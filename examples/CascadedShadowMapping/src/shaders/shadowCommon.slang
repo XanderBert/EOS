@@ -1,5 +1,7 @@
 module shadowCommon;
 
+import eos.material;
+
 public static const int SHADOW_TECHNIQUE_CPU_CASCADE = 0;
 public static const int SHADOW_TECHNIQUE_COMPUTE_CASCADE = 1;
 public static const int SHADOW_TECHNIQUE_RAY_QUERY = 2;
@@ -13,8 +15,9 @@ public struct PerFrameData
     public float4   lightDir;
     public float4   cascadeSplits;
     public float3   cameraPos;
-    public uint     shadowMapID;
-    public uint     sceneTLASID;
+    public DescriptorHandle<Texture2DArray>                   shadowMap;
+    public DescriptorHandle<SamplerState>                     shadowSampler;
+    public DescriptorHandle<RaytracingAccelerationStructure>  sceneTLAS;       // invalid when the device has no ray tracing
     public int      shadowDebugMode;
     public int      shadowForceCascade;
     public int      shadowTechnique;
@@ -22,15 +25,12 @@ public struct PerFrameData
 
 public struct DrawData
 {
-    public uint albedo;
-    public uint normal;
-    public uint metallicRoughness;
-    public uint pad;
     public float4x4 transform;
+    public StandardMaterialData material;
 };
 
 public struct PushConstants
 {
-    public uint64_t PerFramePointer;
-    public uint64_t PerDrawPointer;
+    public PerFrameData* perFrame;
+    public DrawData* draws;
 };

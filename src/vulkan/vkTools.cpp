@@ -566,6 +566,7 @@ namespace VkContext
         {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
             .pNext = &deviceFeatures12,
+            .shaderDemoteToHelperInvocation = VK_TRUE,  // `discard` compiles to OpDemoteToHelperInvocation in SPIR-V 1.6
             .subgroupSizeControl  = VK_TRUE,
             .synchronization2     = VK_TRUE,
             .dynamicRendering     = VK_TRUE,

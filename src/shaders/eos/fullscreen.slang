@@ -1,4 +1,4 @@
-module fullscreen;
+module "eos/fullscreen";
 
 public void FullscreenTriangle(uint id, out float2 uv, out float4 pos)
 {

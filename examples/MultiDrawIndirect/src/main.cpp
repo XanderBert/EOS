@@ -7,13 +7,11 @@ struct PerFrameData final
     glm::vec4 cameraPos;
 };
 
+// DrawData in indirectModel.slang
 struct DrawData final
 {
-    uint32_t albedoID{};
-    uint32_t normalID{};
-    uint32_t metallicRoughnessID{};
-    uint32_t pad{};
     glm::mat4 transform{};
+    EOS::StandardMaterialData material{};
 };
 
 struct Vertex final
@@ -111,7 +109,7 @@ int main()
     });
 
 
-    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene, App.DefaultSampler);
 
     Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,

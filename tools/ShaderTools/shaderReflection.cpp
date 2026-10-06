@@ -40,6 +40,10 @@ namespace EOS::SlangReflection
 
         [[nodiscard]] ShaderResourceType ToResourceType(slang::TypeLayoutReflection* typeLayout)
         {
+            // eos.bindless declares its arrays as Slang's untyped __DynamicResource, aliased per use.
+            slang::TypeLayoutReflection* elementTypeLayout = typeLayout->getKind() == Kind::Array ? typeLayout->getElementTypeLayout() : typeLayout;
+            if (elementTypeLayout->getKind() == Kind::DynamicResource) return ShaderResourceType::Bindless;
+
             if (typeLayout->getBindingRangeCount() == 0) return ShaderResourceType::Unknown;
 
             switch (typeLayout->getBindingRangeType(0))

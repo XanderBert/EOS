@@ -88,7 +88,7 @@ namespace EOS
         };
         Sampler = context->CreateSampler(samplerDesc);
 
-        Shader = context->CreateShaderProgram({.Module = "imgui"});
+        Shader = context->CreateShaderProgram({.Module = "eos.imgui"});
     }
 
     ImGuiRenderer::~ImGuiRenderer()
@@ -305,8 +305,8 @@ namespace EOS
                 {
                     .LRTB               = {left, right, top, bottom},
                     .vertexBufferPtr    = listVertexBufferPtr,
-                    .textureId          = textureData.TextureID,
-                    .samplerId          = Sampler.Index(),
+                    .texture            = DescriptorHandle(textureData.TextureID),
+                    .samplerState       = Sampler,
                     .textureLayer       = textureData.Layer,
                     .textureView        = static_cast<uint32_t>(textureData.View),
                 };

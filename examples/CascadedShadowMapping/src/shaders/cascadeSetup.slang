@@ -1,5 +1,4 @@
-import bindings;
-import math;
+import eos.math;
 import shadowCommon;
 
 static const uint CASCADES = 4;
@@ -15,8 +14,8 @@ struct DepthReductionData
 
 struct CascadeSetupPC
 {
-    uint64_t perFramePtr;
-    uint64_t depthRangePtr;
+    PerFrameData* perFrame;
+    DepthReductionData* depthRange;
     float4x4 invViewProjection;
     float4 lightForwardNear;
     float4 cameraPlanes;
@@ -44,7 +43,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     if (useDepthReduction)
     {
-        DepthReductionData reduction = *((Ptr<DepthReductionData>)pc.depthRangePtr);
+        DepthReductionData reduction = *pc.depthRange;
         if (reduction.maxDepth > reduction.minDepth)
         {
             float reducedMin = LinearDepth(reduction.minDepth, nearClip, farClip);
@@ -72,7 +71,7 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     float lastSplitDist = 0.0;
     float3 lightForward = normalize(pc.lightForwardNear.xyz);
 
-    PerFrameData frameData = *((Ptr<PerFrameData>)pc.perFramePtr);
+    PerFrameData frameData = *pc.perFrame;
 
     [unroll]
     for (uint i = 0; i < CASCADES; ++i)
@@ -150,5 +149,5 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         nearClip + cascadeSplits[3] * clipRange
     );
 
-    *((Ptr<PerFrameData>)pc.perFramePtr) = frameData;
+    *pc.perFrame = frameData;
 }

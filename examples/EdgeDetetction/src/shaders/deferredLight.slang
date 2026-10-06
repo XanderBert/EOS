@@ -1,20 +1,18 @@
-import bindings;
-import fullscreen;
-import shading;
+import eos.math;
+import eos.bsdf;
+import eos.lighting;
+import eos.fullscreen;
 
 public struct DeferredLightingPC
 {
-    public uint   gbufferAlbedoID;
-    public uint   gbufferNormalID;
-    public uint   gbufferWorldPosID;
-    public uint   samplerID;
+    public DescriptorHandle<Texture2D>    gbufferAlbedo;
+    public DescriptorHandle<Texture2D>    gbufferNormal;
+    public DescriptorHandle<Texture2D>    gbufferWorldPos;
+    public DescriptorHandle<SamplerState> samplerState;
     public uint   debugView;
-    public uint   pad0;
-    public uint   pad1;
-    public uint   pad2;
     public float4 cameraPos;
-    public float4 lightDirIntensity;
-    public float4 lightColorAmbient;
+    public float4 lightDirIntensity;    // xyz: direction the light travels, w: intensity
+    public float4 lightColorAmbient;    // rgb: light color, w: ambient radiance
 };
 
 [[vk::push_constant]] DeferredLightingPC pc;
@@ -34,37 +32,32 @@ VSOutput vertexMain(uint id : SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(VSOutput input)
+float4 fragmentMain(VSOutput input) : SV_Target
 {
-    float2 uv = input.UV;
+    const float2 uv = input.UV;
 
-    float4 albedoMetallic = TextureBindless2D(pc.gbufferAlbedoID, pc.samplerID, uv);
-    float4 normalRoughness = TextureBindless2D(pc.gbufferNormalID, pc.samplerID, uv);
-    float3 worldPos = TextureBindless2D(pc.gbufferWorldPosID, pc.samplerID, uv).xyz;
+    const float4 albedoMetallic = pc.gbufferAlbedo.Sample(pc.samplerState, uv);
+    const float4 normalRoughness = pc.gbufferNormal.Sample(pc.samplerState, uv);
+    const float3 worldPos = pc.gbufferWorldPos.Sample(pc.samplerState, uv).xyz;
 
-    float3 albedo = albedoMetallic.rgb;
-    float metallic = albedoMetallic.a;
-    float3 normal = DecodeNormal(normalRoughness.rgb);
-    float roughness = saturate(normalRoughness.a);
+    const float3 albedo = albedoMetallic.rgb;
+    const float3 normal = UnpackNormalUnorm(normalRoughness.rgb);
+    const float roughness = saturate(normalRoughness.a);
 
     if (pc.debugView == 1) return float4(albedo, 1.0);
     if (pc.debugView == 2) return float4(normal * 0.5 + 0.5, 1.0);
     if (pc.debugView == 3) return roughness.xxxx;
     if (pc.debugView == 4) return float4(abs(worldPos) * 0.05, 1.0);
 
-    Material material;
-    material.albedo = albedo;
-    material.metallic = metallic;
-    material.roughness = roughness;
+    const StandardBSDF bsdf = StandardBSDF(albedo, albedoMetallic.a, roughness);
+    const ShadingFrame frame = ShadingFrame.FromNormal(normal);
+    const float3 viewDirection = normalize(pc.cameraPos.xyz - worldPos);
 
-    PBRSurface surface;
-    surface.material = material;
-    surface.normal = normal;
-    surface.viewDir = normalize(pc.cameraPos.xyz - worldPos);
-    surface.lightDir = normalize(-pc.lightDirIntensity.xyz);
+    DirectionalLight sun;
+    sun.direction = normalize(pc.lightDirIntensity.xyz);
+    sun.radiance = pc.lightColorAmbient.rgb * pc.lightDirIntensity.w;
 
-    float3 color = EvaluatePBR(surface);
-    color *= pc.lightColorAmbient.rgb * pc.lightDirIntensity.w;
-
+    const float3 color = EvaluateDirectionalLight(bsdf, frame, viewDirection, sun)
+                       + EvaluateConstantAmbient(bsdf, frame, viewDirection, pc.lightColorAmbient.www, 1.0);
     return float4(color, 1.0);
 }

@@ -50,12 +50,13 @@ namespace EOS
         };
         DrawableData Drawables[3] = {};
 
+        // Push constants of eos/imgui.slang.
         struct BindData final
         {
             float LRTB[4];
             uint64_t vertexBufferPtr = 0;
-            uint32_t textureId = 0;
-            uint32_t samplerId = 0;
+            DescriptorHandle texture{};
+            DescriptorHandle samplerState{};
             uint32_t textureLayer = 0;
             uint32_t textureView = 0;
         };

@@ -22,6 +22,7 @@ namespace
         std::filesystem::path EngineShaderDirectory;
         std::filesystem::path OutputDirectory;
         std::vector<std::string> ModulesToReflect;
+        std::filesystem::path SpirvDumpDirectory;
         bool Force = false;
     };
 
@@ -29,7 +30,8 @@ namespace
     {
         std::cerr << "Usage: EOSShaderCompilerTool --project-shaders <dir> --engine-shaders <dir> --output <dir> [--force] [--reflect <module>]...\n"
                      "  --force             recompile every module, even when its cache is up to date\n"
-                     "  --reflect <module>  print the reflection of a module after compiling\n";
+                     "  --reflect <module>  print the reflection of a module after compiling\n"
+                     "  --dump-spirv <dir>  write the SPIR-V of every --reflect module to <dir>/<module>.<entry point>.spv\n";
     }
 
     [[nodiscard]] bool ParseOptions(int argc, char** argv, Options& outOptions)
@@ -44,6 +46,7 @@ namespace
             else if (argument == "--output" && hasValue) outOptions.OutputDirectory = argv[++i];
             else if (argument == "--force") outOptions.Force = true;
             else if (argument == "--reflect" && hasValue) outOptions.ModulesToReflect.emplace_back(argv[++i]);
+            else if (argument == "--dump-spirv" && hasValue) outOptions.SpirvDumpDirectory = argv[++i];
             else return false;
         }
 
@@ -108,6 +111,7 @@ namespace
             case EOS::ShaderResourceType::UniformBuffer:          return "uniform buffer";
             case EOS::ShaderResourceType::StorageBuffer:          return "storage buffer";
             case EOS::ShaderResourceType::AccelerationStructure:  return "acceleration structure";
+            case EOS::ShaderResourceType::Bindless:               return "bindless (aliased)";
             case EOS::ShaderResourceType::Unknown:                return "unknown";
         }
 
@@ -240,6 +244,18 @@ int main(int argc, char** argv)
         }
 
         PrintReflection(*program);
+
+        if (!options.SpirvDumpDirectory.empty())
+        {
+            std::filesystem::create_directories(options.SpirvDumpDirectory);
+            for (const EOS::ShaderEntryPoint& entryPoint : program->EntryPoints)
+            {
+                const std::filesystem::path path = options.SpirvDumpDirectory / (moduleName + "." + entryPoint.Name + ".spv");
+                std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
+                file.write(reinterpret_cast<const char*>(entryPoint.Spirv.data()), static_cast<std::streamsize>(entryPoint.Spirv.size() * sizeof(uint32_t)));
+                std::cout << "[shader-tool] wrote " << path.string() << "\n";
+            }
+        }
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime);

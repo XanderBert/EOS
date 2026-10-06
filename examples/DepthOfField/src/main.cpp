@@ -7,13 +7,11 @@ struct PerFrameData final
     glm::vec4 cameraPos;
 };
 
+// DrawData in indirectModel.slang
 struct DrawData final
 {
-    uint32_t albedoID{};
-    uint32_t normalID{};
-    uint32_t metallicRoughnessID{};
-    uint32_t pad{};
     glm::mat4 transform{};
+    EOS::StandardMaterialData material{};
 };
 
 struct Vertex final
@@ -30,60 +28,60 @@ struct FramePointers final
     uint64_t drawDataPtr;
 };
 
+// Radiance of the uniform environment that stands in for image-based lighting.
+constexpr float kAmbientRadiance = 0.3f;
+
+// DeferredLightingPC in deferredLightCompute.slang
 struct DeferredLightingPC final
 {
-    uint32_t gbufferAlbedoID;
-    uint32_t gbufferNormalID;
-    uint32_t gbufferWorldPosID;
-    uint32_t samplerID;
-    uint32_t outputImageID;
+    EOS::DescriptorHandle gbufferAlbedo;
+    EOS::DescriptorHandle gbufferNormal;
+    EOS::DescriptorHandle gbufferWorldPos;
+    EOS::DescriptorHandle samplerState;
+    EOS::DescriptorHandle outputImage;
     uint32_t debugView;
-    uint32_t pad0;
-    uint32_t pad1;
     glm::vec4 cameraPos;
     glm::vec4 lightDirIntensity;
     glm::vec4 lightColorAmbient;
 };
 
+// PresentPC in present.slang
 struct PresentPC final
 {
-    uint32_t sceneColorID;
-    uint32_t samplerID;
-    uint32_t pad0;
-    uint32_t pad1;
+    EOS::DescriptorHandle sceneColor;
+    EOS::DescriptorHandle samplerState;
 };
 
+// DofDownsamplePC in dofDownsample.slang
 struct DofDownsamplePC final
 {
-    uint32_t sceneColorID;
-    uint32_t worldPosID;
-    uint32_t samplerID;
-    uint32_t outputImageID;
+    EOS::DescriptorHandle sceneColor;
+    EOS::DescriptorHandle worldPos;
+    EOS::DescriptorHandle samplerState;
+    EOS::DescriptorHandle outputImage;
     float    focusDistance;
     float    focusRange;
-    float    pad0;
-    float    pad1;
 };
 
+// DofBlurPC in dofBlur.slang
 struct DofBlurPC final
 {
-    uint32_t inputImageID;
-    uint32_t outputImageID;
-    uint32_t samplerID;
+    EOS::DescriptorHandle inputImage;
+    EOS::DescriptorHandle outputImage;
+    EOS::DescriptorHandle samplerState;
     float    maxBlurRadius;
     float    texelSizeX;
     float    texelSizeY;
-    float    pad0;
-    float    pad1;
 };
 
+// DofCompositePC in dofComposite.slang
 struct DofCompositePC final
 {
-    uint32_t sceneColorID;
-    uint32_t blurredID;
-    uint32_t worldPosID;
-    uint32_t samplerID;
-    uint32_t outputImageID;
+    EOS::DescriptorHandle sceneColor;
+    EOS::DescriptorHandle blurred;
+    EOS::DescriptorHandle worldPos;
+    EOS::DescriptorHandle samplerState;
+    EOS::DescriptorHandle outputImage;
     float    focusDistance;
     float    focusRange;
     float    maxBlurRadius;
@@ -247,7 +245,7 @@ int main()
         .DebugName = "Buffer: index"
     });
 
-    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene);
+    std::vector<DrawData> drawData = BuildDrawDataFromScene<DrawData>(scene, App.DefaultSampler);
 
     Handles.PerDrawBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
@@ -374,32 +372,32 @@ int main()
 
         const DeferredLightingPC lightingPC
         {
-            .gbufferAlbedoID   = Handles.GbufferAlbedoTexture.Index(),
-            .gbufferNormalID   = Handles.GbufferNormalTexture.Index(),
-            .gbufferWorldPosID = Handles.GbufferWorldPosTexture.Index(),
-            .samplerID         = App.DefaultSampler.Index(),
-            .outputImageID     = Handles.SceneLitTexture.Index(),
+            .gbufferAlbedo     = Handles.GbufferAlbedoTexture,
+            .gbufferNormal     = Handles.GbufferNormalTexture,
+            .gbufferWorldPos   = Handles.GbufferWorldPosTexture,
+            .samplerState      = App.DefaultSampler,
+            .outputImage       = Handles.SceneLitTexture,
             .debugView         = static_cast<uint32_t>(debugView),
             .cameraPos         = glm::vec4(App.MainCamera.GetPosition(), 1.0f),
             .lightDirIntensity = glm::vec4(lightDirection, lightIntensity),
-            .lightColorAmbient = glm::vec4(lightColor, 0.0f),
+            .lightColorAmbient = glm::vec4(lightColor, kAmbientRadiance),
         };
 
         const DofDownsamplePC dofDownsamplePC
         {
-            .sceneColorID  = Handles.SceneLitTexture.Index(),
-            .worldPosID    = Handles.GbufferWorldPosTexture.Index(),
-            .samplerID     = App.DefaultSampler.Index(),
-            .outputImageID = Handles.DofHalfTexture.Index(),
+            .sceneColor    = Handles.SceneLitTexture,
+            .worldPos      = Handles.GbufferWorldPosTexture,
+            .samplerState  = App.DefaultSampler,
+            .outputImage   = Handles.DofHalfTexture,
             .focusDistance = focusDistance,
             .focusRange    = focusRange,
         };
 
         const DofBlurPC dofBlurHPC
         {
-            .inputImageID  = Handles.DofHalfTexture.Index(),
-            .outputImageID = Handles.DofBlurTexture.Index(),
-            .samplerID     = App.DefaultSampler.Index(),
+            .inputImage    = Handles.DofHalfTexture,
+            .outputImage   = Handles.DofBlurTexture,
+            .samplerState  = App.DefaultSampler,
             .maxBlurRadius = maxBlurRadius,
             .texelSizeX    = 1.0f / static_cast<float>(halfWidth),
             .texelSizeY    = 1.0f / static_cast<float>(halfHeight),
@@ -407,9 +405,9 @@ int main()
 
         const DofBlurPC dofBlurVPC
         {
-            .inputImageID  = Handles.DofBlurTexture.Index(),
-            .outputImageID = Handles.DofHalfTexture.Index(),
-            .samplerID     = App.DefaultSampler.Index(),
+            .inputImage    = Handles.DofBlurTexture,
+            .outputImage   = Handles.DofHalfTexture,
+            .samplerState  = App.DefaultSampler,
             .maxBlurRadius = maxBlurRadius,
             .texelSizeX    = 1.0f / static_cast<float>(halfWidth),
             .texelSizeY    = 1.0f / static_cast<float>(halfHeight),
@@ -417,11 +415,11 @@ int main()
 
         const DofCompositePC dofCompositePC
         {
-            .sceneColorID  = Handles.SceneLitTexture.Index(),
-            .blurredID     = Handles.DofHalfTexture.Index(),
-            .worldPosID    = Handles.GbufferWorldPosTexture.Index(),
-            .samplerID     = App.DefaultSampler.Index(),
-            .outputImageID = Handles.DofTexture.Index(),
+            .sceneColor    = Handles.SceneLitTexture,
+            .blurred       = Handles.DofHalfTexture,
+            .worldPos      = Handles.GbufferWorldPosTexture,
+            .samplerState  = App.DefaultSampler,
+            .outputImage   = Handles.DofTexture,
             .focusDistance = focusDistance,
             .focusRange    = focusRange,
             .maxBlurRadius = maxBlurRadius,
@@ -429,8 +427,8 @@ int main()
 
         const PresentPC presentPC
         {
-            .sceneColorID = Handles.DofTexture.Index(),
-            .samplerID    = App.DefaultSampler.Index(),
+            .sceneColor   = Handles.DofTexture,
+            .samplerState = App.DefaultSampler,
         };
 
         constexpr EOS::RenderPass sceneRenderPass
