@@ -31,8 +31,7 @@ namespace EOS
     private:
         IContext* Context;
         SamplerHolder Sampler;
-        ShaderModuleHolder VertexShader;
-        ShaderModuleHolder FragmentShader;
+        ShaderProgramHolder Shader;
         TextureHolder FontTexture;
         RenderPipelineHolder RenderPipeline;
         uint32_t FrameIndex = 0;

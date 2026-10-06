@@ -1,67 +1,60 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <map>
-#include <string>
+#include <memory>
+#include <unordered_map>
 #include <vector>
 
-#include <EOS.h>
+#include "shaderTypes.h"
 
+namespace EOS
+{
+    class ShaderCompiler;
+}
+
+/**
+ * @brief Watches the source files of every shader program in use, imports included, and recompiles a program when any
+ *        of them changes. Each changed program is compiled once and handed to a callback that swaps it into whatever
+ *        uses it.
+ *
+ * A program is watched while at least one user (a shader program handle or a pipeline) tracks it.
+ * Without EOS_SHADER_TOOLS every member is a no-op.
+ */
 class ShaderReloader final
 {
 public:
-    using ReloadShaderModuleCallback = std::function<bool(EOS::ShaderModuleHandle, const char*, EOS::ShaderStage)>;
-    using RebuildRenderPipelineCallback = std::function<bool(EOS::RenderPipelineHandle)>;
-    using RebuildComputePipelineCallback = std::function<bool(EOS::ComputePipelineHandle)>;
+    // Receives a successfully recompiled program; returns the number of pipelines it rebuilt.
+    using ProgramRecompiledCallback = std::function<uint32_t(const std::shared_ptr<const EOS::CompiledShaderProgram>&)>;
 
-    explicit ShaderReloader(std::filesystem::path shaderSourcePath, std::filesystem::path engineShaderSourcePath = {});
+    void TrackProgram(const EOS::CompiledShaderProgram& program);
+    void UntrackProgram(const EOS::ShaderProgramDescription& description);
 
-    void TrackShader(const EOS::ShaderModuleHandle& shaderHandle, const char* fileName, EOS::ShaderStage shaderStage);
-    void UntrackShader(const EOS::ShaderModuleHandle& shaderHandle);
-
-    void RegisterRenderPipelineDependencies(const EOS::RenderPipelineHandle& pipelineHandle, const EOS::RenderPipelineDescription& renderPipelineDescription);
-    void UnregisterRenderPipelineDependencies(const EOS::RenderPipelineHandle& pipelineHandle);
-
-    void RegisterComputePipelineDependencies(const EOS::ComputePipelineHandle& pipelineHandle, const EOS::ComputePipelineDescription& computePipelineDescription);
-    void UnregisterComputePipelineDependencies(const EOS::ComputePipelineHandle& pipelineHandle);
-
-    [[nodiscard]] uint32_t ReloadChangedShaders(const ReloadShaderModuleCallback& reloadShaderModuleCallback, const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback, const RebuildComputePipelineCallback& rebuildComputePipelineCallback = nullptr);
+    /**
+     * @brief Recompiles every tracked program whose sources changed since it was last compiled.
+     * @return The number of pipelines rebuilt.
+     */
+    [[nodiscard]] uint32_t ReloadChangedShaders(EOS::ShaderCompiler& compiler, const ProgramRecompiledCallback& onProgramRecompiled);
 
 private:
 #if defined(EOS_SHADER_TOOLS)
-    struct ShaderHandleLess final
+    struct WatchedFile final
     {
-        [[nodiscard]] bool operator()(const EOS::ShaderModuleHandle& lhs, const EOS::ShaderModuleHandle& rhs) const
-        {
-            if (lhs.Index() != rhs.Index())
-            {
-                return lhs.Index() < rhs.Index();
-            }
-
-            return lhs.Gen() < rhs.Gen();
-        }
-    };
-
-    struct TrackedShader final
-    {
-        std::filesystem::path SourceFilePath{};
-        std::string ModuleName{};
-        EOS::ShaderStage ShaderStage = EOS::ShaderStage::None;
+        std::filesystem::path Path;
         std::filesystem::file_time_type LastWriteTime{};
-        bool MissingTimestampWarningLogged = false;
-        std::vector<EOS::RenderPipelineHandle> DependentRenderPipelines{};
-        std::vector<EOS::ComputePipelineHandle> DependentComputePipelines{};
     };
 
-    static void AddUniqueRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle);
-    static void RemoveRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle);
-    static void AddUniqueComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle);
-    static void RemoveComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle);
+    struct TrackedProgram final
+    {
+        EOS::ShaderProgramDescription Description;
+        std::vector<WatchedFile> Files{};
+        uint32_t UseCount = 0;
+    };
 
-    std::map<EOS::ShaderModuleHandle, TrackedShader, ShaderHandleLess> ShaderMap{};
+    static void WatchSources(TrackedProgram& trackedProgram, const EOS::CompiledShaderProgram& program);
+    [[nodiscard]] static bool HaveSourcesChanged(const TrackedProgram& trackedProgram);
+
+    std::unordered_map<uint64_t, TrackedProgram> Programs{};
 #endif
-
-    std::filesystem::path ShaderSourcePath{};
-    std::filesystem::path EngineShaderSourcePath{};
 };

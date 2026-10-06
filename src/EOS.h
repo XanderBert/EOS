@@ -9,6 +9,7 @@
 #include "defines.h"
 #include "enums.h"
 #include "handle.h"
+#include "shaderTypes.h"
 
 #if defined(EOS_USE_TRACY)
 #include <tracy/Tracy.hpp>
@@ -59,7 +60,7 @@ namespace EOS
     using ComputePipelineHandle     = Handle<struct ComputePipeline>;
     using RenderPipelineHandle      = Handle<struct RenderPipeline>;
     using RayTracingPipelineHandle  = Handle<struct RayTracingPipeline>;
-    using ShaderModuleHandle        = Handle<struct ShaderModule>;
+    using ShaderProgramHandle       = Handle<struct ShaderProgram>;
     using SamplerHandle             = Handle<struct Sampler>;
     using BufferHandle              = Handle<struct Buffer>;
     using TextureHandle             = Handle<struct Texture>;
@@ -69,7 +70,7 @@ namespace EOS
     using ComputePipelineHolder     = Holder<ComputePipelineHandle>;
     using RenderPipelineHolder      = Holder<RenderPipelineHandle>;
     using RayTracingPipelineHolder  = Holder<RayTracingPipelineHandle>;
-    using ShaderModuleHolder        = Holder<ShaderModuleHandle>;
+    using ShaderProgramHolder       = Holder<ShaderProgramHandle>;
     using SamplerHolder             = Holder<SamplerHandle>;
     using BufferHolder              = Holder<BufferHandle>;
     using TextureHolder             = Holder<TextureHandle>;
@@ -149,17 +150,6 @@ namespace EOS
     };
 
     /**
-     * @brief Compiled shader payload and metadata returned by the shader compiler.
-     */
-    struct ShaderInfo final
-    {
-        std::vector<uint32_t> Spirv;
-        EOS::ShaderStage ShaderStage;
-        uint32_t PushConstantSize;
-        std::string DebugName;
-    };
-
-    /**
      * @brief Vertex layout description used for graphics pipeline creation.
      */
     struct VertexInputData final
@@ -196,6 +186,20 @@ namespace EOS
         {
             return memcmp(this, &other, sizeof(VertexInputData)) == 0;
         }
+    };
+
+    /**
+     * @brief Selects one entry point of a shader program for a pipeline stage.
+     */
+    struct ShaderEntry final
+    {
+        ShaderProgramHandle Program{};
+
+        // Name of the entry point, e.g. "fragmentMain". Leave it null when the program has exactly one entry point
+        // of the stage this entry is used for. Only read while the pipeline is created.
+        const char* EntryPoint = nullptr;
+
+        [[nodiscard]] bool Valid() const { return Program.Valid(); }
     };
 
     /**
@@ -270,23 +274,15 @@ namespace EOS
         Topology PipelineTopology = Topology::Triangle;
         VertexInputData VertexInput;
 
-        ShaderModuleHandle VertexShader;
-        ShaderModuleHandle TessellationControlShader;
-        ShaderModuleHandle TesselationShader;
-        ShaderModuleHandle GeometryShader;
-        ShaderModuleHandle TaskShader;
-        ShaderModuleHandle MeshShader;
-        ShaderModuleHandle FragmentShader;
+        ShaderEntry VertexShader;
+        ShaderEntry TessellationControlShader;
+        ShaderEntry TessellationEvaluationShader;
+        ShaderEntry GeometryShader;
+        ShaderEntry TaskShader;
+        ShaderEntry MeshShader;
+        ShaderEntry FragmentShader;
 
         SpecializationConstantDescription SpecInfo = {};
-
-        const char* EntryPointVert = "main";
-        const char* EntryPointTesc = "main";
-        const char* EntryPointTese = "main";
-        const char* EntryPointGeom = "main";
-        const char* EntryPointTask = "main";
-        const char* EntryPointMesh = "main";
-        const char* EntryPointFrag = "main";
 
         ColorAttachment ColorAttachments[EOS_MAX_COLOR_ATTACHMENTS] = {};
         Format DepthFormat = Format::Invalid;
@@ -315,9 +311,8 @@ namespace EOS
    */
     struct ComputePipelineDescription final
     {
-        ShaderModuleHandle ComputeShader;
+        ShaderEntry ComputeShader;
         SpecializationConstantDescription SpecInfo{};
-        const char* EntryPoint = "main";
         const char* DebugName = "";
     };
 
@@ -701,12 +696,26 @@ namespace EOS
         [[nodiscard]] virtual uint32_t GetNumMipLevels(TextureHandle handle) const = 0;
 
         /**
-        * @brief Creates shader module from a compiled shader.
-        * @param fileName The name of the shader.
-        * @param shaderStage The stage of the shader
-        * @return A Holder to a shader module.
+        * @brief Loads a shader program: a Slang module compiled with all (or the listed) entry points. It comes from the
+        *        shader cache when that is up to date and is compiled otherwise. Pipelines select its entry points with
+        *        ShaderEntry{program, "entryPointName"}.
+        * @param description The module, entry points and defines, e.g. {.Module = "shade"} for shade.slang.
+        * @return A Holder to the program, empty when the program failed to compile or does not fit EOS's pipeline layout.
         */
-        virtual EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, ShaderStage shaderStage) = 0;
+        virtual EOS::Holder<EOS::ShaderProgramHandle> CreateShaderProgram(const ShaderProgramDescription& description) = 0;
+
+        /**
+        * @brief Gets the compiled program and its reflection: entry points, push-constant size, thread-group sizes,
+        *        specialization constants, vertex inputs, color outputs and source files. After a hot reload this returns
+        *        the new version; a version obtained earlier stays valid.
+        * @param handle The program to inspect.
+        */
+        [[nodiscard]] virtual std::shared_ptr<const CompiledShaderProgram> GetShaderProgram(ShaderProgramHandle handle) const = 0;
+
+        /**
+        * @brief Size of the push-constant range every pipeline shares. A program whose push constants are larger is rejected.
+        */
+        [[nodiscard]] virtual uint32_t GetMaxPushConstantSize() const = 0;
 
         /**
         * @brief Creates a RenderPipeline and returns a handle to it.
@@ -723,7 +732,8 @@ namespace EOS
         virtual EOS::Holder<EOS::ComputePipelineHandle> CreateComputePipeline(const ComputePipelineDescription& computePipelineDescription) = 0;
 
         /**
-        * @brief Reloads changed shader files and rebuilds affected pipelines.
+        * @brief Recompiles every program in use whose source files (imports included) changed on disk, and rebuilds the
+        *        pipelines that use it. A program that fails to compile or validate keeps its previous version.
         * @return Number of pipelines rebuilt.
         */
         virtual uint32_t ReloadShaders() = 0;
@@ -767,10 +777,10 @@ namespace EOS
 
 
         /**
-        * @brief Handles the destruction of a ShaderModuleHandle and what it holds.
-        * @param handle The handle to the shaderModule you want to destroy.
+        * @brief Handles the destruction of a ShaderProgramHandle. Pipelines created from the program keep working.
+        * @param handle The handle to the program you want to destroy.
         */
-        virtual void Destroy(ShaderModuleHandle handle) = 0;
+        virtual void Destroy(ShaderProgramHandle handle) = 0;
 
         /**
         * @brief Handles the destruction of a RenderPipelineHandle and what it holds.
@@ -1089,6 +1099,15 @@ void cmdBindComputePipeline(EOS::ICommandBuffer& commandBuffer, EOS::ComputePipe
 void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount, const EOS::Dependencies& dependencies = {});
 
 /**
+ * @brief Dispatches enough thread groups of the bound compute pipeline to cover threadCount threads in every dimension.
+ *        The thread-group size comes from the shader's [numthreads] attribute.
+ * @param commandBuffer The commandbuffer we want to record into.
+ * @param threadCount The number of threads to run in each dimension.
+ * @param dependencies The Input/Output dependencies of this pipeline
+ */
+void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadCount, const EOS::Dependencies& dependencies = {});
+
+/**
  * @brief Add a command to the commandbuffer that we will now start rendering, defining what should be rendered and what dependencies we have.
  * @param commandBuffer The commandbuffer where we add the command to.
  * @param renderPass Describes what how our framebuffer attachements should be loaded / stored ...
@@ -1164,7 +1183,8 @@ void cmdDrawIndexed(const EOS::ICommandBuffer& commandBuffer, uint32_t indexCoun
 void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, const EOS:: BufferHandle& indirectBuffer, size_t indirectBufferOffset, uint32_t drawCount, uint32_t stride = 0);
 
 /**
- * @brief Binds push constants.
+ * @brief Binds push constants. Every pipeline shares one push-constant range (see IContext::GetMaxPushConstantSize), so
+ *        values stay bound when the pipeline changes.
  * @param commandBuffer The commandbuffer we want to record to bind our push constants.
  * @param data The actual data we want to bind.
  * @param size The size of the data we want to bind.

@@ -162,15 +162,11 @@ struct Resources final
 
     EOS::SamplerHolder DepthMapSampler;
 
-    EOS::ShaderModuleHolder ShaderHandleVertShade;
-    EOS::ShaderModuleHolder ShaderHandleFragShade;
-    EOS::ShaderModuleHolder ShaderHandleVertEarlyZ;
-    EOS::ShaderModuleHolder ShaderHandleFragEarlyZ;
-    EOS::ShaderModuleHolder ShaderHandleVertShadow;
-    EOS::ShaderModuleHolder ShaderHandleGeomShadow;
-    EOS::ShaderModuleHolder ShaderHandleFragShadow;
-    EOS::ShaderModuleHolder ShaderHandleComputeDepthReduction;
-    EOS::ShaderModuleHolder ShaderHandleComputeCascadeSetup;
+    EOS::ShaderProgramHolder ShadeShader;
+    EOS::ShaderProgramHolder EarlyZShader;
+    EOS::ShaderProgramHolder ShadowShader;
+    EOS::ShaderProgramHolder DepthReductionShader;
+    EOS::ShaderProgramHolder CascadeSetupShader;
 };
 
 Resources Handles;
@@ -494,15 +490,11 @@ int main()
 
     ExampleApp App{appDescription};
 
-    Handles.ShaderHandleVertShade = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleFragShade = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Fragment);
-    Handles.ShaderHandleVertEarlyZ = App.Context->CreateShaderModule("earlyZ", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleFragEarlyZ = App.Context->CreateShaderModule("earlyZ", EOS::ShaderStage::Fragment);
-    Handles.ShaderHandleVertShadow = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleGeomShadow = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Geometry);
-    Handles.ShaderHandleFragShadow = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Fragment);
-    Handles.ShaderHandleComputeDepthReduction = App.Context->CreateShaderModule("depthReduction", EOS::ShaderStage::Compute);
-    Handles.ShaderHandleComputeCascadeSetup = App.Context->CreateShaderModule("cascadeSetup", EOS::ShaderStage::Compute);
+    Handles.ShadeShader = App.Context->CreateShaderProgram({.Module = "shade"});
+    Handles.EarlyZShader = App.Context->CreateShaderProgram({.Module = "earlyZ"});
+    Handles.ShadowShader = App.Context->CreateShaderProgram({.Module = "shadowDepth"});
+    Handles.DepthReductionShader = App.Context->CreateShaderProgram({.Module = "depthReduction"});
+    Handles.CascadeSetupShader = App.Context->CreateShaderProgram({.Module = "cascadeSetup"});
 
     Handles.DepthTexture = App.Context->CreateTexture(
     {
@@ -731,8 +723,8 @@ int main()
     EOS::RenderPipelineDescription renderPipelineShade
     {
         .VertexInput = VertexInputDataShade,
-        .VertexShader = Handles.ShaderHandleVertShade,
-        .FragmentShader = Handles.ShaderHandleFragShade,
+        .VertexShader = {Handles.ShadeShader, "vertexMain"},
+        .FragmentShader = {Handles.ShadeShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
         .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
@@ -743,8 +735,8 @@ int main()
     EOS::RenderPipelineDescription renderPipelineEarlyZDesc
     {
         .VertexInput = VertexInputDataShadowDepth,
-        .VertexShader = Handles.ShaderHandleVertEarlyZ,
-        .FragmentShader = Handles.ShaderHandleFragEarlyZ,
+        .VertexShader = {Handles.EarlyZShader, "vertexMain"},
+        .FragmentShader = {Handles.EarlyZShader, "fragmentMain"},
         .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "EarlyZ Render Pipeline",
@@ -754,9 +746,9 @@ int main()
     EOS::RenderPipelineDescription renderPipelineShadow
     {
         .VertexInput = VertexInputDataShadowDepth,
-        .VertexShader = Handles.ShaderHandleVertShadow,
-        .GeometryShader = Handles.ShaderHandleGeomShadow,
-        .FragmentShader = Handles.ShaderHandleFragShadow,
+        .VertexShader = {Handles.ShadowShader, "vertexMain"},
+        .GeometryShader = {Handles.ShadowShader, "geometryMain"},
+        .FragmentShader = {Handles.ShadowShader, "fragmentMain"},
         .DepthFormat = App.Context->GetFormat(Handles.ShadowDepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
         .DepthClamping = true,
@@ -766,14 +758,14 @@ int main()
 
     const EOS::ComputePipelineDescription computeDepthReductionDesc
     {
-        .ComputeShader = Handles.ShaderHandleComputeDepthReduction,
+        .ComputeShader = {Handles.DepthReductionShader, "computeMain"},
         .DebugName = "Depth Reduction Compute Pipeline",
     };
     Handles.ComputePipelineDepthReduction = App.Context->CreateComputePipeline(computeDepthReductionDesc);
 
     const EOS::ComputePipelineDescription computeCascadeSetupDesc
     {
-        .ComputeShader = Handles.ShaderHandleComputeCascadeSetup,
+        .ComputeShader = {Handles.CascadeSetupShader, "computeMain"},
         .DebugName = "Cascade Setup Compute Pipeline",
     };
     Handles.ComputePipelineCascadeSetup = App.Context->CreateComputePipeline(computeCascadeSetupDesc);

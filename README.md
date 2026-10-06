@@ -60,6 +60,31 @@ option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
     - Used as the output location for compiled shaders.
 
 
+# Shaders
+Shaders are written in [Slang](https://shader-slang.org). Every `.slang` file with `[shader("...")]` entry points is a
+program; the other files are modules it imports.
+
+- **Compilation**: before an example builds, `EOSShaderCompilerTool` compiles its programs and the engine's into
+  `bin/shaders/<Example>/<Debug|Release>/<module>.eosprog`. Each file holds the SPIR-V of every entry point plus the
+  reflection (push-constant size, thread-group size, specialization constants, vertex inputs, color outputs, bindings).
+  A program is only recompiled when one of its source files (imports included), the compiler options or the Slang
+  version changed. Pass `--force` to recompile everything, or `--reflect <module>` to print a program's reflection.
+- **Runtime**: `IContext::CreateShaderProgram({.Module = "shade"})` loads a program from the cache and falls back to
+  compiling it when the cache is stale (only with `EOS_SHADER_TOOLS=ON`). Pipelines pick its entry points by name:
+  `.VertexShader = {shade, "vertexMain"}`. `IContext::GetShaderProgram(handle)` returns the reflection, and
+  `cmdDispatchThreads` uses the reflected `[numthreads]` to size a dispatch.
+- **Pipeline layout**: every pipeline shares one layout: the bindless descriptor set (`src/shaders/bindings.slang`) plus
+  one push-constant range visible to all stages (`IContext::GetMaxPushConstantSize()`, 256 bytes on desktop GPUs).
+  Programs are checked against it when they are created: larger push constants or bindings outside the bindless set
+  are rejected with an error. Pipeline creation also checks that every vertex shader input has a matching attribute.
+- **Hot reload**: `IContext::ReloadShaders()` recompiles every program in use whose source files, imports included,
+  changed on disk, and rebuilds the pipelines that use it. A program that fails to compile or validate keeps its
+  previous version.
+- **Conventions**: matrices are row-major and multiply row vectors (`mul(v, M)`), which matches glm's memory layout;
+  buffers use scalar layout. Debug builds compile shaders with debug info and without optimization, so they can be
+  stepped through in RenderDoc or Nsight.
+
+
 # Building
 This project is built using CMake and Ninja.
 

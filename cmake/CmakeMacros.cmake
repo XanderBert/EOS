@@ -120,13 +120,16 @@ macro(CREATE_LIB name)
 endmacro()
 
 
-function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH SHADER_FILES_LIST)
+# Runs EOSShaderCompilerTool before TARGET_NAME builds. The custom target runs on every build; the tool itself skips
+# every module whose cache is up to date (it hashes each module's sources, imports included), so an unchanged build
+# costs a few file reads and never starts Slang.
+function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH)
     if(NOT TARGET EOSShaderCompilerTool)
         return()
     endif()
 
     set(SHADER_COMPILE_TARGET "CompileShaders_${TARGET_NAME}")
-    
+
     add_custom_target(${SHADER_COMPILE_TARGET}
         COMMAND $<TARGET_FILE:EOSShaderCompilerTool>
             --project-shaders "${PROJECT_SHADER_PATH}"
@@ -136,7 +139,6 @@ function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SH
         COMMENT "Compiling shaders for ${TARGET_NAME}"
         USES_TERMINAL
         VERBATIM
-        DEPENDS ${SHADER_FILES_LIST}
     )
     set_property(TARGET ${SHADER_COMPILE_TARGET} PROPERTY FOLDER "Internal/Shaders")
     add_dependencies(${SHADER_COMPILE_TARGET} EOSShaderCompilerTool)
@@ -163,7 +165,9 @@ macro(CREATE_EXAMPLE name)
     eos_copy_slang_runtime(${PROJECT_NAME})
 
     set(PROJECT_SHADER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
-    set(SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin")
+    # Every example gets its own shader cache: examples define modules with the same name (indirectModel, shade, ...)
+    # that are different programs.
+    set(SHADER_OUTPUT_PATH "${CMAKE_SOURCE_DIR}/bin/shaders/${PROJECT_NAME}")
     SET_SHADER_PATHS(${PROJECT_NAME} "${PROJECT_SHADER_PATH}" "${SHADER_OUTPUT_PATH}")
     SETUP_GROUPS("${SRC_FILES}")
 
@@ -176,7 +180,6 @@ macro(CREATE_EXAMPLE name)
         "${PROJECT_SHADER_PATH}"
         "${ENGINE_SHADER_PATH}"
         "${SHADER_OUTPUT_PATH}"
-        "${SHADER_FILES}"
     )
 endmacro()
 

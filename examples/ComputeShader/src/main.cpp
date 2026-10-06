@@ -15,7 +15,7 @@ struct ComputePushConstants final
 
 struct Resources final
 {
-    EOS::ShaderModuleHolder ComputeShader;
+    EOS::ShaderProgramHolder ComputeShader;
     EOS::BufferHolder ComputeBuffer;
     EOS::ComputePipelineHolder ComputePipeline;
 };
@@ -37,7 +37,7 @@ int main()
     };
 
     ExampleApp App{appDescription};
-    Handles.ComputeShader = App.Context->CreateShaderModule("compute", EOS::ShaderStage::Compute);
+    Handles.ComputeShader = App.Context->CreateShaderProgram({.Module = "compute"});
 
     constexpr ComputePayload initialPayload
     {
@@ -56,7 +56,7 @@ int main()
 
     const EOS::ComputePipelineDescription computePipelineDescription
     {
-        .ComputeShader = Handles.ComputeShader,
+        .ComputeShader = {Handles.ComputeShader, "computeMain"},
         .DebugName = "Compute Validation Pipeline",
     };
     Handles.ComputePipeline = App.Context->CreateComputePipeline(computePipelineDescription);

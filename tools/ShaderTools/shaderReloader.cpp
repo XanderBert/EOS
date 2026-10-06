@@ -1,268 +1,104 @@
 #include "shaderReloader.h"
 
-#include <algorithm>
-#include <array>
+#include <system_error>
 
 #include "logger.h"
-#include "utils.h"
+#include "shaderCache.h"
+#include "shaderCompiler.h"
 
-//TODO: I need to handle that fact that shaders get copied...
-
-ShaderReloader::ShaderReloader(std::filesystem::path shaderSourcePath, std::filesystem::path engineShaderSourcePath)
-: ShaderSourcePath(std::move(shaderSourcePath))
-, EngineShaderSourcePath(std::move(engineShaderSourcePath))
-{}
-
-void ShaderReloader::TrackShader([[maybe_unused]] const EOS::ShaderModuleHandle& shaderHandle,[[maybe_unused]]  const char* fileName,[[maybe_unused]]  EOS::ShaderStage shaderStage)
+void ShaderReloader::TrackProgram([[maybe_unused]] const EOS::CompiledShaderProgram& program)
 {
 #if defined(EOS_SHADER_TOOLS)
-    if (!shaderHandle.Valid() || !fileName)  return;
-
-    TrackedShader& trackedShader = ShaderMap[shaderHandle];
-    const std::filesystem::path incomingPath(fileName);
-    const std::filesystem::path modulePath = incomingPath.has_extension() ? incomingPath : std::filesystem::path(std::string(fileName) + ".slang");
-
-    std::filesystem::path resolvedPath;
-    if (modulePath.is_absolute())
+    auto [it, isNewProgram] = Programs.try_emplace(EOS::ShaderCache::HashDescription(program.Description));
+    TrackedProgram& trackedProgram = it->second;
+    if (isNewProgram)
     {
-        resolvedPath = modulePath;
-    }
-    else
-    {
-        const std::filesystem::path projectPath = ShaderSourcePath / modulePath;
-        const std::filesystem::path enginePath = EngineShaderSourcePath.empty() ? std::filesystem::path{} : (EngineShaderSourcePath / modulePath);
-
-        if (std::filesystem::exists(projectPath))
-        {
-            resolvedPath = projectPath;
-        }
-        else if (!enginePath.empty() && std::filesystem::exists(enginePath))
-        {
-            resolvedPath = enginePath;
-        }
-        else
-        {
-            resolvedPath = projectPath;
-        }
+        trackedProgram.Description = program.Description;
+        WatchSources(trackedProgram, program);
     }
 
-    trackedShader.SourceFilePath = resolvedPath;
-
-    const std::string stem = modulePath.stem().string();
-    trackedShader.ModuleName = stem.empty() ? modulePath.filename().string() : stem;
-
-    trackedShader.ShaderStage = shaderStage;
-    trackedShader.LastWriteTime = EOS::GetLastWriteTime(trackedShader.SourceFilePath.string());
+    ++trackedProgram.UseCount;
 #endif
 }
 
-void ShaderReloader::UntrackShader([[maybe_unused]] const EOS::ShaderModuleHandle& shaderHandle)
+void ShaderReloader::UntrackProgram([[maybe_unused]] const EOS::ShaderProgramDescription& description)
 {
 #if defined(EOS_SHADER_TOOLS)
-    ShaderMap.erase(shaderHandle);
+    const auto it = Programs.find(EOS::ShaderCache::HashDescription(description));
+    if (it == Programs.end()) return;
+
+    if (--it->second.UseCount == 0) Programs.erase(it);
 #endif
 }
 
-void ShaderReloader::RegisterRenderPipelineDependencies([[maybe_unused]] const EOS::RenderPipelineHandle& pipelineHandle, [[maybe_unused]] const EOS::RenderPipelineDescription& renderPipelineDescription)
+uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] EOS::ShaderCompiler& compiler, [[maybe_unused]] const ProgramRecompiledCallback& onProgramRecompiled)
 {
 #if defined(EOS_SHADER_TOOLS)
-    CHECK_RETURN(pipelineHandle.Valid(), "RenderPipeline is not valid!");
-
-    const std::array<EOS::ShaderModuleHandle, 7> shaderHandles =
+    std::vector<TrackedProgram*> changedPrograms;
+    for (auto& [programKey, trackedProgram] : Programs)
     {
-        renderPipelineDescription.VertexShader,
-        renderPipelineDescription.TessellationControlShader,
-        renderPipelineDescription.TesselationShader,
-        renderPipelineDescription.GeometryShader,
-        renderPipelineDescription.FragmentShader,
-        renderPipelineDescription.TaskShader,
-        renderPipelineDescription.MeshShader,
-    };
-
-    for (const EOS::ShaderModuleHandle shaderHandle : shaderHandles)
-    {
-        if (!shaderHandle.Valid()) continue;
-
-        TrackedShader& trackedShader = ShaderMap[shaderHandle];
-        AddUniqueRenderPipelineHandle(trackedShader.DependentRenderPipelines, pipelineHandle);
+        if (HaveSourcesChanged(trackedProgram)) changedPrograms.push_back(&trackedProgram);
     }
-#endif
-}
 
-void ShaderReloader::UnregisterRenderPipelineDependencies([[maybe_unused]] const EOS::RenderPipelineHandle& pipelineHandle)
-{
-#if defined(EOS_SHADER_TOOLS)
-    CHECK_RETURN(pipelineHandle.Valid(), "RenderPipeline is not valid!");
+    if (changedPrograms.empty()) return 0;
 
-    for (auto& [shaderHandle, trackedShader] : ShaderMap)
+    // Slang caches every module it has loaded; start over so edited imports are read from disk again.
+    compiler.ResetModuleCache();
+
+    uint32_t numberOfRebuiltPipelines = 0;
+    for (TrackedProgram* trackedProgram : changedPrograms)
     {
-        static_cast<void>(shaderHandle);
-        RemoveRenderPipelineHandle(trackedShader.DependentRenderPipelines, pipelineHandle);
-    }
-#endif
-}
+        const std::string& moduleName = trackedProgram->Description.Module;
 
-void ShaderReloader::RegisterComputePipelineDependencies([[maybe_unused]] const EOS::ComputePipelineHandle& pipelineHandle, [[maybe_unused]] const EOS::ComputePipelineDescription& computePipelineDescription)
-{
-#if defined(EOS_SHADER_TOOLS)
-    CHECK_RETURN(pipelineHandle.Valid(), "ComputePipeline is not valid!");
-
-    const EOS::ShaderModuleHandle computeShaderHandle = computePipelineDescription.ComputeShader;
-
-    if (!computeShaderHandle.Valid()) return;
-
-    TrackedShader& trackedShader = ShaderMap[computeShaderHandle];
-    AddUniqueComputePipelineHandle(trackedShader.DependentComputePipelines, pipelineHandle);
-#endif
-}
-
-void ShaderReloader::UnregisterComputePipelineDependencies([[maybe_unused]] const EOS::ComputePipelineHandle& pipelineHandle)
-{
-#if defined(EOS_SHADER_TOOLS)
-    CHECK_RETURN(pipelineHandle.Valid(), "ComputePipeline is not valid!");
-
-    for (auto& [shaderHandle, trackedShader] : ShaderMap)
-    {
-        static_cast<void>(shaderHandle);
-        RemoveComputePipelineHandle(trackedShader.DependentComputePipelines, pipelineHandle);
-    }
-#endif
-}
-
-uint32_t ShaderReloader::ReloadChangedShaders([[maybe_unused]] const ReloadShaderModuleCallback& reloadShaderModuleCallback,[[maybe_unused]] const RebuildRenderPipelineCallback& rebuildRenderPipelineCallback, [[maybe_unused]] const RebuildComputePipelineCallback& rebuildComputePipelineCallback)
-{
-#if defined(EOS_SHADER_TOOLS)
-    if (!reloadShaderModuleCallback || !rebuildRenderPipelineCallback) return 0;
-
-    std::vector<EOS::RenderPipelineHandle> pipelinesToRebuild;
-    std::vector<EOS::ComputePipelineHandle> computePipelinesToRebuild;
-    for (auto& [shaderHandle, trackedShader] : ShaderMap)
-    {
-        if (!shaderHandle.Valid() || trackedShader.SourceFilePath.empty() || trackedShader.ModuleName.empty())
+        std::string diagnostics;
+        const std::shared_ptr<const EOS::CompiledShaderProgram> program = compiler.CompileProgram(trackedProgram->Description, diagnostics);
+        if (!program)
         {
-            continue;
-        }
+            EOS::Logger->error("Hot reload: '{}' failed to compile, keeping the previous version.\n{}", moduleName, diagnostics);
 
-        if (trackedShader.ShaderStage == EOS::ShaderStage::None)
-        {
-            continue;
-        }
-
-        const std::filesystem::file_time_type currentWriteTime = EOS::GetLastWriteTime(trackedShader.SourceFilePath.string());
-        if (currentWriteTime == std::filesystem::file_time_type{})
-        {
-            if (!trackedShader.MissingTimestampWarningLogged)
+            // Remember the failed version so it is not recompiled again until it changes.
+            for (WatchedFile& file : trackedProgram->Files)
             {
-                EOS::Logger->warn("Hot reload could not resolve timestamp for shader source: {}", trackedShader.SourceFilePath.string());
-                trackedShader.MissingTimestampWarningLogged = true;
+                std::error_code errorCode;
+                file.LastWriteTime = std::filesystem::last_write_time(file.Path, errorCode);
             }
             continue;
         }
 
-        trackedShader.MissingTimestampWarningLogged = false;
+        if (!diagnostics.empty()) EOS::Logger->warn("Hot reload: '{}'\n{}", moduleName, diagnostics);
 
-        if (trackedShader.LastWriteTime != std::filesystem::file_time_type{} && currentWriteTime <= trackedShader.LastWriteTime)
-        {
-            continue;
-        }
-
-        if (!reloadShaderModuleCallback(shaderHandle, trackedShader.ModuleName.c_str(), trackedShader.ShaderStage))
-        {
-            continue;
-        }
-
-        trackedShader.LastWriteTime = currentWriteTime;
-
-        for (const EOS::RenderPipelineHandle pipelineHandle : trackedShader.DependentRenderPipelines)
-        {
-            AddUniqueRenderPipelineHandle(pipelinesToRebuild, pipelineHandle);
-        }
-
-        for (const EOS::ComputePipelineHandle computePipelineHandle : trackedShader.DependentComputePipelines)
-        {
-            AddUniqueComputePipelineHandle(computePipelinesToRebuild, computePipelineHandle);
-        }
+        WatchSources(*trackedProgram, *program);
+        numberOfRebuiltPipelines += onProgramRecompiled(program);
+        EOS::Logger->info("Hot reload: recompiled '{}'", moduleName);
     }
 
-    uint32_t numberOfRebuiltGraphicsPipelines = 0;
-    for (const EOS::RenderPipelineHandle pipelineHandle : pipelinesToRebuild)
-    {
-        if (rebuildRenderPipelineCallback(pipelineHandle)) ++numberOfRebuiltGraphicsPipelines;
-    }
-    if (numberOfRebuiltGraphicsPipelines > 0) EOS::Logger->info("Rebuilt {} Graphics Pipelines after shader reload", numberOfRebuiltGraphicsPipelines);
-
-
-    uint32_t numberOfRebuiltComputePipelines = 0;
-    if (rebuildComputePipelineCallback)
-    {
-        for (const EOS::ComputePipelineHandle computePipelineHandle : computePipelinesToRebuild)
-        {
-            if (rebuildComputePipelineCallback(computePipelineHandle)) ++numberOfRebuiltComputePipelines;
-        }
-    }
-    if (numberOfRebuiltComputePipelines > 0) EOS::Logger->info("Rebuilt {} Compute Pipelines after shader reload", numberOfRebuiltComputePipelines);
-
-
-
-    return numberOfRebuiltGraphicsPipelines;
-#endif
+    if (numberOfRebuiltPipelines > 0) EOS::Logger->info("Hot reload: rebuilt {} pipelines", numberOfRebuiltPipelines);
+    return numberOfRebuiltPipelines;
+#else
     return 0;
+#endif
 }
 
 #if defined(EOS_SHADER_TOOLS)
-void ShaderReloader::AddUniqueRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle)
+void ShaderReloader::WatchSources(TrackedProgram& trackedProgram, const EOS::CompiledShaderProgram& program)
 {
-    CHECK_RETURN(handle.Valid(), "The renderPipelineHandle is not valid!");
-    for (const EOS::RenderPipelineHandle existingHandle : handles)
+    trackedProgram.Files.clear();
+    for (const EOS::ShaderSourceDependency& dependency : program.Dependencies)
     {
-        if (existingHandle == handle) return;
-    }
-
-    handles.push_back(handle);
-}
-
-void ShaderReloader::RemoveRenderPipelineHandle(std::vector<EOS::RenderPipelineHandle>& handles, EOS::RenderPipelineHandle handle)
-{
-    CHECK_RETURN(handle.Valid(), "The renderPipelineHandle is not valid!");
-    if (handles.empty()) return;
-
-    for (auto iterator = handles.begin(); iterator != handles.end();)
-    {
-        if (*iterator == handle)
-        {
-            iterator = handles.erase(iterator);
-            continue;
-        }
-
-        ++iterator;
+        std::error_code errorCode;
+        trackedProgram.Files.push_back({.Path = dependency.Path, .LastWriteTime = std::filesystem::last_write_time(dependency.Path, errorCode)});
     }
 }
 
-void ShaderReloader::AddUniqueComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle)
+bool ShaderReloader::HaveSourcesChanged(const TrackedProgram& trackedProgram)
 {
-    CHECK_RETURN(handle.Valid(), "The computePipelineHandle is not valid!");
-    for (const EOS::ComputePipelineHandle existingHandle : handles)
+    for (const WatchedFile& file : trackedProgram.Files)
     {
-        if (existingHandle == handle) return;
+        // Any difference counts, not only newer: checking out an older revision also changes the shader.
+        std::error_code errorCode;
+        if (std::filesystem::last_write_time(file.Path, errorCode) != file.LastWriteTime) return true;
     }
 
-    handles.push_back(handle);
-}
-
-void ShaderReloader::RemoveComputePipelineHandle(std::vector<EOS::ComputePipelineHandle>& handles, EOS::ComputePipelineHandle handle)
-{
-    CHECK_RETURN(handle.Valid(), "The computePipelineHandle is not valid!");
-    if (handles.empty()) return;
-
-    for (auto iterator = handles.begin(); iterator != handles.end();)
-    {
-        if (*iterator == handle)
-        {
-            iterator = handles.erase(iterator);
-            continue;
-        }
-
-        ++iterator;
-    }
+    return false;
 }
 #endif

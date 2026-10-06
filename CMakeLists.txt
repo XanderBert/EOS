@@ -112,7 +112,9 @@ endif ()
 # rather than disabling a feature.
 target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
 target_sources(EOS PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCache.cpp"
     "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCompiler.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReflection.cpp"
     "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReloader.cpp"
 )
 

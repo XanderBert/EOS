@@ -91,15 +91,12 @@ struct DofCompositePC final
 
 struct Resources final
 {
-    EOS::ShaderModuleHolder VertexShader;
-    EOS::ShaderModuleHolder PixelShader;
-    EOS::ShaderModuleHolder DeferredLightComputeShader;
-    EOS::ShaderModuleHolder DofDownsampleShader;
-    EOS::ShaderModuleHolder DofBlurHShader;
-    EOS::ShaderModuleHolder DofBlurVShader;
-    EOS::ShaderModuleHolder DofCompositeShader;
-    EOS::ShaderModuleHolder PresentVertShader;
-    EOS::ShaderModuleHolder PresentFragShader;
+    EOS::ShaderProgramHolder ModelShader;
+    EOS::ShaderProgramHolder DeferredLightComputeShader;
+    EOS::ShaderProgramHolder DofDownsampleShader;
+    EOS::ShaderProgramHolder DofBlurShader;
+    EOS::ShaderProgramHolder DofCompositeShader;
+    EOS::ShaderProgramHolder PresentShader;
     EOS::TextureHolder DepthTexture;
     EOS::TextureHolder GbufferAlbedoTexture;
     EOS::TextureHolder GbufferNormalTexture;
@@ -148,15 +145,12 @@ int main()
 
     ExampleApp App{appDescription};
 
-    Handles.VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
-    Handles.PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
-    Handles.DeferredLightComputeShader = App.Context->CreateShaderModule("deferredLightCompute", EOS::ShaderStage::Compute);
-    Handles.DofDownsampleShader = App.Context->CreateShaderModule("dofDownsample", EOS::ShaderStage::Compute);
-    Handles.DofBlurHShader = App.Context->CreateShaderModule("dofBlurH", EOS::ShaderStage::Compute);
-    Handles.DofBlurVShader = App.Context->CreateShaderModule("dofBlurV", EOS::ShaderStage::Compute);
-    Handles.DofCompositeShader = App.Context->CreateShaderModule("dofComposite", EOS::ShaderStage::Compute);
-    Handles.PresentVertShader = App.Context->CreateShaderModule("present", EOS::ShaderStage::Vertex);
-    Handles.PresentFragShader = App.Context->CreateShaderModule("present", EOS::ShaderStage::Fragment);
+    Handles.ModelShader = App.Context->CreateShaderProgram({.Module = "indirectModel"});
+    Handles.DeferredLightComputeShader = App.Context->CreateShaderProgram({.Module = "deferredLightCompute"});
+    Handles.DofDownsampleShader = App.Context->CreateShaderProgram({.Module = "dofDownsample"});
+    Handles.DofBlurShader = App.Context->CreateShaderProgram({.Module = "dofBlur"});
+    Handles.DofCompositeShader = App.Context->CreateShaderProgram({.Module = "dofComposite"});
+    Handles.PresentShader = App.Context->CreateShaderProgram({.Module = "present"});
     Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - DepthOfField");
 
     Handles.GbufferAlbedoTexture = App.Context->CreateTexture({
@@ -284,8 +278,8 @@ int main()
     const EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = Handles.VertexShader,
-        .FragmentShader = Handles.PixelShader,
+        .VertexShader = {Handles.ModelShader, "vertexMain"},
+        .FragmentShader = {Handles.ModelShader, "fragmentMain"},
         .ColorAttachments =
         {
             { .ColorFormat = EOS::Format::RGBA_UN8 },
@@ -300,43 +294,43 @@ int main()
 
     const EOS::ComputePipelineDescription deferredLightingPipelineDescription
     {
-        .ComputeShader = Handles.DeferredLightComputeShader,
+        .ComputeShader = {Handles.DeferredLightComputeShader, "computeMain"},
         .DebugName     = "Deferred Lighting Compute Pipeline",
     };
     Handles.DeferredLightingPipeline = App.Context->CreateComputePipeline(deferredLightingPipelineDescription);
 
     const EOS::ComputePipelineDescription dofDownsamplePipelineDescription
     {
-        .ComputeShader = Handles.DofDownsampleShader,
+        .ComputeShader = {Handles.DofDownsampleShader, "computeMain"},
         .DebugName     = "DOF Downsample Pipeline",
     };
     Handles.DofDownsamplePipeline = App.Context->CreateComputePipeline(dofDownsamplePipelineDescription);
 
     const EOS::ComputePipelineDescription dofBlurHPipelineDescription
     {
-        .ComputeShader = Handles.DofBlurHShader,
+        .ComputeShader = {Handles.DofBlurShader, "blurHorizontal"},
         .DebugName     = "DOF Blur H Pipeline",
     };
     Handles.DofBlurHPipeline = App.Context->CreateComputePipeline(dofBlurHPipelineDescription);
 
     const EOS::ComputePipelineDescription dofBlurVPipelineDescription
     {
-        .ComputeShader = Handles.DofBlurVShader,
+        .ComputeShader = {Handles.DofBlurShader, "blurVertical"},
         .DebugName     = "DOF Blur V Pipeline",
     };
     Handles.DofBlurVPipeline = App.Context->CreateComputePipeline(dofBlurVPipelineDescription);
 
     const EOS::ComputePipelineDescription dofCompositePipelineDescription
     {
-        .ComputeShader = Handles.DofCompositeShader,
+        .ComputeShader = {Handles.DofCompositeShader, "computeMain"},
         .DebugName     = "DOF Composite Pipeline",
     };
     Handles.DofCompositePipeline = App.Context->CreateComputePipeline(dofCompositePipelineDescription);
 
     const EOS::RenderPipelineDescription presentPipelineDescription
     {
-        .VertexShader     = Handles.PresentVertShader,
-        .FragmentShader   = Handles.PresentFragShader,
+        .VertexShader     = {Handles.PresentShader, "vertexMain"},
+        .FragmentShader   = {Handles.PresentShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat() }},
         .PipelineCullMode = EOS::CullMode::None,
         .DebugName        = "Present Pipeline",
@@ -510,9 +504,7 @@ int main()
         {
             cmdBindComputePipeline(cmdBuffer, Handles.DeferredLightingPipeline);
             cmdPushConstants(cmdBuffer, lightingPC);
-            uint32_t dispatchX = (App.Window.Width + 7) / 8;
-            uint32_t dispatchY = (App.Window.Height + 7) / 8;
-            cmdDispatchThreadGroups(cmdBuffer, {dispatchX, dispatchY, 1});
+            cmdDispatchThreads(cmdBuffer, {static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height), 1});
         }
         cmdPopMarker(cmdBuffer);
 
@@ -528,9 +520,7 @@ int main()
         {
             cmdBindComputePipeline(cmdBuffer, Handles.DofDownsamplePipeline);
             cmdPushConstants(cmdBuffer, dofDownsamplePC);
-            uint32_t dispatchX = (halfWidth + 7) / 8;
-            uint32_t dispatchY = (halfHeight + 7) / 8;
-            cmdDispatchThreadGroups(cmdBuffer, {dispatchX, dispatchY, 1});
+            cmdDispatchThreads(cmdBuffer, {halfWidth, halfHeight, 1});
         }
         cmdPopMarker(cmdBuffer);
 
@@ -545,9 +535,7 @@ int main()
         {
             cmdBindComputePipeline(cmdBuffer, Handles.DofBlurHPipeline);
             cmdPushConstants(cmdBuffer, dofBlurHPC);
-            uint32_t dispatchX = (halfWidth + 7) / 8;
-            uint32_t dispatchY = (halfHeight + 7) / 8;
-            cmdDispatchThreadGroups(cmdBuffer, {dispatchX, dispatchY, 1});
+            cmdDispatchThreads(cmdBuffer, {halfWidth, halfHeight, 1});
         }
         cmdPopMarker(cmdBuffer);
 
@@ -562,9 +550,7 @@ int main()
         {
             cmdBindComputePipeline(cmdBuffer, Handles.DofBlurVPipeline);
             cmdPushConstants(cmdBuffer, dofBlurVPC);
-            uint32_t dispatchX = (halfWidth + 7) / 8;
-            uint32_t dispatchY = (halfHeight + 7) / 8;
-            cmdDispatchThreadGroups(cmdBuffer, {dispatchX, dispatchY, 1});
+            cmdDispatchThreads(cmdBuffer, {halfWidth, halfHeight, 1});
         }
         cmdPopMarker(cmdBuffer);
 
@@ -579,9 +565,7 @@ int main()
         {
             cmdBindComputePipeline(cmdBuffer, Handles.DofCompositePipeline);
             cmdPushConstants(cmdBuffer, dofCompositePC);
-            uint32_t dispatchX = (App.Window.Width + 7) / 8;
-            uint32_t dispatchY = (App.Window.Height + 7) / 8;
-            cmdDispatchThreadGroups(cmdBuffer, {dispatchX, dispatchY, 1});
+            cmdDispatchThreads(cmdBuffer, {static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height), 1});
         }
         cmdPopMarker(cmdBuffer);
 

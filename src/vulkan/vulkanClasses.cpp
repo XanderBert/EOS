@@ -124,24 +124,24 @@ void cmdBindComputePipeline(EOS::ICommandBuffer& commandBuffer, EOS::ComputePipe
 {
     CHECK(!handle.Empty(), "Please pass a valid compute handle");
     CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
+    VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
 
     vulkanCommandBuffer->CurrentGraphicsPipeline = {};
     vulkanCommandBuffer->CurrentComputePipeline = std::move(handle);
     vulkanCommandBuffer->CurrentRayTracingPipeline = {};
 
-    //Create Pipeline if needed
-    //TODO: Can we somehow fetch all needed pipelines beforehand and create them in advance?
-    VkPipeline pipeline = vulkanCommandBuffer->VkContext->GetComputePipeline(vulkanCommandBuffer->CurrentComputePipeline);
-    CHECK(pipeline != VK_NULL_HANDLE, "Failed to create or fetch the compute pipeline");
+    // Update the descriptor set first: it can grow the global pipeline layout, which the pipeline has to match.
+    vkContext->UpdateDescriptorSet();
 
-    const ComputePipelineState* cps = vulkanCommandBuffer->VkContext->ComputePipelinePool.Get(vulkanCommandBuffer->CurrentComputePipeline);
+    const ComputePipelineState* cps = vkContext->GetUpToDateComputePipeline(vulkanCommandBuffer->CurrentComputePipeline);
+    CHECK(cps && cps->Pipeline != VK_NULL_HANDLE, "Failed to create or fetch the compute pipeline");
+    if (!cps || cps->Pipeline == VK_NULL_HANDLE) return;
 
-    if (vulkanCommandBuffer->LastPipelineBound != pipeline)
+    if (vulkanCommandBuffer->LastPipelineBound != cps->Pipeline)
     {
-        vulkanCommandBuffer->LastPipelineBound = pipeline;
-        vkCmdBindPipeline(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-        vulkanCommandBuffer->VkContext->UpdateDescriptorSet();
-        vulkanCommandBuffer->VkContext->BindDefaultDescriptorSet(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, cps->PipelineLayout);
+        vulkanCommandBuffer->LastPipelineBound = cps->Pipeline;
+        vkCmdBindPipeline(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, cps->Pipeline);
+        vkContext->BindDefaultDescriptorSet(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE);
     }
 }
 
@@ -153,6 +153,26 @@ void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dime
     EOS_PROFILER_GPU_ZONE("vkCmdDispatch", vulkanCommandBuffer->VkContext->GetTracyVkContext(), vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, EOS_PROFILER_COLOR_CMD_DISPATCH);
 
     vkCmdDispatch(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, threadGroupCount.Width, threadGroupCount.Height, threadGroupCount.Depth);
+}
+
+void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadCount, const EOS::Dependencies& dependencies)
+{
+    const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
+    CHECK(!vulkanCommandBuffer->CurrentComputePipeline.Empty(), "cmdDispatchThreads needs a bound compute pipeline");
+
+    const ComputePipelineState* cps = vulkanCommandBuffer->VkContext->ComputePipelinePool.Get(vulkanCommandBuffer->CurrentComputePipeline);
+    CHECK(cps, "The bound compute pipeline is not valid");
+    if (!cps) return;
+
+    const auto groupsFor = [](uint32_t threads, uint32_t groupSize) { return (threads + std::max(groupSize, 1u) - 1) / std::max(groupSize, 1u); };
+    const EOS::Dimensions threadGroupCount
+    {
+        .Width = groupsFor(threadCount.Width, cps->ThreadGroupSize[0]),
+        .Height = groupsFor(threadCount.Height, cps->ThreadGroupSize[1]),
+        .Depth = groupsFor(threadCount.Depth, cps->ThreadGroupSize[2]),
+    };
+
+    cmdDispatchThreadGroups(commandBuffer, threadGroupCount, dependencies);
 }
 
 void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description, const EOS::Dependencies &dependencies)
@@ -369,22 +389,9 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipeli
     vulkanCommandBuffer->CurrentComputePipeline = {};
     vulkanCommandBuffer->CurrentRayTracingPipeline = {};
 
-    VulkanRenderPipelinePool& renderPipelinePool = vulkanCommandBuffer->VkContext->RenderPipelinePool;
-    const VulkanRenderPipelineState* rps = renderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
+    const VulkanRenderPipelineState* rps = vulkanCommandBuffer->VkContext->GetUpToDateRenderPipeline(vulkanCommandBuffer->CurrentGraphicsPipeline);
     CHECK(rps, "The resolved RenderPipeline State is not valid");
-
-    const VkDescriptorSetLayout currentDescriptorSetLayout = vulkanCommandBuffer->VkContext->GetActiveDescriptorSetLayout();
-
-    if (rps->Pipeline == VK_NULL_HANDLE ||
-        rps->PipelineLayout == VK_NULL_HANDLE ||
-        rps->LastDescriptorSetLayout == VK_NULL_HANDLE ||
-        rps->LastDescriptorSetLayout != currentDescriptorSetLayout)
-    {
-        EOS::Logger->warn("Rebuilding Render Pipeline because of invalid pipeline state or incompatible descriptor set layout");
-        CHECK(vulkanCommandBuffer->VkContext->RebuildRenderPipeline(vulkanCommandBuffer->CurrentGraphicsPipeline), "Failed to rebuild render pipeline for descriptor set compatibility");
-        rps = renderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
-        CHECK(rps, "The resolved RenderPipeline State is not valid after rebuild");
-    }
+    if (!rps) return;
 
     const bool hasDepthAttachmentPipeline = rps->Description.DepthFormat != EOS::Format::Invalid;
     const bool hasDepthAttachmentPass = !vulkanCommandBuffer->VulkanFrameBuffer.DepthStencil.Texture.Empty();
@@ -395,7 +402,7 @@ void cmdBindRenderPipeline(EOS::ICommandBuffer &commandBuffer, EOS::RenderPipeli
     {
         vulkanCommandBuffer->LastPipelineBound = rps->Pipeline;
         vkCmdBindPipeline(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rps->Pipeline);
-        vulkanCommandBuffer->VkContext->BindDefaultDescriptorSet(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rps->PipelineLayout);
+        vulkanCommandBuffer->VkContext->BindDefaultDescriptorSet(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS);
     }
 }
 
@@ -462,40 +469,37 @@ void cmdDrawIndexedIndirect(const EOS::ICommandBuffer& commandBuffer, const EOS:
 
 void cmdPushConstants(const EOS::ICommandBuffer &commandBuffer, const void *data, size_t size, size_t offset)
 {
-    CHECK(size % 4 == 0, "A push constant must be a multiple of 4");
+    CHECK(size % 4 == 0 && offset % 4 == 0, "Push constant offset and size must be multiples of 4");
 
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     VulkanContext* vkContext = vulkanCommandBuffer->VkContext;
 
+    CHECK(offset + size <= vkContext->GetMaxPushConstantSize(), "Push constants [{}, {}) exceed the {} bytes every pipeline shares", offset, offset + size, vkContext->GetMaxPushConstantSize());
     CHECK(!vulkanCommandBuffer->CurrentGraphicsPipeline.Empty() || !vulkanCommandBuffer->CurrentComputePipeline.Empty() || !vulkanCommandBuffer->CurrentRayTracingPipeline.Empty(), "No pipeline bound, cannot set pushconstants");
 
+    // A whole push-constant struct whose size differs from what the shader declares is almost always a C++ struct
+    // that drifted from its Slang counterpart. Reported once per pipeline.
+    const auto checkSize = [&](auto* pipelineState, const char* debugName)
+    {
+        if (!pipelineState || offset != 0 || size == pipelineState->PushConstantSize || pipelineState->ReportedPushConstantSizeMismatch) return;
 
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkShaderStageFlags shaderStageFlags = 0;
+        pipelineState->ReportedPushConstantSizeMismatch = true;
+        EOS::Logger->warn("Pipeline '{}': pushing {} bytes of push constants, but its shaders declare {} bytes. Check that the C++ struct matches the Slang one.",
+                          debugName, size, pipelineState->PushConstantSize);
+    };
 
     if (!vulkanCommandBuffer->CurrentGraphicsPipeline.Empty())
     {
-        const VulkanRenderPipelineState* stateGraphics = vkContext->RenderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
-        CHECK(stateGraphics, "Graphics State is not valid");
-
-        pipelineLayout = stateGraphics->PipelineLayout;
-        shaderStageFlags = stateGraphics->ShaderStageFlags;
+        VulkanRenderPipelineState* state = vkContext->RenderPipelinePool.Get(vulkanCommandBuffer->CurrentGraphicsPipeline);
+        checkSize(state, state ? state->Description.DebugName : "");
     }
     else if (!vulkanCommandBuffer->CurrentComputePipeline.Empty())
     {
-        const ComputePipelineState* stateCompute = vkContext->ComputePipelinePool.Get(vulkanCommandBuffer->CurrentComputePipeline);
-        CHECK(stateCompute, "Compute State is not valid");
-
-        pipelineLayout = stateCompute->PipelineLayout;
-        shaderStageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    }
-    else
-    {
-        CHECK(false, "Ray tracing push constants are not implemented yet");
+        ComputePipelineState* state = vkContext->ComputePipelinePool.Get(vulkanCommandBuffer->CurrentComputePipeline);
+        checkSize(state, state ? state->Description.DebugName : "");
     }
 
-    CHECK(pipelineLayout != VK_NULL_HANDLE, "Pipeline layout is not valid");
-    vkCmdPushConstants(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, pipelineLayout, shaderStageFlags, static_cast<uint32_t>(offset), static_cast<uint32_t>(size), data);
+    vkCmdPushConstants(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, vkContext->GetPipelineLayout(), VK_SHADER_STAGE_ALL, static_cast<uint32_t>(offset), static_cast<uint32_t>(size), data);
 }
 
 void cmdSetDepthState(const EOS::ICommandBuffer &commandBuffer, const EOS::DepthState &depthState)
@@ -2179,8 +2183,8 @@ VulkanStagingDevice::StagingAllocation VulkanStagingDevice::AcquireStagingRegion
 
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.Config)
-, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderOutputPath, std::vector<std::string>{contextDescription.ShaderPath.string(), contextDescription.EngineShaderPath.string()}))
-, ShaderReloaderImpl(std::make_unique<ShaderReloader>(contextDescription.ShaderPath, contextDescription.EngineShaderPath))
+, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderOutputPath, std::vector<std::filesystem::path>{contextDescription.ShaderPath, contextDescription.EngineShaderPath}))
+, ShaderReloaderImpl(std::make_unique<ShaderReloader>())
 {
     EOS_PROFILER_FUNCTION();
     CHECK(volkInitialize() == VK_SUCCESS, "Failed to Initialize VOLK");
@@ -2243,9 +2247,13 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     VulkanStagingBuffer = std::make_unique<VulkanStagingDevice>(this);
 
+    // Every pipeline shares one push-constant range. 256 bytes is what desktop GPUs offer; the spec only guarantees 128.
+    PushConstantRangeSize = std::min(MaxPushConstantsSize, 256u);
+
+    GrowBindlessCapacity({.MaxTextures = 512, .MaxSamplers = 16, .MaxAccelStructs = 128}); //TODO: Query max from beginning and assign that
     DescriptorSets.emplace_back();
     LastUpdatedDescriptorSet = 0;
-    GrowDescriptorPool(512, 16, 128); //TODO: Query max from beginning and assign that
+    AllocateDescriptorSet(DescriptorSets.back());
 
     // Create Dummy Texture
     constexpr uint32_t pixel = 0xFF000000;
@@ -2301,7 +2309,7 @@ VulkanContext::~VulkanContext()
     // clearing it destroys buffers and therefore has to happen while BufferPool still holds them.
     clearPool(AccelerationStructurePool, "Acceleration Structures");
     clearPool(TexturePool, "textures");
-    clearPool(ShaderModulePool, "Shader Modules");
+    clearPool(ShaderProgramPool, "Shader Programs");
     clearPool(RenderPipelinePool, "Render Pipelines");
     clearPool(ComputePipelinePool, "Compute Pipelines");
     clearPool(BufferPool, "Buffers");
@@ -2315,11 +2323,6 @@ VulkanContext::~VulkanContext()
 
     for (DescriptorSetState& descriptorSetState : DescriptorSets)
     {
-        if (descriptorSetState.Layout != VK_NULL_HANDLE)
-        {
-            vkDestroyDescriptorSetLayout(VulkanDevice, descriptorSetState.Layout, nullptr);
-        }
-
         if (descriptorSetState.Pool != VK_NULL_HANDLE)
         {
             vkDestroyDescriptorPool(VulkanDevice, descriptorSetState.Pool, nullptr);
@@ -2327,6 +2330,8 @@ VulkanContext::~VulkanContext()
     }
 
     DescriptorSets.clear();
+    vkDestroyPipelineLayout(VulkanDevice, GlobalPipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(VulkanDevice, GlobalDescriptorSetLayout, nullptr);
 
     vmaDestroyAllocator(vmaAllocator);
 
@@ -2497,86 +2502,349 @@ EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const
     return dimensions;
 }
 
-EOS::Holder<EOS::ShaderModuleHandle> VulkanContext::CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage)
+namespace
 {
-    EOS::ShaderInfo shaderInfo{};
-    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo))
+    void LogShaderDiagnostics(const std::string& moduleName, const std::string& diagnostics, bool succeeded)
     {
-        EOS::Logger->error("Could not load shader: {}", fileName);
+        if (diagnostics.empty()) return;
+
+        if (succeeded) EOS::Logger->warn("Shader '{}':\n{}", moduleName, diagnostics);
+        else EOS::Logger->error("Shader '{}' failed to compile:\n{}", moduleName, diagnostics);
+    }
+
+    [[nodiscard]] VkShaderStageFlagBits ToVkShaderStage(EOS::ShaderStage stage)
+    {
+        switch (stage)
+        {
+            case EOS::ShaderStage::Vertex:        return VK_SHADER_STAGE_VERTEX_BIT;
+            case EOS::ShaderStage::Hull:          return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+            case EOS::ShaderStage::Domain:        return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+            case EOS::ShaderStage::Geometry:      return VK_SHADER_STAGE_GEOMETRY_BIT;
+            case EOS::ShaderStage::Fragment:      return VK_SHADER_STAGE_FRAGMENT_BIT;
+            case EOS::ShaderStage::Compute:       return VK_SHADER_STAGE_COMPUTE_BIT;
+            case EOS::ShaderStage::RayGen:        return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+            case EOS::ShaderStage::Intersection:  return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+            case EOS::ShaderStage::AnyHit:        return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+            case EOS::ShaderStage::ClosestHit:    return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+            case EOS::ShaderStage::Miss:          return VK_SHADER_STAGE_MISS_BIT_KHR;
+            case EOS::ShaderStage::Callable:      return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+            case EOS::ShaderStage::Mesh:          return VK_SHADER_STAGE_MESH_BIT_EXT;
+            case EOS::ShaderStage::Amplification: return VK_SHADER_STAGE_TASK_BIT_EXT;
+            case EOS::ShaderStage::None:          break;
+        }
+
+        return VK_SHADER_STAGE_ALL;
+    }
+
+    [[nodiscard]] std::string ListEntryPoints(const EOS::CompiledShaderProgram& program)
+    {
+        std::string names;
+        for (const EOS::ShaderEntryPoint& entryPoint : program.EntryPoints)
+        {
+            if (!names.empty()) names += ", ";
+            names += fmt::format("{} ({})", entryPoint.Name, EOS::ToString(entryPoint.Stage));
+        }
+
+        return names.empty() ? std::string("none") : names;
+    }
+
+    // Whether a value is read as float, signed or unsigned integer. A vertex attribute must match the shader input in this.
+    enum class NumericClass : uint8_t
+    {
+        Unknown,
+        Float,
+        SignedInteger,
+        UnsignedInteger,
+    };
+
+    [[nodiscard]] NumericClass ToNumericClass(EOS::ShaderScalarType type)
+    {
+        switch (type)
+        {
+            case EOS::ShaderScalarType::Float16:
+            case EOS::ShaderScalarType::Float32:
+            case EOS::ShaderScalarType::Float64:
+                return NumericClass::Float;
+            case EOS::ShaderScalarType::Int8:
+            case EOS::ShaderScalarType::Int16:
+            case EOS::ShaderScalarType::Int32:
+            case EOS::ShaderScalarType::Int64:
+                return NumericClass::SignedInteger;
+            case EOS::ShaderScalarType::Bool:
+            case EOS::ShaderScalarType::UInt8:
+            case EOS::ShaderScalarType::UInt16:
+            case EOS::ShaderScalarType::UInt32:
+            case EOS::ShaderScalarType::UInt64:
+                return NumericClass::UnsignedInteger;
+            case EOS::ShaderScalarType::Unknown:
+                break;
+        }
+
+        return NumericClass::Unknown;
+    }
+
+    [[nodiscard]] NumericClass ToNumericClass(EOS::VertexFormat format)
+    {
+        using enum EOS::VertexFormat;
+        switch (format)
+        {
+            case Byte1: case Byte2: case Byte3: case Byte4:
+            case Short1: case Short2: case Short3: case Short4:
+            case Int1: case Int2: case Int3: case Int4:
+                return NumericClass::SignedInteger;
+            case UByte1: case UByte2: case UByte3: case UByte4:
+            case UShort1: case UShort2: case UShort3: case UShort4:
+            case UInt1: case UInt2: case UInt3: case UInt4:
+                return NumericClass::UnsignedInteger;
+            case Invalid:
+                return NumericClass::Unknown;
+            default:    // Float, HalfFloat and the normalized formats are read as floats
+                return NumericClass::Float;
+        }
+    }
+
+    // Every location the vertex shader reads needs an attribute, and the attribute must be read as the same kind of
+    // number: Vulkan leaves both mistakes undefined.
+    [[nodiscard]] bool ValidateVertexInputs(const EOS::ShaderEntryPoint& entryPoint, const EOS::VertexInputData& vertexInput, const char* pipelineName)
+    {
+        bool isValid = true;
+        const uint32_t numberOfAttributes = vertexInput.GetNumAttributes();
+
+        for (const EOS::ShaderVarying& input : entryPoint.Inputs)
+        {
+            const EOS::VertexInputData::VertexAttribute* attribute = nullptr;
+            for (uint32_t i = 0; i < numberOfAttributes; ++i)
+            {
+                if (vertexInput.Attributes[i].Location == input.Location) attribute = &vertexInput.Attributes[i];
+            }
+
+            if (!attribute)
+            {
+                EOS::Logger->error("Pipeline '{}': vertex shader '{}' reads '{}' ({}{}) at location {}, but VertexInput has no attribute at that location",
+                                   pipelineName, entryPoint.Name, input.Name, input.Semantic, input.SemanticIndex, input.Location);
+                isValid = false;
+                continue;
+            }
+
+            const NumericClass shaderClass = ToNumericClass(input.ComponentType);
+            if (shaderClass != NumericClass::Unknown && shaderClass != ToNumericClass(attribute->Format))
+            {
+                EOS::Logger->error("Pipeline '{}': vertex shader '{}' reads '{}' at location {} as a different numeric type (float / int / uint) than its vertex attribute format",
+                                   pipelineName, entryPoint.Name, input.Name, input.Location);
+                isValid = false;
+            }
+        }
+
+        return isValid;
+    }
+
+    // Vulkan silently ignores specialization constants a pipeline sets but no shader declares; that is almost always a typo.
+    void WarnAboutUnknownSpecializationConstants(const EOS::SpecializationConstantDescription& specializationInfo, const std::vector<const EOS::CompiledShaderProgram*>& programs, const char* pipelineName)
+    {
+        for (uint32_t i = 0; i < specializationInfo.GetNumberOfSpecializationConstants(); ++i)
+        {
+            const uint32_t constantID = specializationInfo.Entries[i].ID;
+            const bool isDeclared = std::ranges::any_of(programs, [constantID](const EOS::CompiledShaderProgram* program)
+            {
+                return std::ranges::any_of(program->SpecializationConstants, [constantID](const EOS::ShaderSpecializationConstant& constant) { return constant.ConstantID == constantID; });
+            });
+
+            if (!isDeclared) EOS::Logger->warn("Pipeline '{}' sets specialization constant {}, which none of its shaders declare", pipelineName, constantID);
+        }
+    }
+
+    // The bindings of EOS's bindless descriptor set (set 0), matching src/shaders/bindings.slang.
+    struct BindlessBinding final
+    {
+        uint32_t Binding;
+        EOS::ShaderResourceType Type;
+    };
+
+    constexpr BindlessBinding kBindlessLayout[] =
+    {
+        {EOS::Bindings::Textures,               EOS::ShaderResourceType::SampledTexture},
+        {EOS::Bindings::Samplers,               EOS::ShaderResourceType::Sampler},
+        {EOS::Bindings::StorageImages,          EOS::ShaderResourceType::StorageTexture},
+        {EOS::Bindings::Textures2DArray,        EOS::ShaderResourceType::SampledTexture},
+        {EOS::Bindings::AccelerationStructures, EOS::ShaderResourceType::AccelerationStructure},
+    };
+
+    [[nodiscard]] const char* DebugNameOrEmpty(const char* debugName)
+    {
+        return debugName ? debugName : "";
+    }
+}
+
+bool VulkanContext::ValidateProgram(const EOS::CompiledShaderProgram& program, std::string& outErrors) const
+{
+    bool isValid = true;
+
+    if (program.EntryPoints.empty())
+    {
+        outErrors += "it has no entry points marked with [shader(\"...\")]\n";
+        isValid = false;
+    }
+
+    if (program.PushConstantSize > PushConstantRangeSize)
+    {
+        outErrors += fmt::format("its push constants are {} bytes, but every pipeline shares a {}-byte push-constant range\n", program.PushConstantSize, PushConstantRangeSize);
+        isValid = false;
+    }
+
+    for (const EOS::ShaderResourceBinding& binding : program.ResourceBindings)
+    {
+        const BindlessBinding* expectedBinding = nullptr;
+        for (const BindlessBinding& bindlessBinding : kBindlessLayout)
+        {
+            if (bindlessBinding.Binding == binding.Binding) expectedBinding = &bindlessBinding;
+        }
+
+        if (binding.Set != 0 || !expectedBinding)
+        {
+            outErrors += fmt::format("'{}' is bound to set {} binding {}, which is not part of EOS's bindless descriptor set (see bindings.slang); "
+                                     "pass resources through the bindless arrays or buffer pointers instead\n", binding.Name, binding.Set, binding.Binding);
+            isValid = false;
+        }
+        else if (binding.Type != expectedBinding->Type)
+        {
+            outErrors += fmt::format("'{}' at set 0 binding {} does not have the descriptor type EOS binds there (see bindings.slang)\n", binding.Name, binding.Binding);
+            isValid = false;
+        }
+        else if (binding.Binding == EOS::Bindings::AccelerationStructures && binding.StageMask != 0 && !HasAccelerationStructure)
+        {
+            outErrors += fmt::format("'{}' uses acceleration structures, which this device does not support\n", binding.Name);
+            isValid = false;
+        }
+    }
+
+    return isValid;
+}
+
+EOS::Holder<EOS::ShaderProgramHandle> VulkanContext::CreateShaderProgram(const EOS::ShaderProgramDescription& description)
+{
+    std::string diagnostics;
+    const std::shared_ptr<const EOS::CompiledShaderProgram> program = ShaderCompiler->LoadProgram(description, diagnostics);
+    LogShaderDiagnostics(description.Module, diagnostics, program != nullptr);
+    if (!program) return {};
+
+    std::string errors;
+    if (!ValidateProgram(*program, errors))
+    {
+        EOS::Logger->error("Shader program '{}' cannot be used:\n{}", description.Module, errors);
         return {};
     }
 
-
-    VkShaderModule vkShaderModule = VK_NULL_HANDLE;
-
-    const VkShaderModuleCreateInfo createInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = shaderInfo.Spirv.size() * sizeof(uint32_t),
-        .pCode = shaderInfo.Spirv.data(),
-    };
-
-    VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &vkShaderModule);)
-    CHECK(vkShaderModule != VK_NULL_HANDLE, "Failed to create shader module from ShaderInfo");
-
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(vkShaderModule), shaderInfo.DebugName.c_str()));
-
-    VulkanShaderModuleState state
-    {
-        .ShaderModule = vkShaderModule,
-        .PushConstantsSize = shaderInfo.PushConstantSize
-    };
-
-    const EOS::ShaderModuleHandle shaderHandle = ShaderModulePool.Create(std::move(state));
+    const EOS::ShaderProgramHandle handle = ShaderProgramPool.Create({.Program = program});
     if (ShaderReloaderImpl)
     {
-        ShaderReloaderImpl->TrackShader(shaderHandle, fileName, shaderStage);
+        ShaderReloaderImpl->TrackProgram(*program);
     }
 
-    return {this, shaderHandle};
+    return {this, handle};
 }
 
-bool VulkanContext::ReloadShaderModule(EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage)
+std::shared_ptr<const EOS::CompiledShaderProgram> VulkanContext::GetShaderProgram(EOS::ShaderProgramHandle handle) const
 {
-    VulkanShaderModuleState* shaderState = ShaderModulePool.Get(handle);
-    if (!shaderState || !fileName)
+    const VulkanShaderProgramState* state = ShaderProgramPool.Get(handle);
+    return state ? state->Program : nullptr;
+}
+
+bool VulkanContext::ResolveShaderStage(const EOS::ShaderEntry& entry, EOS::ShaderStage stage, const char* pipelineName, PipelineShaderStage& outStage) const
+{
+    const VulkanShaderProgramState* state = ShaderProgramPool.Get(entry.Program);
+    if (!state || !state->Program)
     {
+        EOS::Logger->error("Pipeline '{}': the {} shader does not refer to a valid shader program", pipelineName, EOS::ToString(stage));
         return false;
     }
 
-    EOS::ShaderInfo shaderInfo{};
-    if (!ShaderCompiler->LoadShader(fileName, shaderStage, shaderInfo, true))
+    const EOS::CompiledShaderProgram& program = *state->Program;
+    const EOS::ShaderEntryPoint* entryPoint = nullptr;
+
+    if (entry.EntryPoint && entry.EntryPoint[0] != '\0')
     {
-        EOS::Logger->error("Could not load shader: {}", fileName);
-        return {};
+        entryPoint = program.FindEntryPoint(entry.EntryPoint);
+        if (!entryPoint)
+        {
+            EOS::Logger->error("Pipeline '{}': program '{}' has no entry point '{}'. Entry points: {}", pipelineName, program.Description.Module, entry.EntryPoint, ListEntryPoints(program));
+            return false;
+        }
+
+        if (entryPoint->Stage != stage)
+        {
+            EOS::Logger->error("Pipeline '{}': '{}' in program '{}' is a {} shader but is used as the {} shader", pipelineName, entryPoint->Name, program.Description.Module, EOS::ToString(entryPoint->Stage), EOS::ToString(stage));
+            return false;
+        }
+    }
+    else
+    {
+        // No name given: the program must have exactly one entry point of this stage.
+        uint32_t numberOfCandidates = 0;
+        for (const EOS::ShaderEntryPoint& candidate : program.EntryPoints)
+        {
+            if (candidate.Stage != stage) continue;
+
+            entryPoint = &candidate;
+            ++numberOfCandidates;
+        }
+
+        if (numberOfCandidates != 1)
+        {
+            EOS::Logger->error("Pipeline '{}': program '{}' has {} {} entry points, so the {} shader needs an entry point name. Entry points: {}",
+                               pipelineName, program.Description.Module, numberOfCandidates, EOS::ToString(stage), EOS::ToString(stage), ListEntryPoints(program));
+            return false;
+        }
     }
 
-    VkShaderModule recompiledModule = VK_NULL_HANDLE;
+    outStage = {.Program = state->Program, .EntryPoint = entryPoint->Name, .Stage = stage};
+    return true;
+}
+
+VkShaderModule VulkanContext::CreateTransientShaderModule(const PipelineShaderStage& stage, const EOS::ShaderEntryPoint& entryPoint) const
+{
     const VkShaderModuleCreateInfo createInfo =
     {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = shaderInfo.Spirv.size() * sizeof(uint32_t),
-        .pCode = shaderInfo.Spirv.data(),
+        .codeSize = entryPoint.Spirv.size() * sizeof(uint32_t),
+        .pCode = entryPoint.Spirv.data(),
     };
 
-    VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &recompiledModule);)
-    CHECK(recompiledModule != VK_NULL_HANDLE, "Failed to create reloaded shader module from ShaderInfo");
+    VkShaderModule shaderModule = VK_NULL_HANDLE;
+    VK_ASSERT(vkCreateShaderModule(VulkanDevice, &createInfo, nullptr, &shaderModule));
 
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(recompiledModule), shaderInfo.DebugName.c_str()));
-
-    if (shaderState->ShaderModule != VK_NULL_HANDLE)
-    {
-        vkDestroyShaderModule(VulkanDevice, shaderState->ShaderModule, nullptr);
-    }
-
-    shaderState->ShaderModule = recompiledModule;
-    shaderState->PushConstantsSize = shaderInfo.PushConstantSize;
-    return true;
+    const std::string debugName = stage.Program->Description.Module + "::" + entryPoint.Name;
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_SHADER_MODULE, reinterpret_cast<uint64_t>(shaderModule), debugName.c_str()));
+    return shaderModule;
 }
 
 bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState)
 {
     const EOS::RenderPipelineDescription& description = renderPipelineState.Description;
+    const char* pipelineName = DebugNameOrEmpty(description.DebugName);
+
+    // Look every stage up in its program (which may have been hot reloaded) and validate it before the current
+    // pipeline is touched, so a failed rebuild leaves the pipeline as it was.
+    std::vector<const EOS::ShaderEntryPoint*> entryPoints;
+    std::vector<const EOS::CompiledShaderProgram*> programs;
+    uint32_t pushConstantSize = 0;
+    for (const PipelineShaderStage& stage : renderPipelineState.Stages)
+    {
+        const EOS::ShaderEntryPoint* entryPoint = stage.Program->FindEntryPoint(stage.EntryPoint);
+        if (!entryPoint || entryPoint->Stage != stage.Stage)
+        {
+            EOS::Logger->error("Pipeline '{}': program '{}' has no {} entry point '{}' anymore", pipelineName, stage.Program->Description.Module, EOS::ToString(stage.Stage), stage.EntryPoint);
+            return false;
+        }
+
+        if (entryPoint->Stage == EOS::ShaderStage::Vertex && !ValidateVertexInputs(*entryPoint, description.VertexInput, pipelineName)) return false;
+
+        entryPoints.push_back(entryPoint);
+        programs.push_back(stage.Program.get());
+        pushConstantSize = std::max(pushConstantSize, entryPoint->PushConstantSize);
+    }
+
+    WarnAboutUnknownSpecializationConstants(description.SpecInfo, programs, pipelineName);
+
     const uint32_t numColorAttachments = description.GetNumColorAttachments();
 
     VkPipelineColorBlendAttachmentState colorBlendAttachmentStates[EOS_MAX_COLOR_ATTACHMENTS]{};
@@ -2618,41 +2886,6 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
         }
     }
 
-    const VulkanShaderModuleState* vertModule = ShaderModulePool.Get(description.VertexShader);
-    const VulkanShaderModuleState* tescModule = ShaderModulePool.Get(description.TessellationControlShader);
-    const VulkanShaderModuleState* teseModule = ShaderModulePool.Get(description.TesselationShader);
-    const VulkanShaderModuleState* geomModule = ShaderModulePool.Get(description.GeometryShader);
-    const VulkanShaderModuleState* fragModule = ShaderModulePool.Get(description.FragmentShader);
-    const VulkanShaderModuleState* taskModule = ShaderModulePool.Get(description.TaskShader);
-    const VulkanShaderModuleState* meshModule = ShaderModulePool.Get(description.MeshShader);
-
-    if (description.MeshShader.Valid())
-    {
-        CHECK(meshModule, "Invalid mesh shader module in pipeline: {}", description.DebugName);
-    }
-    else
-    {
-        CHECK(vertModule, "Invalid vertex shader module in pipeline: {}", description.DebugName);
-    }
-    CHECK(fragModule, "Invalid fragment shader module in pipeline: {}", description.DebugName);
-
-    if (description.TaskShader.Valid())
-    {
-        CHECK(taskModule, "Invalid task shader module in pipeline: {}", description.DebugName);
-    }
-    if (description.TessellationControlShader.Valid())
-    {
-        CHECK(tescModule, "Invalid tessellation control shader module in pipeline: {}", description.DebugName);
-    }
-    if (description.TesselationShader.Valid())
-    {
-        CHECK(teseModule, "Invalid tessellation evaluation shader module in pipeline: {}", description.DebugName);
-    }
-    if (description.GeometryShader.Valid())
-    {
-        CHECK(geomModule, "Invalid geometry shader module in pipeline: {}", description.DebugName);
-    }
-
     const VkPipelineVertexInputStateCreateInfo ciVertexInputState
     {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -2665,65 +2898,20 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
     VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants]{};
     const VkSpecializationInfo specializationInfo = VkContext::GetPipelineShaderStageSpecializationInfo(description.SpecInfo, entries);
 
-    VkShaderStageFlags shaderStageFlags = 0;
-    uint32_t pushConstantsSize = 0;
-
-    #define UPDATE_PUSH_CONSTANT_SIZE(sm, bit)                     \
-        if (sm)                                                    \
-        {                                                          \
-            pushConstantsSize = std::max(pushConstantsSize, sm->PushConstantsSize); \
-            shaderStageFlags |= bit;                               \
-        }
-
-    UPDATE_PUSH_CONSTANT_SIZE(vertModule, VK_SHADER_STAGE_VERTEX_BIT);
-    UPDATE_PUSH_CONSTANT_SIZE(tescModule, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
-    UPDATE_PUSH_CONSTANT_SIZE(teseModule, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
-    UPDATE_PUSH_CONSTANT_SIZE(geomModule, VK_SHADER_STAGE_GEOMETRY_BIT);
-    UPDATE_PUSH_CONSTANT_SIZE(fragModule, VK_SHADER_STAGE_FRAGMENT_BIT);
-    UPDATE_PUSH_CONSTANT_SIZE(taskModule, VK_SHADER_STAGE_TASK_BIT_EXT);
-    UPDATE_PUSH_CONSTANT_SIZE(meshModule, VK_SHADER_STAGE_MESH_BIT_EXT);
-
-    #undef UPDATE_PUSH_CONSTANT_SIZE
-
-    CHECK(pushConstantsSize <= MaxPushConstantsSize, "Push constants size exceeded {} (max {} bytes)", pushConstantsSize, MaxPushConstantsSize);
-
-    const VkDescriptorSetLayout descriptorSetLayout = GetActiveDescriptorSetLayout();
-    CHECK(descriptorSetLayout != VK_NULL_HANDLE, "No active descriptor set layout was found while building render pipeline");
-
-    const VkDescriptorSetLayout dsls[] = {descriptorSetLayout};
-    const VkPushConstantRange range
-    {
-        .stageFlags = shaderStageFlags,
-        .offset = 0,
-        .size = pushConstantsSize,
-    };
-
-    VkPipelineLayout newPipelineLayout = VK_NULL_HANDLE;
-    const VkPipelineLayoutCreateInfo createInfo
-    {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 1,
-        .pSetLayouts = dsls,
-        .pushConstantRangeCount = pushConstantsSize ? 1u : 0u,
-        .pPushConstantRanges = pushConstantsSize ? &range : nullptr,
-    };
-    VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &createInfo, nullptr, &newPipelineLayout));
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(newPipelineLayout), fmt::format("Pipeline Layout: {}", description.DebugName).c_str()));
-
-    VkPipeline newPipeline = VK_NULL_HANDLE;
-    VK_ASSERT(VulkanPipelineBuilder()
-    .DynamicState(VK_DYNAMIC_STATE_VIEWPORT)
-    .DynamicState(VK_DYNAMIC_STATE_SCISSOR)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS)
-    .DynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)
-    .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)
-    .PrimitiveTypology(VkContext::TopologyToVkPrimitiveTopology(description.PipelineTopology))
-    .RasterizationSamples(VkContext::GetVulkanSampleCountFlags(description.SamplesCount, VkContext::GetFramebufferMSAABitMask(VulkanPhysicalDevice)), description.MinSampleShading)
-    .PolygonMode(VkContext::PolygonModeToVkPolygonMode(description.PolygonModeDescription))
-    .StencilStateOps(VK_STENCIL_FACE_FRONT_BIT,
+    VulkanPipelineBuilder pipelineBuilder;
+    pipelineBuilder
+      .DynamicState(VK_DYNAMIC_STATE_VIEWPORT)
+      .DynamicState(VK_DYNAMIC_STATE_SCISSOR)
+      .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS)
+      .DynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS)
+      .DynamicState(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)
+      .DynamicState(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)
+      .DynamicState(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)
+      .DynamicState(VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE)
+      .PrimitiveTypology(VkContext::TopologyToVkPrimitiveTopology(description.PipelineTopology))
+      .RasterizationSamples(VkContext::GetVulkanSampleCountFlags(description.SamplesCount, VkContext::GetFramebufferMSAABitMask(VulkanPhysicalDevice)), description.MinSampleShading)
+      .PolygonMode(VkContext::PolygonModeToVkPolygonMode(description.PolygonModeDescription))
+      .StencilStateOps(VK_STENCIL_FACE_FRONT_BIT,
                        VkContext::StencilOpToVkStencilOp(description.FrontFaceStencil.StencilFailureOp),
                        VkContext::StencilOpToVkStencilOp(description.FrontFaceStencil.DepthStencilPassOp),
                        VkContext::StencilOpToVkStencilOp(description.FrontFaceStencil.DepthFailureOp),
@@ -2735,17 +2923,6 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
                        VkContext::CompareOpToVkCompareOp(description.BackFaceStencil.StencilCompareOp))
       .StencilMasks(VK_STENCIL_FACE_FRONT_BIT, 0xFF, description.FrontFaceStencil.WriteMask, description.FrontFaceStencil.ReadMask)
       .StencilMasks(VK_STENCIL_FACE_BACK_BIT, 0xFF, description.BackFaceStencil.WriteMask, description.BackFaceStencil.ReadMask)
-      .ShaderStage(taskModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TASK_BIT_EXT, taskModule->ShaderModule, description.EntryPointTask, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .ShaderStage(meshModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_MESH_BIT_EXT, meshModule->ShaderModule, description.EntryPointMesh, &specializationInfo)
-                                : VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertModule->ShaderModule, description.EntryPointVert, &specializationInfo))
-      .ShaderStage(VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragModule->ShaderModule, description.EntryPointFrag, &specializationInfo))
-      .ShaderStage(tescModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, tescModule->ShaderModule, description.EntryPointTesc, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .ShaderStage(teseModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, teseModule->ShaderModule, description.EntryPointTese, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
-      .ShaderStage(geomModule   ? VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_GEOMETRY_BIT, geomModule->ShaderModule, description.EntryPointGeom, &specializationInfo)
-                                : VkPipelineShaderStageCreateInfo{.module = VK_NULL_HANDLE})
       .CullMode(VkContext::CullModeToVkCullMode(description.PipelineCullMode))
       .FrontFace(VkContext::WindingModeToVkFrontFace(description.FrontFaceWinding))
       .VertexInputState(ciVertexInputState)
@@ -2753,55 +2930,170 @@ bool VulkanContext::BuildRenderPipeline(VulkanRenderPipelineState& renderPipelin
       .DepthAttachmentFormat(VkContext::FormatTovkFormat(description.DepthFormat))
       .StencilAttachmentFormat(VkContext::FormatTovkFormat(description.StencilFormat))
       .PatchControlPoints(description.PatchControlPoints)
-      .DepthClamping(renderPipelineState.Description.DepthClamping)
-      .Build(VulkanDevice, nullptr, newPipelineLayout, &newPipeline, description.DebugName));
+      .DepthClamping(description.DepthClamping);
+
+    // Shader modules only live while the pipeline is created; the pipeline keeps its own copy of the code.
+    std::vector<VkShaderModule> shaderModules;
+    for (size_t i = 0; i < renderPipelineState.Stages.size(); ++i)
+    {
+        const PipelineShaderStage& stage = renderPipelineState.Stages[i];
+        const VkShaderModule shaderModule = CreateTransientShaderModule(stage, *entryPoints[i]);
+        shaderModules.push_back(shaderModule);
+        pipelineBuilder.ShaderStage(VkContext::GetPipelineShaderStageCreateInfo(ToVkShaderStage(stage.Stage), shaderModule, entryPoints[i]->Name.c_str(), &specializationInfo));
+    }
+
+    VkPipeline newPipeline = VK_NULL_HANDLE;
+    const VkResult result = pipelineBuilder.Build(VulkanDevice, nullptr, GlobalPipelineLayout, &newPipeline, pipelineName);
+
+    for (const VkShaderModule shaderModule : shaderModules) vkDestroyShaderModule(VulkanDevice, shaderModule, nullptr);
+
+    if (result != VK_SUCCESS || newPipeline == VK_NULL_HANDLE)
+    {
+        EOS::Logger->error("Pipeline '{}': vkCreateGraphicsPipelines failed: {}", pipelineName, string_VkResult(result));
+        return false;
+    }
 
     if (renderPipelineState.Pipeline != VK_NULL_HANDLE)
     {
         Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = renderPipelineState.Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
     }
 
-    if (renderPipelineState.PipelineLayout != VK_NULL_HANDLE)
-    {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState.PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
-    }
-
-    renderPipelineState.ShaderStageFlags = shaderStageFlags;
-    renderPipelineState.LastDescriptorSetLayout = descriptorSetLayout;
-    renderPipelineState.PipelineLayout = newPipelineLayout;
     renderPipelineState.Pipeline = newPipeline;
+    renderPipelineState.PushConstantSize = pushConstantSize;
+    renderPipelineState.PipelineLayoutGeneration = PipelineLayoutGeneration;
+    renderPipelineState.ReportedPushConstantSizeMismatch = false;
     return true;
 }
 
-bool VulkanContext::RebuildRenderPipeline(EOS::RenderPipelineHandle handle)
+bool VulkanContext::BuildComputePipeline(ComputePipelineState& computePipelineState)
 {
-    VulkanRenderPipelineState* renderPipelineState = RenderPipelinePool.Get(handle);
-    if (!renderPipelineState)  return false;
-    return BuildRenderPipeline(*renderPipelineState);
+    const char* pipelineName = DebugNameOrEmpty(computePipelineState.Description.DebugName);
+    const PipelineShaderStage& stage = computePipelineState.Stage;
+
+    const EOS::ShaderEntryPoint* entryPoint = stage.Program->FindEntryPoint(stage.EntryPoint);
+    if (!entryPoint || entryPoint->Stage != EOS::ShaderStage::Compute)
+    {
+        EOS::Logger->error("Pipeline '{}': program '{}' has no compute entry point '{}' anymore", pipelineName, stage.Program->Description.Module, stage.EntryPoint);
+        return false;
+    }
+
+    WarnAboutUnknownSpecializationConstants(computePipelineState.Description.SpecInfo, {stage.Program.get()}, pipelineName);
+
+    VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants] = {};
+    const VkSpecializationInfo specializationInfo = VkContext::GetPipelineShaderStageSpecializationInfo(computePipelineState.Description.SpecInfo, entries);
+
+    const VkShaderModule shaderModule = CreateTransientShaderModule(stage, *entryPoint);
+    const VkComputePipelineCreateInfo createInfo
+    {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .flags = 0,
+        .stage = VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, shaderModule, entryPoint->Name.c_str(), &specializationInfo),
+        .layout = GlobalPipelineLayout,
+        .basePipelineHandle = VK_NULL_HANDLE,
+        .basePipelineIndex = -1,
+    };
+
+    //TODO: Add PipelineCache
+    VkPipeline newPipeline = VK_NULL_HANDLE;
+    const VkResult result = vkCreateComputePipelines(VulkanDevice, nullptr, 1, &createInfo, nullptr, &newPipeline);
+    vkDestroyShaderModule(VulkanDevice, shaderModule, nullptr);
+
+    if (result != VK_SUCCESS || newPipeline == VK_NULL_HANDLE)
+    {
+        EOS::Logger->error("Pipeline '{}': vkCreateComputePipelines failed: {}", pipelineName, string_VkResult(result));
+        return false;
+    }
+
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(newPipeline), pipelineName));
+
+    if (computePipelineState.Pipeline != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = computePipelineState.Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
+    }
+
+    computePipelineState.Pipeline = newPipeline;
+    computePipelineState.PushConstantSize = entryPoint->PushConstantSize;
+    computePipelineState.ThreadGroupSize = entryPoint->ThreadGroupSize;
+    computePipelineState.PipelineLayoutGeneration = PipelineLayoutGeneration;
+    computePipelineState.ReportedPushConstantSizeMismatch = false;
+    return true;
 }
 
-bool VulkanContext::RebuildComputePipeline(EOS::ComputePipelineHandle handle)
+const VulkanRenderPipelineState* VulkanContext::GetUpToDateRenderPipeline(EOS::RenderPipelineHandle handle)
 {
-    ComputePipelineState* cps = ComputePipelinePool.Get(handle);
-    if (!cps) return false;
+    VulkanRenderPipelineState* state = RenderPipelinePool.Get(handle);
+    if (!state) return nullptr;
 
-    // Invalidate the current pipeline so it will be rebuilt on next access
-    if (cps->Pipeline != VK_NULL_HANDLE)
+    if (state->Pipeline == VK_NULL_HANDLE || state->PipelineLayoutGeneration != PipelineLayoutGeneration)
     {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = cps->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
+        if (!BuildRenderPipeline(*state)) EOS::Logger->error("Could not rebuild pipeline '{}' for the grown bindless descriptor set", DebugNameOrEmpty(state->Description.DebugName));
     }
 
-    if (cps->PipelineLayout != VK_NULL_HANDLE)
+    return state;
+}
+
+const ComputePipelineState* VulkanContext::GetUpToDateComputePipeline(EOS::ComputePipelineHandle handle)
+{
+    ComputePipelineState* state = ComputePipelinePool.Get(handle);
+    if (!state) return nullptr;
+
+    if (state->Pipeline == VK_NULL_HANDLE || state->PipelineLayoutGeneration != PipelineLayoutGeneration)
     {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, layout = cps->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
+        if (!BuildComputePipeline(*state)) EOS::Logger->error("Could not rebuild pipeline '{}' for the grown bindless descriptor set", DebugNameOrEmpty(state->Description.DebugName));
     }
 
-    cps->Pipeline = VK_NULL_HANDLE;
-    cps->PipelineLayout = VK_NULL_HANDLE;
-    // Force rebuild by invalidating descriptor set layout
-    cps->LastVkDescriptorSetLayout = VK_NULL_HANDLE;
+    return state;
+}
 
-    return true;
+uint32_t VulkanContext::OnShaderProgramRecompiled(const std::shared_ptr<const EOS::CompiledShaderProgram>& program)
+{
+    const EOS::ShaderProgramDescription& description = program->Description;
+
+    std::string errors;
+    if (!ValidateProgram(*program, errors))
+    {
+        EOS::Logger->error("Hot reload: '{}' cannot be used, keeping the previous version:\n{}", description.Module, errors);
+        return 0;
+    }
+
+    // Programs created from now on get the new version through the compiler; update the ones that already exist.
+    for (VulkanShaderProgramState& state : ShaderProgramPool)
+    {
+        if (state.Program && state.Program->Description == description) state.Program = program;
+    }
+
+    uint32_t numberOfRebuiltPipelines = 0;
+    for (VulkanRenderPipelineState& state : RenderPipelinePool)
+    {
+        std::vector<PipelineShaderStage> previousStages = state.Stages;
+        bool usesProgram = false;
+        for (PipelineShaderStage& stage : state.Stages)
+        {
+            if (stage.Program && stage.Program->Description == description)
+            {
+                stage.Program = program;
+                usesProgram = true;
+            }
+        }
+
+        if (!usesProgram) continue;
+
+        if (BuildRenderPipeline(state)) ++numberOfRebuiltPipelines;
+        else state.Stages = std::move(previousStages);
+    }
+
+    for (ComputePipelineState& state : ComputePipelinePool)
+    {
+        if (!state.Stage.Program || state.Stage.Program->Description != description) continue;
+
+        PipelineShaderStage previousStage = state.Stage;
+        state.Stage.Program = program;
+
+        if (BuildComputePipeline(state)) ++numberOfRebuiltPipelines;
+        else state.Stage = std::move(previousStage);
+    }
+
+    return numberOfRebuiltPipelines;
 }
 
 EOS::Handle<EOS::AccelerationStructure> VulkanContext::CreateBLAS(const EOS::AccelerationStructDescription& desc)
@@ -3061,24 +3353,12 @@ void VulkanContext::GetTLASBuildInfo(const EOS::AccelerationStructDescription& d
 
 uint32_t VulkanContext::ReloadShaders()
 {
-    if (!ShaderReloaderImpl)
-    {
-        return 0;
-    }
+    if (!ShaderReloaderImpl) return 0;
 
-    return ShaderReloaderImpl->ReloadChangedShaders(
-        [this](EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage)
-        {
-            return ReloadShaderModule(handle, fileName, shaderStage);
-        },
-        [this](EOS::RenderPipelineHandle handle)
-        {
-            return RebuildRenderPipeline(handle);
-        },
-        [this](EOS::ComputePipelineHandle handle)
-        {
-            return RebuildComputePipeline(handle);
-        });
+    return ShaderReloaderImpl->ReloadChangedShaders(*ShaderCompiler, [this](const std::shared_ptr<const EOS::CompiledShaderProgram>& program)
+    {
+        return OnShaderProgramRecompiled(program);
+    });
 }
 
 EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription)
@@ -3092,9 +3372,9 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
     if (!hasAnyAttachments) { return {};  }
 
     //Check Tesselation Setup
-    if (renderPipelineDescription.TessellationControlShader.Valid() || renderPipelineDescription.TesselationShader.Valid() || renderPipelineDescription.PatchControlPoints)
+    if (renderPipelineDescription.TessellationControlShader.Valid() || renderPipelineDescription.TessellationEvaluationShader.Valid() || renderPipelineDescription.PatchControlPoints)
     {
-        const bool isTesselationOkay = renderPipelineDescription.TessellationControlShader.Valid() && renderPipelineDescription.TesselationShader.Valid();
+        const bool isTesselationOkay = renderPipelineDescription.TessellationControlShader.Valid() && renderPipelineDescription.TessellationEvaluationShader.Valid();
         CHECK(isTesselationOkay, "You need both Tesselation Control and Evaluation Shaders");
 
         if (!isTesselationOkay){return {}; }
@@ -3112,11 +3392,11 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
         CHECK(!hasVertexShader, "Cannot have vertex shader with mesh shaders");
         if (hasVertexShader) {return {}; }
 
-        const bool hasAttributesOrInputBindings = renderPipelineDescription.VertexInput.GetNumAttributes() == 0 && renderPipelineDescription.VertexInput.GetNumInputBindings() == 0;
+        const bool hasAttributesOrInputBindings = renderPipelineDescription.VertexInput.GetNumAttributes() != 0 || renderPipelineDescription.VertexInput.GetNumInputBindings() != 0;
         CHECK(!hasAttributesOrInputBindings, "Cannot have vertexInput with mesh shaders");
         if (hasAttributesOrInputBindings) {return {}; }
 
-        const bool hasTesselationShader = renderPipelineDescription.TesselationShader.Valid() || renderPipelineDescription.TessellationControlShader.Valid();
+        const bool hasTesselationShader = renderPipelineDescription.TessellationEvaluationShader.Valid() || renderPipelineDescription.TessellationControlShader.Valid();
         CHECK(!hasTesselationShader, "Cannot have tesselation shader with mesh shaders");
         if (hasTesselationShader) {return {}; }
 
@@ -3136,6 +3416,35 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
 
 
     VulkanRenderPipelineState renderPipelineState = {.Description = renderPipelineDescription};
+    const char* pipelineName = DebugNameOrEmpty(renderPipelineDescription.DebugName);
+
+    // Resolve every shader to its compiled entry point now: the description only names them, and its strings need
+    // not outlive this call.
+    const std::pair<const EOS::ShaderEntry*, EOS::ShaderStage> shaderEntries[] =
+    {
+        {&renderPipelineDescription.TaskShader,                   EOS::ShaderStage::Amplification},
+        {&renderPipelineDescription.MeshShader,                   EOS::ShaderStage::Mesh},
+        {&renderPipelineDescription.VertexShader,                 EOS::ShaderStage::Vertex},
+        {&renderPipelineDescription.TessellationControlShader,    EOS::ShaderStage::Hull},
+        {&renderPipelineDescription.TessellationEvaluationShader, EOS::ShaderStage::Domain},
+        {&renderPipelineDescription.GeometryShader,               EOS::ShaderStage::Geometry},
+        {&renderPipelineDescription.FragmentShader,               EOS::ShaderStage::Fragment},
+    };
+
+    for (const auto& [shaderEntry, stage] : shaderEntries)
+    {
+        if (!shaderEntry->Valid()) continue;
+
+        PipelineShaderStage& pipelineStage = renderPipelineState.Stages.emplace_back();
+        if (!ResolveShaderStage(*shaderEntry, stage, pipelineName, pipelineStage)) return {};
+    }
+
+    for (EOS::ShaderEntry* shaderEntry : {&renderPipelineState.Description.TaskShader, &renderPipelineState.Description.MeshShader, &renderPipelineState.Description.VertexShader,
+                                          &renderPipelineState.Description.TessellationControlShader, &renderPipelineState.Description.TessellationEvaluationShader,
+                                          &renderPipelineState.Description.GeometryShader, &renderPipelineState.Description.FragmentShader})
+    {
+        *shaderEntry = {};
+    }
 
     // Iterate and cache vertex input bindings and attributes
     const EOS::VertexInputData& vertexInput = renderPipelineState.Description.VertexInput;
@@ -3170,49 +3479,46 @@ EOS::Holder<EOS::RenderPipelineHandle> VulkanContext::CreateRenderPipeline(const
 
     if (renderPipelineDescription.SpecInfo.Data && renderPipelineDescription.SpecInfo.DataSize)
     {
-        // copy into a local storage
-        renderPipelineState.SpecConstantDataStorage = malloc(renderPipelineDescription.SpecInfo.DataSize);
-        memcpy(renderPipelineState.SpecConstantDataStorage, renderPipelineDescription.SpecInfo.Data, renderPipelineDescription.SpecInfo.DataSize);
-        renderPipelineState.Description.SpecInfo.Data = renderPipelineState.SpecConstantDataStorage;
+        const auto* specializationBytes = static_cast<const uint8_t*>(renderPipelineDescription.SpecInfo.Data);
+        renderPipelineState.SpecializationData.assign(specializationBytes, specializationBytes + renderPipelineDescription.SpecInfo.DataSize);
+        renderPipelineState.Description.SpecInfo.Data = renderPipelineState.SpecializationData.data();
     }
 
-    if (!BuildRenderPipeline(renderPipelineState))
-    {
-        free(renderPipelineState.SpecConstantDataStorage);
-        return {};
-    }
+    if (!BuildRenderPipeline(renderPipelineState)) return {};
 
-    const EOS::RenderPipelineHandle handle = RenderPipelinePool.Create(std::move(renderPipelineState));
     if (ShaderReloaderImpl)
     {
-        ShaderReloaderImpl->RegisterRenderPipelineDependencies(handle, renderPipelineDescription);
+        for (const PipelineShaderStage& stage : renderPipelineState.Stages) ShaderReloaderImpl->TrackProgram(*stage.Program);
     }
 
-    return {this, handle};
+    // The specialization data moves along with its vector, so Description.SpecInfo.Data stays valid.
+    return {this, RenderPipelinePool.Create(std::move(renderPipelineState))};
 }
 
 EOS::Holder<EOS::ComputePipelineHandle> VulkanContext::CreateComputePipeline(const EOS::ComputePipelineDescription& description)
 {
     CHECK(description.ComputeShader.Valid(), "The Compute Shader Handle is not valid!");
-    ComputePipelineState state{description};
-    state.LastVkDescriptorSetLayout = GetActiveDescriptorSetLayout();
+    const char* pipelineName = DebugNameOrEmpty(description.DebugName);
+
+    ComputePipelineState state{.Description = description};
+    if (!ResolveShaderStage(description.ComputeShader, EOS::ShaderStage::Compute, pipelineName, state.Stage)) return {};
+    state.Description.ComputeShader = {};
 
     if (description.SpecInfo.Data && description.SpecInfo.DataSize)
     {
-        //Copy spec info in to a local storage
-        state.SpecConstantDataStorage = malloc(description.SpecInfo.DataSize);
-        memcpy(state.SpecConstantDataStorage, description.SpecInfo.Data, description.SpecInfo.DataSize);
-        state.Description.SpecInfo.Data = state.SpecConstantDataStorage;
+        const auto* specializationBytes = static_cast<const uint8_t*>(description.SpecInfo.Data);
+        state.SpecializationData.assign(specializationBytes, specializationBytes + description.SpecInfo.DataSize);
+        state.Description.SpecInfo.Data = state.SpecializationData.data();
     }
 
-    const EOS::ComputePipelineHandle computeHandle = ComputePipelinePool.Create(std::move(state));
+    if (!BuildComputePipeline(state)) return {};
 
     if (ShaderReloaderImpl)
     {
-        ShaderReloaderImpl->RegisterComputePipelineDependencies(computeHandle, description);
+        ShaderReloaderImpl->TrackProgram(*state.Stage.Program);
     }
 
-    return {this, computeHandle};
+    return {this, ComputePipelinePool.Create(std::move(state))};
 }
 
 EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDescription& bufferDescription)
@@ -3500,29 +3806,22 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
     TexturePool.Destroy(handle);
 }
 
-void VulkanContext::Destroy(EOS::ShaderModuleHandle handle)
+void VulkanContext::Destroy(EOS::ShaderProgramHandle handle)
 {
-    const VulkanShaderModuleState* state = ShaderModulePool.Get(handle);
+    const VulkanShaderProgramState* state = ShaderProgramPool.Get(handle);
+    if (!state) return;
 
-    if (!state) { return; }
-
-    if (ShaderReloaderImpl)
+    if (ShaderReloaderImpl && state->Program)
     {
-        ShaderReloaderImpl->UntrackShader(handle);
+        ShaderReloaderImpl->UntrackProgram(state->Program->Description);
     }
 
-    if (state->ShaderModule != VK_NULL_HANDLE)
-    {
-        vkDestroyShaderModule(VulkanDevice, state->ShaderModule, nullptr);
-    }
-
-    ShaderModulePool.Destroy(handle);
+    ShaderProgramPool.Destroy(handle);
 }
 
 void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
 {
-    VulkanRenderPipelineState* renderPipelineState = RenderPipelinePool.Get(handle);
-
+    const VulkanRenderPipelineState* renderPipelineState = RenderPipelinePool.Get(handle);
     if (!renderPipelineState)
     {
         EOS::Logger->warn("Tried to destroy a non-valid RenderPipelineState");
@@ -3531,32 +3830,25 @@ void VulkanContext::Destroy(EOS::RenderPipelineHandle handle)
 
     if (ShaderReloaderImpl)
     {
-        ShaderReloaderImpl->UnregisterRenderPipelineDependencies(handle);
+        for (const PipelineShaderStage& stage : renderPipelineState->Stages) ShaderReloaderImpl->UntrackProgram(stage.Program->Description);
     }
 
-    //TODO: Questionable solution ....
-    free(renderPipelineState->SpecConstantDataStorage);
-
     Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = renderPipelineState->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
-    Defer(std::packaged_task<void()>([device = VulkanDevice, layout = renderPipelineState->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
-
     RenderPipelinePool.Destroy(handle);
 }
 
 void VulkanContext::Destroy(EOS::ComputePipelineHandle handle)
 {
+    const ComputePipelineState* cps = ComputePipelinePool.Get(handle);
+    CHECK(cps, "The specified handle is not valid!");
+    if (!cps) return;
+
     if (ShaderReloaderImpl)
     {
-        ShaderReloaderImpl->UnregisterComputePipelineDependencies(handle);
+        ShaderReloaderImpl->UntrackProgram(cps->Stage.Program->Description);
     }
 
-    ComputePipelineState* cps = ComputePipelinePool.Get(handle);
-    CHECK(cps, "The specified handle is not valid!");
-    free(cps->SpecConstantDataStorage);
-
     Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = cps->Pipeline]() { vkDestroyPipeline(device, pipeline, nullptr); }));
-    Defer(std::packaged_task<void()>([device = VulkanDevice, layout = cps->PipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
-
     ComputePipelinePool.Destroy(handle);
 }
 
@@ -3776,73 +4068,58 @@ const VulkanContext::DescriptorSetState& VulkanContext::GetActiveDescriptorSetSt
     return DescriptorSets[LastUpdatedDescriptorSet];
 }
 
-VkDescriptorSetLayout VulkanContext::GetActiveDescriptorSetLayout() const
+void VulkanContext::GrowBindlessCapacity(const BindlessCapacity& requiredCapacity)
 {
-    return GetActiveDescriptorSetState().Layout;
-}
-
-void VulkanContext::GrowDescriptorPool(DescriptorSetState& descriptorSetState, uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs)
-{
-    //TODO: Store the max values in teh context with when we call teh Store function 
-
-    //CHECK(maxTextures <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSampledImages, "Max Textures exceeded, Current:{}, Max:{}", maxTextures, vkPhysicalDeviceVulkan12Properties_.maxDescriptorSetUpdateAfterBindSampledImages);
-    //CHECK(maxSamplers <= vkPhysicalDeviceVulkan12Properties.maxDescriptorSetUpdateAfterBindSamplers, "Max Samplers exceeded, Current:{}, Max:{}", maxSamplers);
-    if (descriptorSetState.MaxAccelStructs == maxAccelStructs &&
-        descriptorSetState.MaxTextures == maxTextures &&
-        descriptorSetState.MaxSamplers == maxSamplers &&
-        descriptorSetState.HasAccelerationStructureBinding == HasAccelerationStructure)
+    //TODO: Check the capacity against maxDescriptorSetUpdateAfterBindSampledImages / Samplers
+    const BindlessCapacity capacity
     {
-        return;
+        .MaxTextures = std::max(GlobalBindlessCapacity.MaxTextures, requiredCapacity.MaxTextures),
+        .MaxSamplers = std::max(GlobalBindlessCapacity.MaxSamplers, requiredCapacity.MaxSamplers),
+        .MaxAccelStructs = std::max(GlobalBindlessCapacity.MaxAccelStructs, requiredCapacity.MaxAccelStructs),
+    };
+
+    if (capacity == GlobalBindlessCapacity && GlobalDescriptorSetLayout != VK_NULL_HANDLE) return;
+
+    EOS::Logger->info("Growing the bindless descriptor set: textures {} -> {}, samplers {} -> {}, acceleration structures {} -> {}",
+                      GlobalBindlessCapacity.MaxTextures, capacity.MaxTextures, GlobalBindlessCapacity.MaxSamplers, capacity.MaxSamplers,
+                      GlobalBindlessCapacity.MaxAccelStructs, capacity.MaxAccelStructs);
+
+    if (GlobalDescriptorSetLayout != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, layout = GlobalDescriptorSetLayout]() { vkDestroyDescriptorSetLayout(device, layout, nullptr); }));
     }
 
-    EOS::Logger->warn("\nGrowing Descriptorpool:\nTextures - \tOld:{}, New:{}\nSamplers - \tOld:{}, New{}\nAcceleration Structures - \tOld:{}, New:{}", descriptorSetState.MaxTextures, maxTextures, descriptorSetState.MaxSamplers, maxSamplers, descriptorSetState.MaxAccelStructs, maxAccelStructs);
-
-    descriptorSetState.MaxTextures = maxTextures;
-    descriptorSetState.MaxSamplers = maxSamplers;
-    descriptorSetState.MaxAccelStructs = maxAccelStructs;
-    descriptorSetState.HasAccelerationStructureBinding = HasAccelerationStructure;
-
-    if (descriptorSetState.Layout != VK_NULL_HANDLE)
+    if (GlobalPipelineLayout != VK_NULL_HANDLE)
     {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, dsl = descriptorSetState.Layout]() { vkDestroyDescriptorSetLayout(device, dsl, nullptr); }));
+        Defer(std::packaged_task<void()>([device = VulkanDevice, layout = GlobalPipelineLayout]() { vkDestroyPipelineLayout(device, layout, nullptr); }));
     }
 
-    if (descriptorSetState.Pool != VK_NULL_HANDLE)
-    {
-        Defer(std::packaged_task<void()>([device = VulkanDevice, dp = descriptorSetState.Pool]() { vkDestroyDescriptorPool(device, dp, nullptr); }));
-    }
+    GlobalBindlessCapacity = capacity;
 
-    // create default descriptor set layout which is going to be shared by graphics pipelines
-    VkShaderStageFlags stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    if (HasRaytracingPipeline)
-    {
-        stageFlags |= VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-    }
-
-
+    // Bindless resources are visible to every stage. These bindings must match src/shaders/bindings.slang.
+    constexpr VkShaderStageFlags stageFlags = VK_SHADER_STAGE_ALL;
     const VkDescriptorSetLayoutBinding bindings[EOS::Bindings::Count]
     {
-        VkContext::GetDSLBinding(EOS::Bindings::Textures, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures, stageFlags),
-        VkContext::GetDSLBinding(EOS::Bindings::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER, maxSamplers, stageFlags),
-        VkContext::GetDSLBinding(EOS::Bindings::StorageImages, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, maxTextures, stageFlags),
-        VkContext::GetDSLBinding(EOS::Bindings::Textures2DArray, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures, stageFlags),
-        VkContext::GetDSLBinding(EOS::Bindings::AccelerationStructures, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxAccelStructs, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::Textures, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, capacity.MaxTextures, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER, capacity.MaxSamplers, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::StorageImages, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, capacity.MaxTextures, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::Textures2DArray, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, capacity.MaxTextures, stageFlags),
+        VkContext::GetDSLBinding(EOS::Bindings::AccelerationStructures, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, capacity.MaxAccelStructs, stageFlags),
     };
 
     constexpr uint32_t flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
 
     VkDescriptorBindingFlags bindingFlags[EOS::Bindings::Count];
-
     for (int i{}; i < EOS::Bindings::Count; ++i)
     {
         bindingFlags[i] = flags;
     }
 
+    const uint32_t bindingCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1);
     const VkDescriptorSetLayoutBindingFlagsCreateInfo setLayoutBindingFlagsCI
     {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT,
-        .bindingCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+        .bindingCount = bindingCount,
         .pBindingFlags = bindingFlags,
     };
 
@@ -3851,66 +4128,82 @@ void VulkanContext::GrowDescriptorPool(DescriptorSetState& descriptorSetState, u
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext = &setLayoutBindingFlagsCI,
         .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT,
-        .bindingCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+        .bindingCount = bindingCount,
         .pBindings = bindings,
     };
 
-    VK_ASSERT(vkCreateDescriptorSetLayout(VulkanDevice, &dslci, nullptr, &descriptorSetState.Layout));
-    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, reinterpret_cast<uint64_t>(descriptorSetState.Layout), "Descriptor Set Layout: VulkanContext::DescriptorSetLayout"));
+    VK_ASSERT(vkCreateDescriptorSetLayout(VulkanDevice, &dslci, nullptr, &GlobalDescriptorSetLayout));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, reinterpret_cast<uint64_t>(GlobalDescriptorSetLayout), "Descriptor Set Layout: Bindless"));
 
+    // Push constants are visible to every stage, so their values survive pipeline switches and cmdPushConstants
+    // never needs to know which stages the bound pipeline has.
+    const VkPushConstantRange pushConstantRange
     {
-        // create default descriptor pool and allocate 1 descriptor set
-        const VkDescriptorPoolSize poolSizes[EOS::Bindings::Count]
-        {
-            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures},
-            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, maxSamplers},
-            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, maxTextures},
-            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, maxTextures},
-            VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, maxAccelStructs},
-        };
+        .stageFlags = VK_SHADER_STAGE_ALL,
+        .offset = 0,
+        .size = PushConstantRangeSize,
+    };
 
-        const VkDescriptorPoolCreateInfo ci
-        {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
-            .maxSets = 1,
-            .poolSizeCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
-            .pPoolSizes = poolSizes,
-        };
-        VK_ASSERT(vkCreateDescriptorPool(VulkanDevice, &ci, nullptr, &descriptorSetState.Pool));
-
-        const VkDescriptorSetAllocateInfo ai
-        {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = descriptorSetState.Pool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &descriptorSetState.Layout,
-        };
-        VK_ASSERT(vkAllocateDescriptorSets(VulkanDevice, &ai, &descriptorSetState.Set));
-    }
-
-    // Invalidate descriptor-set layout compatibility markers.
-    // Pipelines are rebuilt lazily when they are requested or bound next time.
-    for (VulkanRenderPipelineState& pipeline : RenderPipelinePool)
+    const VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
     {
-        pipeline.LastDescriptorSetLayout = VK_NULL_HANDLE;
-    }
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &GlobalDescriptorSetLayout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange,
+    };
 
-    for (ComputePipelineState& pipeline : ComputePipelinePool)
-    {
-        pipeline.LastVkDescriptorSetLayout = VK_NULL_HANDLE;
-    }
+    VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &pipelineLayoutCreateInfo, nullptr, &GlobalPipelineLayout));
+    VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(GlobalPipelineLayout), "Pipeline Layout: Global"));
+
+    // Pipelines built against the previous layout are rebuilt the next time they are bound.
+    ++PipelineLayoutGeneration;
 }
 
-void VulkanContext::GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs)
+void VulkanContext::AllocateDescriptorSet(DescriptorSetState& descriptorSetState)
 {
-    GrowDescriptorPool(GetActiveDescriptorSetState(), maxTextures, maxSamplers, maxAccelStructs);
+    if (descriptorSetState.Set != VK_NULL_HANDLE && descriptorSetState.Capacity == GlobalBindlessCapacity) return;
+
+    if (descriptorSetState.Pool != VK_NULL_HANDLE)
+    {
+        Defer(std::packaged_task<void()>([device = VulkanDevice, pool = descriptorSetState.Pool]() { vkDestroyDescriptorPool(device, pool, nullptr); }));
+    }
+
+    const BindlessCapacity& capacity = GlobalBindlessCapacity;
+    const VkDescriptorPoolSize poolSizes[EOS::Bindings::Count]
+    {
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, capacity.MaxTextures},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, capacity.MaxSamplers},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, capacity.MaxTextures},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, capacity.MaxTextures},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, capacity.MaxAccelStructs},
+    };
+
+    const VkDescriptorPoolCreateInfo ci
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+        .maxSets = 1,
+        .poolSizeCount = static_cast<uint32_t>(HasAccelerationStructure ? EOS::Bindings::Count : EOS::Bindings::Count - 1),
+        .pPoolSizes = poolSizes,
+    };
+    VK_ASSERT(vkCreateDescriptorPool(VulkanDevice, &ci, nullptr, &descriptorSetState.Pool));
+
+    const VkDescriptorSetAllocateInfo ai
+    {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorSetState.Pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &GlobalDescriptorSetLayout,
+    };
+    VK_ASSERT(vkAllocateDescriptorSets(VulkanDevice, &ai, &descriptorSetState.Set));
+    descriptorSetState.Capacity = capacity;
 }
 
-void VulkanContext::BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const
+void VulkanContext::BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint) const
 {
     const VkDescriptorSet descriptorSet = GetActiveDescriptorSetState().Set;
-    vkCmdBindDescriptorSets(commandBuffer, bindPoint, layout, 0, 1, &descriptorSet, 0, nullptr);
+    vkCmdBindDescriptorSets(commandBuffer, bindPoint, GlobalPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 }
 
 VkDevice VulkanContext::GetDevice() const
@@ -4227,16 +4520,15 @@ void VulkanContext::UpdateDescriptorSet()
     DescriptorSetState& activeDescriptorSetState = GetActiveDescriptorSetState();
     activeDescriptorSetState.SubmitHandle = {};
 
-    uint32_t newMaxTextures = std::max(activeDescriptorSetState.MaxTextures, 16u);
-    uint32_t newMaxSamplers = std::max(activeDescriptorSetState.MaxSamplers, 16u);
-    uint32_t newMaxAccelStructs = std::max(activeDescriptorSetState.MaxAccelStructs, 1u);
-
     // The descriptor arrays are indexed by handle, so they have to cover every slot, not just the live ones.
-    while (TexturePool.NumSlots() > newMaxTextures) newMaxTextures *= 2;
-    while (SamplerPool.NumSlots() > newMaxSamplers) newMaxSamplers *= 2;
-    while (AccelerationStructurePool.NumSlots() > newMaxAccelStructs) newMaxAccelStructs *= 2;
+    // Capacity doubles, so the pipelines (which depend on it through the global layout) are rarely rebuilt.
+    BindlessCapacity requiredCapacity = GlobalBindlessCapacity;
+    while (TexturePool.NumSlots() > requiredCapacity.MaxTextures) requiredCapacity.MaxTextures *= 2;
+    while (SamplerPool.NumSlots() > requiredCapacity.MaxSamplers) requiredCapacity.MaxSamplers *= 2;
+    while (AccelerationStructurePool.NumSlots() > requiredCapacity.MaxAccelStructs) requiredCapacity.MaxAccelStructs *= 2;
 
-    GrowDescriptorPool(activeDescriptorSetState, newMaxTextures, newMaxSamplers, newMaxAccelStructs);
+    GrowBindlessCapacity(requiredCapacity);
+    AllocateDescriptorSet(activeDescriptorSetState);
 
     std::vector<VkDescriptorImageInfo> infoSampledImages;
     std::vector<VkDescriptorImageInfo> infoSampledImages2DArray;
@@ -4533,81 +4825,6 @@ EOS::BufferHandle VulkanContext::CreateBuffer(VkDeviceSize bufferSize, VkBufferU
   }
 
   return BufferPool.Create(std::move(buffer));
-}
-
-VkPipeline VulkanContext::GetComputePipeline(EOS::ComputePipelineHandle handle)
-{
-    ComputePipelineState* cps = ComputePipelinePool.Get(handle);
-    CHECK(cps, "Could not fetch a pipelineState from the given handle");
-
-    UpdateDescriptorSet();
-
-    const VkDescriptorSetLayout currentDescriptorSetLayout = GetActiveDescriptorSetLayout();
-    if (cps->LastVkDescriptorSetLayout != currentDescriptorSetLayout)
-    {
-        if (cps->Pipeline != VK_NULL_HANDLE)
-        {
-            Defer(std::packaged_task<void()>([device = VulkanDevice, pipeline = cps->Pipeline](){vkDestroyPipeline(device, pipeline, nullptr); }));
-            Defer(std::packaged_task<void()>([device = VulkanDevice, layout = cps->PipelineLayout](){vkDestroyPipelineLayout(device, layout, nullptr); }));
-        }
-
-        cps->Pipeline = VK_NULL_HANDLE;
-        cps->PipelineLayout = VK_NULL_HANDLE;
-        cps->LastVkDescriptorSetLayout = currentDescriptorSetLayout;
-    }
-
-
-    if (cps->Pipeline == VK_NULL_HANDLE)
-    {
-        const VulkanShaderModuleState* sm = ShaderModulePool.Get(cps->Description.ComputeShader);
-        CHECK(sm, "The given Compute Shader is not valid");
-
-        //Handle Specialization Constants
-        VkSpecializationMapEntry entries[EOS::SpecializationConstantDescription::MaxSecializationConstants] = {};
-        const VkSpecializationInfo siComp = VkContext::GetPipelineShaderStageSpecializationInfo(cps->Description.SpecInfo, entries);
-
-        // create pipeline layout
-        {
-            const VkDescriptorSetLayout dsls[] = {currentDescriptorSetLayout, currentDescriptorSetLayout, currentDescriptorSetLayout, currentDescriptorSetLayout};
-            const VkPushConstantRange range
-            {
-                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-                .offset = 0,
-                .size = EOS::GetSizeAligned(sm->PushConstantsSize, 16),
-            };
-
-            const VkPipelineLayoutCreateInfo ci
-            {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                .setLayoutCount = static_cast<uint32_t>(ARRAY_COUNT(dsls)),
-                .pSetLayouts = dsls,
-                .pushConstantRangeCount = 1,
-                .pPushConstantRanges = &range,
-            };
-
-            VK_ASSERT(vkCreatePipelineLayout(VulkanDevice, &ci, nullptr, &cps->PipelineLayout));
-
-            char pipelineLayoutName[256] = {0};
-            if (cps->Description.DebugName) snprintf(pipelineLayoutName, sizeof(pipelineLayoutName) - 1, "Pipeline Layout: %s", cps->Description.DebugName);
-            VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE_LAYOUT, reinterpret_cast<uint64_t>(cps->PipelineLayout), pipelineLayoutName));
-        }
-
-        const VkComputePipelineCreateInfo ci
-        {
-            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-            .flags = 0,
-            .stage = VkContext::GetPipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, sm->ShaderModule, cps->Description.EntryPoint, &siComp),
-            .layout = cps->PipelineLayout,
-            .basePipelineHandle = VK_NULL_HANDLE,
-            .basePipelineIndex = -1,
-        };
-
-        //TODO: Add PipelineCache
-        VK_ASSERT(vkCreateComputePipelines(VulkanDevice, nullptr, 1, &ci, nullptr, &cps->Pipeline));
-        VK_ASSERT(VkDebug::SetDebugObjectName(VulkanDevice, VK_OBJECT_TYPE_PIPELINE, reinterpret_cast<uint64_t>(cps->Pipeline), cps->Description.DebugName));
-  }
-
-  return cps->Pipeline;
 }
 
 void VulkanContext::InitializeSwapChain(const VulkanSwapChainCreationDescription &description)

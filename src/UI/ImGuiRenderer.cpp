@@ -88,8 +88,7 @@ namespace EOS
         };
         Sampler = context->CreateSampler(samplerDesc);
 
-        VertexShader    = context->CreateShaderModule("imgui", ShaderStage::Vertex);
-        FragmentShader  = context->CreateShaderModule("imgui", ShaderStage::Fragment);
+        Shader = context->CreateShaderProgram({.Module = "imgui"});
     }
 
     ImGuiRenderer::~ImGuiRenderer()
@@ -333,8 +332,8 @@ namespace EOS
 
         const RenderPipelineDescription renderPipelineDesc
         {
-            .VertexShader = VertexShader,
-            .FragmentShader = FragmentShader,
+            .VertexShader = {Shader, "vertexMain"},
+            .FragmentShader = {Shader, "fragmentMain"},
             .SpecInfo =
             {
                 .Entries = {{.ID = 0, .Size = sizeof(nonLinearColorSpace)}},

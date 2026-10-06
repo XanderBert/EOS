@@ -59,12 +59,9 @@ struct EdgeDetectPC final
 
 struct Resources final
 {
-    EOS::ShaderModuleHolder VertexShader;
-    EOS::ShaderModuleHolder PixelShader;
-    EOS::ShaderModuleHolder DeferredLightVertShader;
-    EOS::ShaderModuleHolder DeferredLightFragShader;
-    EOS::ShaderModuleHolder EdgeDetectVertShader;
-    EOS::ShaderModuleHolder EdgeDetectFragShader;
+    EOS::ShaderProgramHolder ModelShader;
+    EOS::ShaderProgramHolder DeferredLightShader;
+    EOS::ShaderProgramHolder EdgeDetectShader;
     EOS::TextureHolder DepthTexture;
     EOS::TextureHolder GbufferAlbedoTexture;
     EOS::TextureHolder GbufferNormalTexture;
@@ -106,12 +103,9 @@ int main()
 
     ExampleApp App{appDescription};
 
-    Handles.VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
-    Handles.PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
-    Handles.DeferredLightVertShader = App.Context->CreateShaderModule("deferredLight", EOS::ShaderStage::Vertex);
-    Handles.DeferredLightFragShader = App.Context->CreateShaderModule("deferredLight", EOS::ShaderStage::Fragment);
-    Handles.EdgeDetectVertShader = App.Context->CreateShaderModule("edgeDetect", EOS::ShaderStage::Vertex);
-    Handles.EdgeDetectFragShader = App.Context->CreateShaderModule("edgeDetect", EOS::ShaderStage::Fragment);
+    Handles.ModelShader = App.Context->CreateShaderProgram({.Module = "indirectModel"});
+    Handles.DeferredLightShader = App.Context->CreateShaderProgram({.Module = "deferredLight"});
+    Handles.EdgeDetectShader = App.Context->CreateShaderProgram({.Module = "edgeDetect"});
     Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - EdgeDetection");
 
     Handles.GbufferAlbedoTexture = App.Context->CreateTexture({
@@ -212,8 +206,8 @@ int main()
     const EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = Handles.VertexShader,
-        .FragmentShader = Handles.PixelShader,
+        .VertexShader = {Handles.ModelShader, "vertexMain"},
+        .FragmentShader = {Handles.ModelShader, "fragmentMain"},
         .ColorAttachments =
         {
             { .ColorFormat = EOS::Format::RGBA_UN8 },
@@ -228,8 +222,8 @@ int main()
 
     const EOS::RenderPipelineDescription deferredLightingPipelineDescription
     {
-        .VertexShader     = Handles.DeferredLightVertShader,
-        .FragmentShader   = Handles.DeferredLightFragShader,
+        .VertexShader     = {Handles.DeferredLightShader, "vertexMain"},
+        .FragmentShader   = {Handles.DeferredLightShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetFormat(Handles.SceneLitTexture) }},
         .PipelineCullMode = EOS::CullMode::None,
         .DebugName        = "Deferred Lighting Pipeline",
@@ -238,8 +232,8 @@ int main()
 
     const EOS::RenderPipelineDescription edgePipelineDescription
     {
-        .VertexShader     = Handles.EdgeDetectVertShader,
-        .FragmentShader   = Handles.EdgeDetectFragShader,
+        .VertexShader     = {Handles.EdgeDetectShader, "vertexMain"},
+        .FragmentShader   = {Handles.EdgeDetectShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat() }},
         .PipelineCullMode = EOS::CullMode::None,
         .DebugName        = "Edge Detect Pipeline",

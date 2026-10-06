@@ -32,8 +32,7 @@ struct FramePointers final
 
 struct Resources final
 {
-    EOS::ShaderModuleHolder VertexShader;
-    EOS::ShaderModuleHolder PixelShader;
+    EOS::ShaderProgramHolder ModelShader;
     EOS::TextureHolder DepthTexture;
     EOS::BufferHolder VertexBuffer;
     EOS::BufferHolder IndexBuffer;
@@ -70,8 +69,7 @@ int main()
 
     ExampleApp App{appDescription};
 
-    Handles.VertexShader = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Vertex);
-    Handles.PixelShader  = App.Context->CreateShaderModule("indirectModel", EOS::ShaderStage::Fragment);
+    Handles.ModelShader = App.Context->CreateShaderProgram({.Module = "indirectModel"});
     Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - MultiDrawIndirect");
 
     //TODO: This could be constevaled with reflection Or use Shader Resource Table model
@@ -147,8 +145,8 @@ int main()
     const EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = Handles.VertexShader,
-        .FragmentShader = Handles.PixelShader,
+        .VertexShader = {Handles.ModelShader, "vertexMain"},
+        .FragmentShader = {Handles.ModelShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
         .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,

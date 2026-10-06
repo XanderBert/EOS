@@ -24,8 +24,7 @@ struct Vertex final
 
 struct Resources final
 {
-    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleVert;
-    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleFrag;
+    EOS::ShaderProgramHolder Shader;
     EOS::Holder<EOS::TextureHandle> DepthTexture;
     EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
     EOS::Holder<EOS::BufferHandle> VertexBuffer;
@@ -59,8 +58,7 @@ int main()
     ExampleApp App{appDescription};
 
 
-    Handles.ShaderHandleVert = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleFrag = App.Context->CreateShaderModule("modelAlbedo", EOS::ShaderStage::Fragment);
+    Handles.Shader = App.Context->CreateShaderProgram({.Module = "modelAlbedo"});
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vdesc
@@ -85,8 +83,8 @@ int main()
     EOS::RenderPipelineDescription renderPipelineDescription
     {
         .VertexInput = vdesc,
-        .VertexShader = Handles.ShaderHandleVert,
-        .FragmentShader = Handles.ShaderHandleFrag,
+        .VertexShader = {Handles.Shader, "vertexMain"},
+        .FragmentShader = {Handles.Shader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
         .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,

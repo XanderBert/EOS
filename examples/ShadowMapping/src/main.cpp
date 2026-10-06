@@ -44,10 +44,8 @@ struct FramePointers final
 
 struct Resources final
 {
-    EOS::ShaderModuleHolder ShaderHandleVert;
-    EOS::ShaderModuleHolder ShaderHandleFrag;
-    EOS::ShaderModuleHolder ShaderHandleShadowVert;
-    EOS::ShaderModuleHolder ShaderHandleShadowFrag;
+    EOS::ShaderProgramHolder ShadeShader;
+    EOS::ShaderProgramHolder ShadowShader;
     EOS::Holder<EOS::TextureHandle> DepthTexture;
     EOS::Holder<EOS::TextureHandle> ShadowDepthTexture;
     EOS::SamplerHolder DepthMapSampler;
@@ -86,10 +84,8 @@ int main()
 
     ExampleApp App{appDescription};
 
-    Handles.ShaderHandleVert = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleFrag = App.Context->CreateShaderModule("shade", EOS::ShaderStage::Fragment);
-    Handles.ShaderHandleShadowVert = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleShadowFrag = App.Context->CreateShaderModule("shadowDepth", EOS::ShaderStage::Fragment);
+    Handles.ShadeShader = App.Context->CreateShaderProgram({.Module = "shade"});
+    Handles.ShadowShader = App.Context->CreateShaderProgram({.Module = "shadowDepth"});
 
     //TODO: This could be constevaled with reflection
     constexpr EOS::VertexInputData vertexDesc
@@ -194,8 +190,8 @@ int main()
     EOS::RenderPipelineDescription renderPipelineShade
     {
         .VertexInput = vertexDesc,
-        .VertexShader = Handles.ShaderHandleVert,
-        .FragmentShader = Handles.ShaderHandleFrag,
+        .VertexShader = {Handles.ShadeShader, "vertexMain"},
+        .FragmentShader = {Handles.ShadeShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
         .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
         .PipelineCullMode = EOS::CullMode::Back,
@@ -206,8 +202,8 @@ int main()
     EOS::RenderPipelineDescription renderPipelineShadow
     {
         .VertexInput = vertexDescriptionShadow,
-        .VertexShader = Handles.ShaderHandleShadowVert,
-        .FragmentShader = Handles.ShaderHandleShadowFrag,
+        .VertexShader = {Handles.ShadowShader, "vertexMain"},
+        .FragmentShader = {Handles.ShadowShader, "fragmentMain"},
         .DepthFormat = App.Context->GetFormat(Handles.ShadowDepthTexture),
         .PipelineCullMode = EOS::CullMode::Front,
         .DebugName = "ShadowMap Render Pipeline",

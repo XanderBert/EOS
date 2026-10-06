@@ -1,7 +1,10 @@
 #pragma once
+#include <array>
 #include <deque>
 #include <EOS.h>
 #include <future>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include <volk.h>
@@ -23,7 +26,7 @@
 
 struct ComputePipelineState;
 struct VulkanRenderPipelineState;
-struct VulkanShaderModuleState;
+struct VulkanShaderProgramState;
 struct VulkanImage;
 struct VulkanBuffer;
 struct VulkanAccelerationStructure;
@@ -34,7 +37,7 @@ static constexpr const char* validationLayer {"VK_LAYER_KHRONOS_validation"};
 
 using VulkanRenderPipelinePool = EOS::Pool<EOS::RenderPipeline, VulkanRenderPipelineState>;
 using VulkanComputePipelinePool = EOS::Pool<EOS::ComputePipeline, ComputePipelineState>;
-using VulkanShaderModulePool = EOS::Pool<EOS::ShaderModule, VulkanShaderModuleState>;
+using VulkanShaderProgramPool = EOS::Pool<EOS::ShaderProgram, VulkanShaderProgramState>;
 using VulkanTexturePool = EOS::Pool<EOS::Texture, VulkanImage>;
 using VulkanBufferPool = EOS::Pool<EOS::Buffer, VulkanBuffer>;
 using VulkanSamplerPool = EOS::Pool<EOS::Sampler, VkSampler>;
@@ -60,31 +63,41 @@ struct VulkanBuffer final
     bool IsCoherentMemory               = false;
 };
 
+// One shader stage of a pipeline. The pipeline keeps the compiled program alive itself, so it can be rebuilt (bindless
+// table growth, hot reload) after the ShaderProgram handle it was created from is gone. VkShaderModules only exist
+// while a pipeline is being built.
+struct PipelineShaderStage final
+{
+    std::shared_ptr<const EOS::CompiledShaderProgram> Program{};
+    std::string EntryPoint{};
+    EOS::ShaderStage Stage = EOS::ShaderStage::None;
+};
+
 //TODO: split up in hot and cold data for the pool
 struct VulkanRenderPipelineState final
 {
+    // The shader entries in here are cleared at creation; Stages holds the resolved shaders.
     EOS::RenderPipelineDescription Description;
+    std::vector<PipelineShaderStage> Stages{};
+
     uint32_t NumberOfBindings = 0;
     uint32_t NumberOfAttributes = 0;
 
     VkVertexInputBindingDescription Bindings[EOS::VertexInputData::MAX_BUFFERS] = {};
     VkVertexInputAttributeDescription Attributes[EOS::VertexInputData::MAX_ATTRIBUTES] = {};
 
-    // non-owning, the last seen VkDescriptorSetLayout from VulkanContext::VulkanDescriptorSetLayout (if the context has a new layout, invalidate all VkPipeline objects)
-    VkDescriptorSetLayout LastDescriptorSetLayout = VK_NULL_HANDLE;
+    std::vector<uint8_t> SpecializationData{};      // Description.SpecInfo.Data points in here
 
-    VkShaderStageFlags ShaderStageFlags = 0;
-    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    uint32_t PushConstantSize = 0;                  // largest push-constant block any stage reads
+    uint64_t PipelineLayoutGeneration = 0;          // VulkanContext::PipelineLayoutGeneration the pipeline was built for
     VkPipeline Pipeline = VK_NULL_HANDLE;
-
-    void* SpecConstantDataStorage = nullptr;
+    bool ReportedPushConstantSizeMismatch = false;
 };
 
 //TODO: split up in hot and cold data for the pool
-struct VulkanShaderModuleState final
+struct VulkanShaderProgramState final
 {
-    VkShaderModule ShaderModule = VK_NULL_HANDLE;
-    uint32_t PushConstantsSize = 0;
+    std::shared_ptr<const EOS::CompiledShaderProgram> Program{};
 };
 
 struct ImageDescription final
@@ -396,12 +409,17 @@ private:
 
 struct ComputePipelineState final
 {
+    // The shader entry in here is cleared at creation; Stage holds the resolved shader.
     EOS::ComputePipelineDescription Description;
+    PipelineShaderStage Stage{};
 
-    VkDescriptorSetLayout LastVkDescriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    std::vector<uint8_t> SpecializationData{};      // Description.SpecInfo.Data points in here
+
+    uint32_t PushConstantSize = 0;
+    std::array<uint32_t, 3> ThreadGroupSize{};
+    uint64_t PipelineLayoutGeneration = 0;          // VulkanContext::PipelineLayoutGeneration the pipeline was built for
     VkPipeline Pipeline = VK_NULL_HANDLE;
-    void* SpecConstantDataStorage = nullptr;
+    bool ReportedPushConstantSizeMismatch = false;
 };
 
 class VulkanStagingDevice final
@@ -468,7 +486,9 @@ public:
     void ResizeSwapChain(uint32_t width, uint32_t height) override;
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
     [[nodiscard]] uint32_t GetNumMipLevels(EOS::TextureHandle handle) const override;
-    [[nodiscard]] EOS::Holder<EOS::ShaderModuleHandle> CreateShaderModule(const char* fileName, EOS::ShaderStage shaderStage) override;
+    [[nodiscard]] EOS::Holder<EOS::ShaderProgramHandle> CreateShaderProgram(const EOS::ShaderProgramDescription& description) override;
+    [[nodiscard]] std::shared_ptr<const EOS::CompiledShaderProgram> GetShaderProgram(EOS::ShaderProgramHandle handle) const override;
+    [[nodiscard]] uint32_t GetMaxPushConstantSize() const override { return PushConstantRangeSize; }
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
     [[nodiscard]] EOS::Holder<EOS::ComputePipelineHandle> CreateComputePipeline(const EOS::ComputePipelineDescription& description) override;
     [[nodiscard]] uint32_t ReloadShaders() override;
@@ -478,7 +498,7 @@ public:
     [[nodiscard]] EOS::Holder<EOS::AccelStructHandle> CreateAccelerationStructure(const EOS::AccelerationStructDescription& desc) override;
 
     void Destroy(EOS::TextureHandle handle) override;
-    void Destroy(EOS::ShaderModuleHandle handle) override;
+    void Destroy(EOS::ShaderProgramHandle handle) override;
     void Destroy(EOS::RenderPipelineHandle handle) override;
     void Destroy(EOS::ComputePipelineHandle handle) override;
     void Destroy(EOS::BufferHandle handle) override;
@@ -507,10 +527,9 @@ public:
     void WaitOnDeferredTasks() const;
     void Defer(std::packaged_task<void()>&& task, EOS::SubmitHandle handle = {}) const;
 
-    void GrowDescriptorPool(uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
-    void BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint, VkPipelineLayout layout) const;
+    void BindDefaultDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint bindPoint) const;
     void UpdateDescriptorSet();
-    [[nodiscard]] VkDescriptorSetLayout GetActiveDescriptorSetLayout() const;
+    [[nodiscard]] VkPipelineLayout GetPipelineLayout() const { return GlobalPipelineLayout; }
     [[nodiscard]] VkDevice GetDevice() const;
     [[nodiscard]] VkPhysicalDevice GetPhysicalDevice() const;
     [[nodiscard]] VkQueue GetGraphicsQueue() const;
@@ -519,8 +538,9 @@ public:
 #endif
     [[nodiscard]] EOS::BufferHandle CreateBuffer(VkDeviceSize bufferSize, VkBufferUsageFlags usageFlags, VkMemoryPropertyFlags memFlags, const char* debugName);
 
-    bool RebuildRenderPipeline(EOS::RenderPipelineHandle handle);
-    VkPipeline GetComputePipeline(EOS::ComputePipelineHandle handle);
+    // Return the pipeline, rebuilding it first when the global pipeline layout changed since it was built.
+    [[nodiscard]] const VulkanRenderPipelineState* GetUpToDateRenderPipeline(EOS::RenderPipelineHandle handle);
+    [[nodiscard]] const ComputePipelineState* GetUpToDateComputePipeline(EOS::ComputePipelineHandle handle);
 
     void InitializeSwapChain(const VulkanSwapChainCreationDescription& description);
 
@@ -532,7 +552,7 @@ public:
 
     VulkanRenderPipelinePool RenderPipelinePool{};
     VulkanComputePipelinePool ComputePipelinePool;
-    VulkanShaderModulePool ShaderModulePool{};
+    VulkanShaderProgramPool ShaderProgramPool{};
     VulkanTexturePool TexturePool{};
     VulkanBufferPool BufferPool{};
     VulkanSamplerPool SamplerPool{};
@@ -541,17 +561,23 @@ public:
     VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
 
 private:
-    struct DescriptorSetState final
+    // How many descriptors each bindless array holds. Every descriptor set uses the same capacity, so they all share
+    // GlobalDescriptorSetLayout, and pipelines only need rebuilding when the capacity grows.
+    struct BindlessCapacity final
     {
-        VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
-        VkDescriptorPool Pool = VK_NULL_HANDLE;
-        VkDescriptorSet Set = VK_NULL_HANDLE;
-        EOS::SubmitHandle SubmitHandle{};
-
         uint32_t MaxTextures = 0;
         uint32_t MaxSamplers = 0;
         uint32_t MaxAccelStructs = 0;
-        bool HasAccelerationStructureBinding = false;
+
+        bool operator==(const BindlessCapacity&) const = default;
+    };
+
+    struct DescriptorSetState final
+    {
+        VkDescriptorPool Pool = VK_NULL_HANDLE;
+        VkDescriptorSet Set = VK_NULL_HANDLE;
+        EOS::SubmitHandle SubmitHandle{};
+        BindlessCapacity Capacity{};               // capacity Set was allocated for
     };
 
     [[nodiscard]] bool HasSwapChain() const noexcept;
@@ -563,16 +589,20 @@ private:
     void GenerateMipmaps(const EOS::TextureHandle& handle);
     void GetHardwareDevice(EOS::HardwareDeviceType desiredDeviceType, std::vector<EOS::HardwareDeviceDescription>& compatibleDevices) const;
     [[nodiscard]] bool IsHostVisibleMemorySingleHeap() const;
-    bool BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState);
-    bool ReloadShaderModule(EOS::ShaderModuleHandle handle, const char* fileName, EOS::ShaderStage shaderStage);
-    bool RebuildComputePipeline(EOS::ComputePipelineHandle handle);
+    [[nodiscard]] bool BuildRenderPipeline(VulkanRenderPipelineState& renderPipelineState);
+    [[nodiscard]] bool BuildComputePipeline(ComputePipelineState& computePipelineState);
+    [[nodiscard]] bool ValidateProgram(const EOS::CompiledShaderProgram& program, std::string& outErrors) const;
+    [[nodiscard]] bool ResolveShaderStage(const EOS::ShaderEntry& entry, EOS::ShaderStage stage, const char* pipelineName, PipelineShaderStage& outStage) const;
+    [[nodiscard]] VkShaderModule CreateTransientShaderModule(const PipelineShaderStage& stage, const EOS::ShaderEntryPoint& entryPoint) const;
+    [[nodiscard]] uint32_t OnShaderProgramRecompiled(const std::shared_ptr<const EOS::CompiledShaderProgram>& program);
 
     EOS::Handle<EOS::AccelerationStructure> CreateBLAS(const EOS::AccelerationStructDescription& desc);
     EOS::Handle<EOS::AccelerationStructure> CreateTLAS(const EOS::AccelerationStructDescription& desc);
 
     void GetBLASBuildInfo(const EOS::AccelerationStructDescription& desc, VkAccelerationStructureGeometryKHR& outGeom, VkAccelerationStructureBuildSizesInfoKHR& outSizeInfo);
     void GetTLASBuildInfo(const EOS::AccelerationStructDescription& desc, VkAccelerationStructureGeometryKHR& outGeom, VkAccelerationStructureBuildSizesInfoKHR& outSizeInfo);
-    void GrowDescriptorPool(DescriptorSetState& descriptorSetState, uint32_t maxTextures, uint32_t maxSamplers, uint32_t maxAccelStructs);
+    void GrowBindlessCapacity(const BindlessCapacity& requiredCapacity);
+    void AllocateDescriptorSet(DescriptorSetState& descriptorSetState);
     [[nodiscard]] DescriptorSetState& GetActiveDescriptorSetState();
     [[nodiscard]] const DescriptorSetState& GetActiveDescriptorSetState() const;
 
@@ -591,6 +621,14 @@ private:
         
     std::vector<DescriptorSetState> DescriptorSets{};
     size_t LastUpdatedDescriptorSet = 0;
+
+    // The one pipeline layout every pipeline uses: the bindless descriptor set plus a push-constant range visible to all
+    // stages. It is recreated (and PipelineLayoutGeneration bumped) only when the bindless capacity grows.
+    BindlessCapacity GlobalBindlessCapacity{};
+    VkDescriptorSetLayout GlobalDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout GlobalPipelineLayout           = VK_NULL_HANDLE;
+    uint64_t PipelineLayoutGeneration               = 0;
+    uint32_t PushConstantRangeSize                  = 0;
     bool ShouldDescriptorSetBeUpdated               = false;
     EOS::Holder<EOS::TextureHandle> DummyTexture    = {};
 

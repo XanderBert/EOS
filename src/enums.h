@@ -282,8 +282,8 @@ namespace EOS
         AlwaysPass
     };
 
-    // These bindings should match SLANG declarations
-    //TODO: We can inject these bindings into the shadermodule
+    // The bindless descriptor set (set 0) every pipeline shares. src/shaders/bindings.slang declares the same bindings;
+    // shader reflection rejects a program that binds anything else.
     enum Bindings : uint8_t
     {
         Textures = 0,

@@ -2,8 +2,7 @@
 
 struct Resources final
 {
-    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleVert;
-    EOS::Holder<EOS::ShaderModuleHandle> ShaderHandleFrag;
+    EOS::ShaderProgramHolder Shader;
     EOS::Holder<EOS::SamplerHandle> Sampler;
     EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
 };
@@ -21,8 +20,7 @@ int main()
 
     std::unique_ptr<EOS::Window> window = std::make_unique<EOS::Window>(contextDescr);
     std::unique_ptr<EOS::IContext> context = EOS::CreateContextWithSwapChain(contextDescr);
-    Handles.ShaderHandleVert = context->CreateShaderModule("triangle", EOS::ShaderStage::Vertex);
-    Handles.ShaderHandleFrag = context->CreateShaderModule("triangle", EOS::ShaderStage::Fragment);
+    Handles.Shader = context->CreateShaderProgram({.Module = "triangle"});
 
     EOS::SamplerDescription samplerDescription
     {
@@ -34,8 +32,8 @@ int main()
 
     EOS::RenderPipelineDescription renderPipelineDescription
     {
-        .VertexShader = Handles.ShaderHandleVert,
-        .FragmentShader = Handles.ShaderHandleFrag,
+        .VertexShader = {Handles.Shader, "vertexMain"},
+        .FragmentShader = {Handles.Shader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = context->GetSwapchainFormat()}},
         .DebugName = "Basic Render Pipeline",
     };
