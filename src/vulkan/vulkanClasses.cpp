@@ -2181,9 +2181,19 @@ VulkanStagingDevice::StagingAllocation VulkanStagingDevice::AcquireStagingRegion
     };
 }
 
+namespace
+{
+    [[nodiscard]] EOS::ShaderCompilerOptions MakeShaderCompilerOptions(const EOS::ContextCreationDescription& contextDescription)
+    {
+        EOS::ShaderCompilerOptions options = EOS::ShaderCompilerOptions::Default();
+        options.LibraryCacheRoots = {contextDescription.EngineShaderCachePath};
+        return options;
+    }
+}
+
 VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescription)
 : Configuration(contextDescription.Config)
-, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderOutputPath, std::vector<std::filesystem::path>{contextDescription.ShaderPath, contextDescription.EngineShaderPath}))
+, ShaderCompiler(std::make_unique<EOS::ShaderCompiler>(contextDescription.ShaderOutputPath, std::vector<std::filesystem::path>{contextDescription.ShaderPath, contextDescription.EngineShaderPath}, MakeShaderCompilerOptions(contextDescription)))
 , ShaderReloaderImpl(std::make_unique<ShaderReloader>())
 {
     EOS_PROFILER_FUNCTION();
@@ -2570,7 +2580,7 @@ namespace
             case EOS::ShaderScalarType::Int32:
             case EOS::ShaderScalarType::Int64:
                 return NumericClass::SignedInteger;
-            case EOS::ShaderScalarType::Bool:
+            case EOS::ShaderScalarType::Boolean:
             case EOS::ShaderScalarType::UInt8:
             case EOS::ShaderScalarType::UInt16:
             case EOS::ShaderScalarType::UInt32:

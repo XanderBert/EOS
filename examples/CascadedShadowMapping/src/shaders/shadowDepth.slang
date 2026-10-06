@@ -23,7 +23,7 @@ struct GSOutput
     uint   DrawIndex : TEXCOORD2;
 };
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] FramePointers pc;
 
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
@@ -31,7 +31,7 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     const float4 localTransformed = mul(float4(input.Pos, 1.0), pc.draws[drawIndex].transform);
 
     VSOutput output;
-    output.WorldPos = mul(localTransformed, pc.perFrame->Model);
+    output.WorldPos = mul(localTransformed, pc.perFrame->model);
     output.UV = input.UV;
     output.DrawIndex = drawIndex;
     return output;

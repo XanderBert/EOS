@@ -1,3 +1,4 @@
+import eos.core;
 import eos.material;
 import eos.lighting;
 
@@ -19,20 +20,22 @@ struct VSOutput
     float2 UV       : TEXCOORD0;
 };
 
-struct PerFrameData
+[CppExport]
+public struct PerFrameData
 {
-    float4x4 Model;
-    float4x4 MVP;
-    float3 cameraPos;
-    StandardMaterialData material;
+    public float4x4 model;
+    public float4x4 mvp;
+    public float3 cameraPos;
+    public StandardMaterialData material;
 };
 
-struct PushConstants
+[CppExport]
+public struct FramePointers
 {
-    PerFrameData* perFrame;
+    public PerFrameData* perFrame;
 };
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] FramePointers pc;
 
 static const float3 kSunDirection = normalize(float3(-1.0, -1.0, -1.0));
 static const float3 kSunRadiance = float3(3.0);
@@ -42,11 +45,11 @@ static const float3 kAmbientRadiance = float3(0.3);
 VSOutput vertexMain(VSInput input)
 {
     const PerFrameData frameData = *pc.perFrame;
-    const float3x3 normalMatrix = float3x3(frameData.Model);
+    const float3x3 normalMatrix = float3x3(frameData.model);
 
     VSOutput output;
-    output.Pos          = mul(float4(input.Pos, 1.0), frameData.MVP);
-    output.WorldPos     = mul(float4(input.Pos, 1.0), frameData.Model).xyz;
+    output.Pos          = mul(float4(input.Pos, 1.0), frameData.mvp);
+    output.WorldPos     = mul(float4(input.Pos, 1.0), frameData.model).xyz;
     output.Normal       = mul(input.Normal, normalMatrix);
     output.Tangent      = float4(mul(input.Tangent.xyz, normalMatrix), input.Tangent.w);
     output.UV           = input.UV;

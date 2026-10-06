@@ -92,6 +92,43 @@ namespace EOS
     };
     static_assert(sizeof(Handle<class Foo>) == sizeof(uint64_t));
 
+    /**
+    * @brief Concept for the required HandleType operations.
+    */    
+    template<typename T>
+    concept ValidHolder = requires(T t)
+    {
+        { t.Valid() } -> std::convertible_to<bool>;
+        { t.Empty() } -> std::convertible_to<bool>;
+        { t.Gen() } -> std::convertible_to<uint32_t>;        { t.Index() } -> std::convertible_to<uint32_t>;
+        { t.IndexAsVoid() } -> std::convertible_to<void*>;
+    };
+
+    template<typename HandleType>
+    requires ValidHolder<HandleType>
+    class Holder;
+
+    //Create our Handle structures
+    using ComputePipelineHandle     = Handle<struct ComputePipeline>;
+    using RenderPipelineHandle      = Handle<struct RenderPipeline>;
+    using RayTracingPipelineHandle  = Handle<struct RayTracingPipeline>;
+    using ShaderProgramHandle       = Handle<struct ShaderProgram>;
+    using SamplerHandle             = Handle<struct Sampler>;
+    using BufferHandle              = Handle<struct Buffer>;
+    using TextureHandle             = Handle<struct Texture>;
+    using QueryPoolHandle           = Handle<struct QueryPool>;
+    using AccelStructHandle         = Handle<struct AccelerationStructure>;
+
+    using ComputePipelineHolder     = Holder<ComputePipelineHandle>;
+    using RenderPipelineHolder      = Holder<RenderPipelineHandle>;
+    using RayTracingPipelineHolder  = Holder<RayTracingPipelineHandle>;
+    using ShaderProgramHolder       = Holder<ShaderProgramHandle>;
+    using SamplerHolder             = Holder<SamplerHandle>;
+    using BufferHolder              = Holder<BufferHandle>;
+    using TextureHolder             = Holder<TextureHandle>;
+    using QueryPoolHolder           = Holder<QueryPoolHandle>;
+    using AccelStructHolder         = Holder<AccelStructHandle>;
+
     struct SubmitHandle final
     {
         SubmitHandle() = default;

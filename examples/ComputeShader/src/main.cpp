@@ -1,17 +1,5 @@
 #include "../../Common/App.h"
-
-struct ComputePayload final
-{
-    uint32_t lhs{};
-    uint32_t rhs{};
-    uint32_t result{};
-    uint32_t pad{};
-};
-
-struct ComputePushConstants final
-{
-    uint64_t payloadPtr{};
-};
+#include ".generated/compute.h"
 
 struct Resources final
 {
@@ -63,7 +51,7 @@ int main()
 
     const ComputePushConstants computePushConstants
     {
-        .payloadPtr = App.Context->GetGPUAddress(Handles.ComputeBuffer),
+        .payload = App.Context->GetGPUAddress(Handles.ComputeBuffer),
     };
 
     App.Run([&]()

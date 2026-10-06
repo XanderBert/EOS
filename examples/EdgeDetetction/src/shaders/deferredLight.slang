@@ -1,8 +1,10 @@
+import eos.core;
 import eos.math;
 import eos.bsdf;
 import eos.lighting;
 import eos.fullscreen;
 
+[CppExport]
 public struct DeferredLightingPC
 {
     public DescriptorHandle<Texture2D>    gbufferAlbedo;

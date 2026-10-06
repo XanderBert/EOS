@@ -105,23 +105,28 @@ public interface IMaterial
 }
 
 // glTF alphaMode.
-public static const uint kAlphaModeOpaque = 0;
-public static const uint kAlphaModeMask   = 1;
-public static const uint kAlphaModeBlend  = 2;
+public enum AlphaMode : uint
+{
+    Opaque = 0,
+    Mask = 1,
+    Blend = 2,
+}
 
-// Parameters of a glTF 2.0 core metallic-roughness material. Every texture is optional: an invalid handle
-// (EOS::DescriptorHandle{} on the C++ side) means the factor alone is used. Color textures must be created with an
-// sRGB format, so sampling returns linear values.
+// Parameters of a glTF 2.0 core metallic-roughness material (EOS::StandardMaterialData in C++). Every texture is
+// optional: an invalid handle (EOS::DescriptorHandle{} on the C++ side) means the factor alone is used. Color textures
+// must be created with an sRGB format, so sampling returns linear values.
+// The scalar defaults are glTF's; C++ can only take over literal defaults, so baseColorFactor starts at zero there.
+[CppExport]
 public struct StandardMaterialData
 {
     public float4 baseColorFactor;                                 // linear RGB, A = alpha
     public float3 emissiveFactor;                                  // linear RGB
-    public float metallicFactor;
-    public float roughnessFactor;
-    public float normalScale;
-    public float occlusionStrength;
-    public float alphaCutoff;                                      // only used with kAlphaModeMask
-    public uint alphaMode;                                         // kAlphaMode*
+    public float metallicFactor = 1.0;
+    public float roughnessFactor = 1.0;
+    public float normalScale = 1.0;
+    public float occlusionStrength = 1.0;
+    public float alphaCutoff = 0.5;                                // only used with AlphaMode.Mask
+    public AlphaMode alphaMode;
 
     public DescriptorHandle<Texture2D> baseColorTexture;           // RGB color, A alpha
     public DescriptorHandle<Texture2D> metallicRoughnessTexture;   // G roughness, B metallic
@@ -174,7 +179,7 @@ public struct StandardMaterial : IMaterial
         point.emission = data.emissiveFactor;
         if (IsValid(data.emissiveTexture)) point.emission *= textureSampler.Sample(data.emissiveTexture, data.samplerState, surface.uv).rgb;
 
-        point.opacity = data.alphaMode == kAlphaModeOpaque ? 1.0 : baseColor.a;
+        point.opacity = data.alphaMode == AlphaMode.Opaque ? 1.0 : baseColor.a;
 
         point.occlusion = 1.0;
         if (IsValid(data.occlusionTexture))
@@ -188,7 +193,7 @@ public struct StandardMaterial : IMaterial
 
     public float EvaluateOpacity<S : ITextureSampler>(SurfaceData surface, S textureSampler)
     {
-        if (data.alphaMode == kAlphaModeOpaque) return 1.0;
+        if (data.alphaMode == AlphaMode.Opaque) return 1.0;
 
         float opacity = data.baseColorFactor.a;
         if (IsValid(data.baseColorTexture)) opacity *= textureSampler.Sample(data.baseColorTexture, data.samplerState, surface.uv).a;
@@ -198,6 +203,6 @@ public struct StandardMaterial : IMaterial
     // glTF MASK: fragments below the cutoff are discarded (fragment shaders) or ignored (any-hit shaders).
     public bool PassesAlphaTest(float opacity)
     {
-        return data.alphaMode != kAlphaModeMask || opacity >= data.alphaCutoff;
+        return data.alphaMode != AlphaMode.Mask || opacity >= data.alphaCutoff;
     }
 }

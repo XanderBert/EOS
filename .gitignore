@@ -58,3 +58,6 @@ data/.compressed/
 
 .claude
 captures
+
+# C++ headers EOSShaderCompilerTool generates from the shaders ([CppExport] structs)
+.generated/

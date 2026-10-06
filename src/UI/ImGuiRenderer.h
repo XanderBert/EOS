@@ -1,15 +1,10 @@
 #pragma once
 #include "defines.h"
 #include "EOS.h"
+#include ".generated/eos/imgui.h"    // ImGuiTextureView, ImGuiPushConstants
 
 namespace EOS
 {
-    enum class ImGuiTextureView : uint32_t
-    {
-        Texture2D = 0,
-        Texture2DArray = 1,
-    };
-
     [[nodiscard]] uint64_t MakeImGuiTextureID(TextureHandle texture, uint32_t layer = 0, ImGuiTextureView view = ImGuiTextureView::Texture2D);
 
     class ImGuiRenderer final
@@ -49,17 +44,5 @@ namespace EOS
             uint32_t NumAllocatedVertices = 0;
         };
         DrawableData Drawables[3] = {};
-
-        // Push constants of eos/imgui.slang.
-        struct BindData final
-        {
-            float LRTB[4];
-            uint64_t vertexBufferPtr = 0;
-            DescriptorHandle texture{};
-            DescriptorHandle samplerState{};
-            uint32_t textureLayer = 0;
-            uint32_t textureView = 0;
-        };
-
     };
 }

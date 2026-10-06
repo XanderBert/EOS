@@ -1,17 +1,21 @@
-struct ComputePayload
+import eos.core;
+
+[CppExport]
+public struct ComputePayload
 {
-    uint lhs;
-    uint rhs;
-    uint result;
-    uint pad;
+    public uint lhs;
+    public uint rhs;
+    public uint result;
+    public uint pad;
 };
 
-struct PushConstants
+[CppExport]
+public struct ComputePushConstants
 {
-    ComputePayload* payload;
+    public ComputePayload* payload;
 };
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] ComputePushConstants pc;
 
 [numthreads(1, 1, 1)]
 [shader("compute")]

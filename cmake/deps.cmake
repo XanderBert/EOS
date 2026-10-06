@@ -260,7 +260,15 @@ function(eos_require_fastgltf TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PRIVATE fastgltf::fastgltf)
 endfunction()
 
+# eos_require_glm(<target> [PUBLIC]): PUBLIC when the target's headers use glm.
 function(eos_require_glm TARGET_NAME)
+    cmake_parse_arguments(ARG "PUBLIC" "" "" ${ARGN})
+    if(ARG_PUBLIC)
+        set(glm_visibility PUBLIC)
+    else()
+        set(glm_visibility PRIVATE)
+    endif()
+
     eos_set_option(GLM_BUILD_TESTS OFF BOOL)
     eos_set_option(GLM_BUILD_INSTALL OFF BOOL)
 
@@ -269,11 +277,11 @@ function(eos_require_glm TARGET_NAME)
         eos_dep_add_subdirectory(glm BINARY_DIR "${CMAKE_BINARY_DIR}/glm-build")
     endif()
 
-    target_link_libraries(${TARGET_NAME} PRIVATE glm::glm)
-    target_compile_definitions(${TARGET_NAME} PRIVATE GLM_ENABLE_EXPERIMENTAL)
+    target_link_libraries(${TARGET_NAME} ${glm_visibility} glm::glm)
+    target_compile_definitions(${TARGET_NAME} ${glm_visibility} GLM_ENABLE_EXPERIMENTAL)
 
     if(EOS_VULKAN)
-        target_compile_definitions(${TARGET_NAME} PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+        target_compile_definitions(${TARGET_NAME} ${glm_visibility} GLM_FORCE_DEPTH_ZERO_TO_ONE)
     endif()
 endfunction()
 

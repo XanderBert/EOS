@@ -1,27 +1,21 @@
+import eos.core;
 import eos.math;
 import shadowCommon;
 
 static const uint CASCADES = 4;
 static const float kCascadeOverlapNDC = 0.03;
 
-struct DepthReductionData
+[CppExport]
+public struct CascadeSetupPushConstants
 {
-    float minDepth;
-    float maxDepth;
-    float pad0;
-    float pad1;
+    public PerFrameData* perFrame;
+    public DepthReductionData* depthRange;
+    public float4x4 invViewProjection;
+    public float4 lightForwardNear;
+    public float4 cameraPlanes;
 };
 
-struct CascadeSetupPC
-{
-    PerFrameData* perFrame;
-    DepthReductionData* depthRange;
-    float4x4 invViewProjection;
-    float4 lightForwardNear;
-    float4 cameraPlanes;
-};
-
-[[vk::push_constant]] CascadeSetupPC pc;
+[[vk::push_constant]] CascadeSetupPushConstants pc;
 
 [numthreads(1, 1, 1)]
 [shader("compute")]

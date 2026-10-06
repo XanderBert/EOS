@@ -34,9 +34,38 @@ namespace EOS
         // DescriptorHandle without it would silently get Slang's default bindings instead.
         std::vector<std::string> LinkedModules{};
 
+        // Shader caches of libraries the programs import (the engine's: bin/shaders/EOS). Modules precompiled there with
+        // PrecompileModule are loaded instead of being parsed and checked again, as long as their sources are unchanged.
+        // They do not change the generated code, so they are not part of the cache key.
+        std::vector<std::filesystem::path> LibraryCacheRoots{};
+
         // Debug builds of EOS: full debug info and no optimization, so shaders can be stepped through in RenderDoc / Nsight.
         // Other builds: optimized, without debug info.
         [[nodiscard]] static ShaderCompilerOptions Default();
+    };
+
+    /**
+     * @brief A shader directory whose modules get C++ mirrors of their [CppExport] structs, and the C++ namespace those
+     *        go in. Generated headers are included as ".generated/<module path>.h", so the directory holding ".generated"
+     *        has to be on the include path of everything that uses them.
+     */
+    struct CppExportRoot final
+    {
+        std::filesystem::path ShaderDirectory;
+        std::string Namespace;                  // empty for the global namespace
+    };
+
+    // Version of the C++ the generator writes. Bump it whenever the output changes for the same Slang input, so
+    // EOSShaderCompilerTool regenerates headers it would otherwise consider up to date.
+    inline constexpr uint32_t CppGeneratorVersion = 1;
+
+    /**
+     * @brief The C++ mirror of a module's [CppExport] structs, and the sources it was generated from.
+     */
+    struct GeneratedCppHeader final
+    {
+        std::string Text;                                   // empty when the module has no [CppExport] struct
+        std::vector<ShaderSourceDependency> Dependencies{};
     };
 
     /**
@@ -82,6 +111,34 @@ namespace EOS
          */
         void ResetModuleCache();
 
+        /**
+         * @brief Precompiles a module programs import into the cache directory (Slang's serialized IR), so compilers with
+         *        this cache in ShaderCompilerOptions::LibraryCacheRoots load it instead of parsing and checking its source.
+         * @note A precompiled module is shared by every program, whatever their Defines, so a library module must not
+         *       depend on a program's defines: vary it with generics, specialization constants or link-time constants.
+         */
+        [[nodiscard]] bool PrecompileModule(const std::string& moduleName, std::string& outDiagnostics);
+
+        /**
+         * @brief True when the module was precompiled with the current options and none of its sources changed since.
+         */
+        [[nodiscard]] bool IsPrecompiledModuleUpToDate(const std::string& moduleName) const;
+
+        /**
+         * @brief Generates the C++ mirror of the structs a module marks with [CppExport] (see shaderCodegen.h).
+         * @param moduleName The module, as used by `import`.
+         * @param roots Every shader directory a [CppExport] type may come from. The module's own types go in the namespace of
+         *              the root it is under; types it uses from other modules are qualified and included through theirs.
+         * @param outHeader The header, and the sources it was generated from. The text is empty when the module exports nothing.
+         * @param outDiagnostics Receives compiler errors and the reasons a struct cannot be mirrored.
+         */
+        [[nodiscard]] bool GenerateCppHeader(const std::string& moduleName, const std::vector<CppExportRoot>& roots, GeneratedCppHeader& outHeader, std::string& outDiagnostics);
+
+        /**
+         * @brief The Slang build tag programs are compiled with, or an empty string without EOS_SHADER_TOOLS.
+         */
+        [[nodiscard]] static std::string GetCompilerVersion();
+
         [[nodiscard]] const std::filesystem::path& GetCacheDirectory() const { return CacheDirectory; }
         [[nodiscard]] const std::vector<std::filesystem::path>& GetSearchPaths() const { return SearchPaths; }
 
@@ -92,6 +149,8 @@ namespace EOS
 
     private:
         [[nodiscard]] bool ReadCache(const ShaderProgramDescription& description, CompiledShaderProgram& outProgram, std::string& outError) const;
+        [[nodiscard]] std::filesystem::path GetPrecompiledModulePath(const std::string& moduleName) const;
+        [[nodiscard]] uint64_t GetPrecompiledModuleKey() const;
 
         struct SlangState;
 

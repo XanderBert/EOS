@@ -22,7 +22,7 @@ namespace EOS::SlangReflection
         {
             switch (scalarType)
             {
-                case slang::TypeReflection::Bool:    return ShaderScalarType::Bool;
+                case slang::TypeReflection::Bool:    return ShaderScalarType::Boolean;
                 case slang::TypeReflection::Int8:    return ShaderScalarType::Int8;
                 case slang::TypeReflection::UInt8:   return ShaderScalarType::UInt8;
                 case slang::TypeReflection::Int16:   return ShaderScalarType::Int16;

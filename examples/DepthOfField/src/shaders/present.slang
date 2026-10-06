@@ -1,5 +1,7 @@
+import eos.core;
 import eos.fullscreen;
 
+[CppExport]
 public struct PresentPC
 {
     public DescriptorHandle<Texture2D>    sceneColor;

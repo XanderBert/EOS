@@ -1,18 +1,10 @@
 #include "../../Common/App.h"
-
-struct PerFrameData final
-{
-    glm::mat4 model;
-    glm::mat4 mvp;
-    glm::vec4 cameraPos;
-};
-
-// DrawData in indirectModel.slang
-struct DrawData final
-{
-    glm::mat4 transform{};
-    EOS::StandardMaterialData material{};
-};
+#include ".generated/deferredLightCompute.h"
+#include ".generated/dofBlur.h"
+#include ".generated/dofComposite.h"
+#include ".generated/dofDownsample.h"
+#include ".generated/indirectModel.h"
+#include ".generated/present.h"
 
 struct Vertex final
 {
@@ -22,70 +14,8 @@ struct Vertex final
     glm::vec4 tangent;
 };
 
-struct FramePointers final
-{
-    uint64_t frameDataPtr;
-    uint64_t drawDataPtr;
-};
-
 // Radiance of the uniform environment that stands in for image-based lighting.
 constexpr float kAmbientRadiance = 0.3f;
-
-// DeferredLightingPC in deferredLightCompute.slang
-struct DeferredLightingPC final
-{
-    EOS::DescriptorHandle gbufferAlbedo;
-    EOS::DescriptorHandle gbufferNormal;
-    EOS::DescriptorHandle gbufferWorldPos;
-    EOS::DescriptorHandle samplerState;
-    EOS::DescriptorHandle outputImage;
-    uint32_t debugView;
-    glm::vec4 cameraPos;
-    glm::vec4 lightDirIntensity;
-    glm::vec4 lightColorAmbient;
-};
-
-// PresentPC in present.slang
-struct PresentPC final
-{
-    EOS::DescriptorHandle sceneColor;
-    EOS::DescriptorHandle samplerState;
-};
-
-// DofDownsamplePC in dofDownsample.slang
-struct DofDownsamplePC final
-{
-    EOS::DescriptorHandle sceneColor;
-    EOS::DescriptorHandle worldPos;
-    EOS::DescriptorHandle samplerState;
-    EOS::DescriptorHandle outputImage;
-    float    focusDistance;
-    float    focusRange;
-};
-
-// DofBlurPC in dofBlur.slang
-struct DofBlurPC final
-{
-    EOS::DescriptorHandle inputImage;
-    EOS::DescriptorHandle outputImage;
-    EOS::DescriptorHandle samplerState;
-    float    maxBlurRadius;
-    float    texelSizeX;
-    float    texelSizeY;
-};
-
-// DofCompositePC in dofComposite.slang
-struct DofCompositePC final
-{
-    EOS::DescriptorHandle sceneColor;
-    EOS::DescriptorHandle blurred;
-    EOS::DescriptorHandle worldPos;
-    EOS::DescriptorHandle samplerState;
-    EOS::DescriptorHandle outputImage;
-    float    focusDistance;
-    float    focusRange;
-    float    maxBlurRadius;
-};
 
 struct Resources final
 {
@@ -337,8 +267,8 @@ int main()
 
     const FramePointers framePointers
     {
-        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
+        .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .draws = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
     glm::vec3 lightDirection = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));

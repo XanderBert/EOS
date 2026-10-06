@@ -1,23 +1,18 @@
 import eos.bindless;
+import eos.core;
+import shadowCommon;
 
-struct DepthReductionData
+[CppExport]
+public struct DepthReductionPushConstants
 {
-    float minDepth;
-    float maxDepth;
-    float pad0;
-    float pad1;
+    public DepthReductionData*          depthRange;
+    public DescriptorHandle<Texture2D>  depthTexture;
+    public uint                         width;
+    public uint                         height;
+    public uint                         numGroupsX;
 };
 
-struct PushConstants
-{
-    DepthReductionData*          depthRange;
-    DescriptorHandle<Texture2D>  depthTexture;
-    uint                         width;
-    uint                         height;
-    uint                         numGroupsX;
-};
-
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] DepthReductionPushConstants pc;
 
 // Two Stage strategy:
 // each group reduces its assigned tiles into one result,

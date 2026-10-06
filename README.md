@@ -24,7 +24,7 @@ Eos aims to be:
 - [Vulkan Memory Allocator (VMA)](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
 - [spdlog](https://github.com/gabime/spdlog)
 - [KTX-Software](https://github.com/KhronosGroup/KTX-Software)
-
+- [GLM](https://github.com/g-truc/glm) 
 ### Optional EOS dependencies
 - [Slang](https://github.com/shader-slang/slang) when `EOS_SHADER_TOOLS=ON`
 - [stb](https://github.com/nothings/stb) when `EOS_BUILD_TEXTURE_TOOLS=ON`
@@ -33,7 +33,6 @@ Eos aims to be:
 
 ### Example-only dependencies
 - [fastGLTF](https://github.com/spnda/fastgltf)
-- [GLM](https://github.com/g-truc/glm)
 
 ### System dependencies
 - Vulkan SDK (required)
@@ -69,7 +68,13 @@ program; the other files are modules it imports.
   reflection (push-constant size, thread-group size, specialization constants, vertex inputs, color outputs, bindings).
   A program is only recompiled when one of its source files (imports included), the compiler options or the Slang
   version changed. `--force` recompiles everything, `--reflect <module>` prints a program's reflection and
-  `--dump-spirv <dir>` writes its SPIR-V.
+  `--dump-spirv <dir>` writes its SPIR-V. A build where no shader changed does not start Slang.
+- **Precompiled library**: before EOS builds, the engine's modules (`src/shaders/eos/`) are precompiled to Slang IR
+  in `bin/shaders/EOS/<Debug|Release>/modules/`. Every compile, at build time and at runtime, loads those instead of
+  parsing and type-checking the library again, which makes recompiling a program that uses the material and BSDF
+  code about three times faster (hot reload, shader graph edits). A module whose sources changed is compiled from
+  source until the next build precompiles it again. Library modules are shared by all programs, so they must not
+  depend on a program's `Defines`; vary them with generics, specialization constants or link-time constants.
 - **Runtime**: `IContext::CreateShaderProgram({.Module = "shade"})` loads a program from the cache and falls back to
   compiling it when the cache is stale (only with `EOS_SHADER_TOOLS=ON`). Pipelines pick its entry points by name:
   `.VertexShader = {shade, "vertexMain"}`. `IContext::GetShaderProgram(handle)` returns the reflection, and
@@ -85,13 +90,43 @@ program; the other files are modules it imports.
   buffers use scalar layout. Debug builds compile shaders with debug info and without optimization, so they can be
   stepped through in RenderDoc or Nsight.
 
+## Structs shared with C++
+Data that C++ writes and shaders read (buffer contents, push constants) is declared once, in Slang, and marked
+`[CppExport]` (from `eos.core`). `EOSShaderCompilerTool` generates the C++ struct into `.generated/<module>.h` next to
+the code that uses it: `src/.generated/` for the engine's modules (namespace `EOS`), `<Example>/src/.generated/` for an
+example's (global namespace). Include it as `#include ".generated/shadowCommon.h"`.
+
+```slang
+import eos.core;
+
+[CppExport]
+public struct DofBlurPC
+{
+    public DescriptorHandle<Texture2D>           inputImage;
+    public DescriptorHandle<RWTexture2D<float4>> outputImage;
+    public float maxBlurRadius = 4.0;
+}
+```
+
+The generated struct has the Slang field names and a `static_assert` for its size and every offset, so a layout
+mismatch fails the C++ build instead of reaching the GPU. Types map to `glm` (`float3` to `glm::vec3`, `float4x4` to
+`glm::mat4`), `T[N]` to `std::array`, pointers to `uint64_t` device addresses and `DescriptorHandle<T>` to
+`EOS::DescriptorHandle`. Every enum of a module that exports structs is exported too (Slang does not allow attributes
+on enums). Fields start zeroed, or at their Slang default when that is a literal number. `bool`, `half`, resources and
+defaults that are not literal numbers are reported as errors with the reason; see `tools/ShaderTools/shaderCodegen.h`.
+
+Headers are only rewritten when their content changes, so C++ is not rebuilt for shader edits that do not touch a
+shared struct. They are build output and not committed (`.generated/` is in `.gitignore`), so they appear with the
+first build; a build with `EOS_SHADER_TOOLS=OFF` cannot write them and needs an earlier build of the same checkout
+with the tools on.
+
 ## Shader library
 The engine's modules live in `src/shaders/eos/` and are imported as `eos.<name>`:
 
 | Module | Contents |
 |---|---|
 | `eos.bindless` | `DescriptorHandle<T>` routing onto the bindless descriptor set; `IsValid(handle)` |
-| `eos.core`, `eos.math`, `eos.color` | constants, math helpers, sRGB conversion and luminance |
+| `eos.core`, `eos.math`, `eos.color` | constants, `[CppExport]`, math helpers, sRGB conversion and luminance |
 | `eos.sampling` | PCG random numbers, hemisphere and GGX visible-normal sampling, MIS weights |
 | `eos.brdf` | GGX distribution, height-correlated Smith masking-shadowing, Fresnel |
 | `eos.bsdf` | `IBSDF` (`Eval`, `Sample`, `EvalPdf`, `Albedo`), `ShadingFrame` and the glTF 2.0 `StandardBSDF` |
@@ -106,8 +141,8 @@ The engine's modules live in `src/shaders/eos/` and are imported as `eos.<name>`
 was created as (`Texture2D`, `Texture2DArray`, `TextureCube`, ...). Buffers are passed as device addresses and read
 through pointers (`MyStruct*`). `eos.bindless` is linked into every program, so this works without importing it.
 
-**Materials**: `StandardMaterial` evaluates a glTF 2.0 metallic-roughness material (`StandardMaterialData`, mirrored by
-`EOS::StandardMaterialData` in C++) into a `StandardBSDF`, shading frame, emission, opacity and occlusion. Textures are
+**Materials**: `StandardMaterial` evaluates a glTF 2.0 metallic-roughness material (`StandardMaterialData`, generated
+as `EOS::StandardMaterialData` in C++) into a `StandardBSDF`, shading frame, emission, opacity and occlusion. Textures are
 optional: an empty handle means the factor alone is used. The rasterizer evaluates the BSDF per light (`eos.lighting`);
 a path tracer uses `Sample` and `EvalPdf` from the same BSDF.
 

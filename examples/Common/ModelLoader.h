@@ -27,7 +27,7 @@ struct MeshEntry final
     uint32_t indexCount;
     uint32_t drawDataIndex;         // index into the DrawData buffer
 
-    EOS::StandardMaterialData material{};   // its Sampler is left empty; BuildDrawDataFromScene fills it in
+    EOS::StandardMaterialData material{};   // its samplerState is left empty; BuildDrawDataFromScene fills it in
 
     glm::mat4 transform{};
 };
@@ -167,7 +167,9 @@ inline Scene LoadModel(const std::filesystem::path& modelPath, EOS::IContext* co
         uint32_t vertexOffset;
         uint32_t indexOffset;
         uint32_t indexCount;
-        EOS::StandardMaterialData material{};
+        // glTF's default material for primitives without one. The generated C++ struct only has Slang's literal
+        // defaults, so the base color (a vector) is set here.
+        EOS::StandardMaterialData material{.baseColorFactor = glm::vec4(1.0f)};
     };
 
     Scene importedScene{};
@@ -330,21 +332,22 @@ inline Scene LoadModel(const std::filesystem::path& modelPath, EOS::IContext* co
                     context);
 
                 EOS::StandardMaterialData& materialData = geometry.material;
-                for (int i = 0; i < 4; ++i) materialData.BaseColorFactor[i] = material.pbrData.baseColorFactor[i];
-                for (int i = 0; i < 3; ++i) materialData.EmissiveFactor[i] = material.emissiveFactor[i] * material.emissiveStrength;
-                materialData.MetallicFactor = material.pbrData.metallicFactor;
-                materialData.RoughnessFactor = material.pbrData.roughnessFactor;
-                materialData.NormalScale = material.normalTexture.has_value() ? material.normalTexture->scale : 1.0f;
-                materialData.OcclusionStrength = material.occlusionTexture.has_value() ? material.occlusionTexture->strength : 1.0f;
-                materialData.AlphaCutoff = material.alphaCutoff;
-                materialData.Alpha = material.alphaMode == fastgltf::AlphaMode::Mask  ? EOS::AlphaMode::Mask
-                                   : material.alphaMode == fastgltf::AlphaMode::Blend ? EOS::AlphaMode::Blend
-                                                                                      : EOS::AlphaMode::Opaque;
-                materialData.BaseColorTexture = textureHandles.albedo;
-                materialData.MetallicRoughnessTexture = textureHandles.metallicRoughness;
-                materialData.NormalTexture = textureHandles.normal;
-                materialData.EmissiveTexture = textureHandles.emissive;
-                materialData.OcclusionTexture = textureHandles.occlusion;
+                const auto& baseColor = material.pbrData.baseColorFactor;
+                materialData.baseColorFactor = glm::vec4(baseColor[0], baseColor[1], baseColor[2], baseColor[3]);
+                materialData.emissiveFactor = glm::vec3(material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2]) * material.emissiveStrength;
+                materialData.metallicFactor = material.pbrData.metallicFactor;
+                materialData.roughnessFactor = material.pbrData.roughnessFactor;
+                materialData.normalScale = material.normalTexture.has_value() ? material.normalTexture->scale : 1.0f;
+                materialData.occlusionStrength = material.occlusionTexture.has_value() ? material.occlusionTexture->strength : 1.0f;
+                materialData.alphaCutoff = material.alphaCutoff;
+                materialData.alphaMode = material.alphaMode == fastgltf::AlphaMode::Mask  ? EOS::AlphaMode::Mask
+                                       : material.alphaMode == fastgltf::AlphaMode::Blend ? EOS::AlphaMode::Blend
+                                                                                          : EOS::AlphaMode::Opaque;
+                materialData.baseColorTexture = textureHandles.albedo;
+                materialData.metallicRoughnessTexture = textureHandles.metallicRoughness;
+                materialData.normalTexture = textureHandles.normal;
+                materialData.emissiveTexture = textureHandles.emissive;
+                materialData.occlusionTexture = textureHandles.occlusion;
             }
 
             const uint32_t geometryIndex = static_cast<uint32_t>(geomCache.size());

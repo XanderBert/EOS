@@ -1,13 +1,5 @@
 #include "../../Common/App.h"
-
-// PerFrameData in modelAlbedo.slang
-struct PerFrameData final
-{
-    glm::mat4 model;
-    glm::mat4 mvp;
-    glm::vec3 cameraPos;
-    EOS::StandardMaterialData material;
-};
+#include ".generated/modelAlbedo.h"
 
 struct Vertex final
 {
@@ -133,7 +125,7 @@ int main()
             .cameraPos = App.MainCamera.GetPosition(),
             .material = scene.meshes[0].material,
         };
-        perFrameData.material.Sampler = App.DefaultSampler;
+        perFrameData.material.samplerState = App.DefaultSampler;
 
 
         EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
@@ -171,12 +163,9 @@ int main()
             cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
             cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
 
-            struct FramePointers
+            const FramePointers pc
             {
-                uint64_t draw;
-            }pc
-            {
-                .draw = App.Context->GetGPUAddress(Handles.PerFrameBuffer)
+                .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer)
             };
 
             cmdPushConstants(cmdBuffer, pc);

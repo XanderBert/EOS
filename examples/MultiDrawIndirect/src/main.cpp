@@ -1,18 +1,5 @@
 #include "../../Common/App.h"
-
-struct PerFrameData final
-{
-    glm::mat4 model;
-    glm::mat4 mvp;
-    glm::vec4 cameraPos;
-};
-
-// DrawData in indirectModel.slang
-struct DrawData final
-{
-    glm::mat4 transform{};
-    EOS::StandardMaterialData material{};
-};
+#include ".generated/indirectModel.h"
 
 struct Vertex final
 {
@@ -20,12 +7,6 @@ struct Vertex final
     glm::vec3 normal;
     glm::vec2 uv;
     glm::vec4 tangent;
-};
-
-struct FramePointers final
-{
-    uint64_t frameDataPtr;
-    uint64_t drawDataPtr;
 };
 
 struct Resources final
@@ -155,8 +136,8 @@ int main()
 
     const FramePointers framePointers
     {
-        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
+        .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .draws = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
 

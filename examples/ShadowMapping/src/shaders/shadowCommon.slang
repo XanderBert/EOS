@@ -1,11 +1,13 @@
 module shadowCommon;
 
+import eos.core;
 import eos.material;
 
+[CppExport]
 public struct PerFrameData
 {
-    public float4x4 Model;
-    public float4x4 MVP;
+    public float4x4 model;
+    public float4x4 mvp;
     public float4x4 depthMVP;
     public float4   lightPos;
     public float4   lightDir; // xyz = direction the light travels (directional light)
@@ -14,13 +16,16 @@ public struct PerFrameData
     public DescriptorHandle<SamplerState> shadowSampler;
 };
 
+[CppExport]
 public struct DrawData
 {
     public float4x4 transform;
     public StandardMaterialData material;
 };
 
-public struct PushConstants
+// Push constants of the shadow and shade passes.
+[CppExport]
+public struct FramePointers
 {
     public PerFrameData* perFrame;
     public DrawData* draws;

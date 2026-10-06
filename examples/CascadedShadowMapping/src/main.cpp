@@ -1,5 +1,8 @@
 
 #include "../../Common/App.h"
+#include ".generated/cascadeSetup.h"
+#include ".generated/depthReduction.h"
+#include ".generated/shadowCommon.h"
 
 //https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
 //https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch10.html
@@ -11,13 +14,6 @@
 
 #define CASCADES 4
 #define SHADOW_SIZE 4096
-
-enum ShadowTechnique : int32_t
-{
-    ShadowTechniqueCpuCascade = 0,
-    ShadowTechniqueComputeCascade = 1,
-    ShadowTechniqueRayQuery = 2,
-};
 
 #pragma region DepthStates
 constexpr EOS::DepthState DepthStateWrite
@@ -34,29 +30,8 @@ constexpr EOS::DepthState DepthStateRead
 #pragma endregion
 
 #pragma region Structs
-struct PerFrameData final
-{
-    glm::mat4 model;
-    glm::mat4 mvp;
-    glm::mat4 view;
-    glm::mat4 cascadeViewProj[CASCADES];
-    glm::vec4 lightDir;
-    glm::vec4 cascadeSplits;
-    glm::vec3 cameraPos;
-    EOS::DescriptorHandle shadowMap;
-    EOS::DescriptorHandle shadowSampler;
-    EOS::DescriptorHandle sceneTLAS;
-    int32_t   shadowDebugMode;
-    int32_t   shadowForceCascade;
-    int32_t   shadowTechnique;
-};
-
-// DrawData in shadowCommon.slang
-struct DrawData final
-{
-    glm::mat4 transform{};
-    EOS::StandardMaterialData material{};
-};
+// PerFrameData, DrawData, FramePointers, DepthReductionData and the compute push constants are generated from the
+// shaders (.generated/*.h).
 
 struct Vertex final
 {
@@ -69,38 +44,6 @@ struct Vertex final
 struct VertexShadow final
 {
     glm::vec3 position;
-};
-
-struct FramePointers final
-{
-    uint64_t frameDataPtr;
-    uint64_t drawDataPtr;
-};
-
-struct DepthReductionData final
-{
-    float minDepth;
-    float maxDepth;
-    float pad0;
-    float pad1;
-};
-
-struct DepthReductionPushConstants final
-{
-    uint64_t depthRangePtr;
-    EOS::DescriptorHandle depthTexture;
-    uint32_t width;
-    uint32_t height;
-    uint32_t numGroupsX;
-};
-
-struct CascadeSetupPushConstants final
-{
-    uint64_t perFramePtr;
-    uint64_t depthRangePtr;
-    glm::mat4 invViewProjection;
-    glm::vec4 lightForwardNear;
-    glm::vec4 cameraPlanes;
 };
 
 struct Cascade final
@@ -193,7 +136,7 @@ int g_ShadowDebugMode = 0;
 int g_ForceShadowCascade = -1;
 bool g_UseDepthReductionForCascades = true;
 
-int g_ShadowTechnique = ShadowTechniqueCpuCascade;
+int g_ShadowTechnique = static_cast<int>(ShadowTechnique::CpuCascade);   // an int for the UI combo
 
 void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3& lightForward, std::array<Cascade, CASCADES>& cascades)
 {
@@ -334,8 +277,8 @@ void DrawDepthSplitByAlphaTest(EOS::ICommandBuffer& cmdBuffer, EOS::RenderPipeli
     {
         const FramePointers alphaTestedPointers
         {
-            .frameDataPtr = FramePointersData.frameDataPtr,
-            .drawDataPtr = FramePointersData.drawDataPtr + nOpaqueMeshes * sizeof(DrawData),
+            .perFrame = FramePointersData.perFrame,
+            .draws = FramePointersData.draws + nOpaqueMeshes * sizeof(DrawData),
         };
 
         cmdBindRenderPipeline(cmdBuffer, alphaTestedPipeline);
@@ -453,8 +396,9 @@ void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::UI::Renderer* UIRenderer)
         };
 
         EOS::UI::Combo("Shadow Technique", &g_ShadowTechnique, shadowTechniqueItems);
-        const bool isCascadeTechnique = g_ShadowTechnique == ShadowTechniqueCpuCascade || g_ShadowTechnique == ShadowTechniqueComputeCascade;
-        const bool isComputeCascadeTechnique = g_ShadowTechnique == ShadowTechniqueComputeCascade;
+        const ShadowTechnique technique = static_cast<ShadowTechnique>(g_ShadowTechnique);
+        const bool isCascadeTechnique = technique == ShadowTechnique::CpuCascade || technique == ShadowTechnique::ComputeCascade;
+        const bool isComputeCascadeTechnique = technique == ShadowTechnique::ComputeCascade;
 
         if (isCascadeTechnique)
         {
@@ -814,8 +758,8 @@ int main()
     //Get UBO pointers
     FramePointersData =
     {
-        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
+        .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .draws = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
 
@@ -836,8 +780,9 @@ int main()
         const glm::mat4 projection = App.MainCamera.GetProjectionMatrix(aspectRatio);
         const glm::mat4 viewProjection = projection * view;
         const glm::mat4 mvp = viewProjection * m;
-        const bool isCascadeTechnique = g_ShadowTechnique == ShadowTechniqueCpuCascade || g_ShadowTechnique == ShadowTechniqueComputeCascade;
-        const bool useComputeCascades = g_ShadowTechnique == ShadowTechniqueComputeCascade;
+        const ShadowTechnique technique = static_cast<ShadowTechnique>(g_ShadowTechnique);
+        const bool isCascadeTechnique = technique == ShadowTechnique::CpuCascade || technique == ShadowTechnique::ComputeCascade;
+        const bool useComputeCascades = technique == ShadowTechnique::ComputeCascade;
 
 
         PerFrameData perFrameData
@@ -852,7 +797,7 @@ int main()
             .sceneTLAS = Handles.SceneTLAS,
             .shadowDebugMode = g_ShadowDebugMode,
             .shadowForceCascade = g_ForceShadowCascade,
-            .shadowTechnique = g_ShadowTechnique,
+            .shadowTechnique = technique,
         };
 
         if (!useComputeCascades)
@@ -899,7 +844,7 @@ int main()
             const uint32_t gx = (static_cast<uint32_t>(App.Window.Width) + 15) / 16;
             const DepthReductionPushConstants depthReductionPC
             {
-                .depthRangePtr  = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
+                .depthRange     = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
                 .depthTexture   = Handles.DepthTexture,
                 .width          = static_cast<uint32_t>(App.Window.Width),
                 .height         = static_cast<uint32_t>(App.Window.Height),
@@ -908,8 +853,8 @@ int main()
 
             const CascadeSetupPushConstants cascadeSetupPC
             {
-                .perFramePtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-                .depthRangePtr = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
+                .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+                .depthRange = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
                 .invViewProjection = glm::inverse(viewProjection),
                 .lightForwardNear = glm::vec4(lightForward, 0.0f),
                 .cameraPlanes = glm::vec4(App.MainCamera.GetNearPlane(), App.MainCamera.GetFarPlane(), g_UseDepthReductionForCascades ? 1.0f : 0.0f, static_cast<float>(SHADOW_SIZE)),

@@ -1,7 +1,9 @@
+import eos.core;
 import eos.math;
 import eos.bindless;
 import eos.fullscreen;
 
+[CppExport]
 public struct EdgeDetectPC
 {
     public DescriptorHandle<Texture2D>    sceneColor;

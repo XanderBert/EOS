@@ -3,7 +3,6 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <iterator>
 #include <system_error>
 #include <type_traits>
 
@@ -12,10 +11,28 @@ namespace EOS::ShaderCache
     namespace
     {
         constexpr uint32_t kMagic = 0x50534F45;     // "EOSP"
-        constexpr uint32_t kFormatVersion = 2;      // bump whenever the layout written below changes
+        constexpr uint32_t kFormatVersion = 3;      // bump whenever the layout written below changes
+
+        constexpr uint32_t kDerivedMagic = 0x44534F45;  // "EOSD"
+        constexpr uint32_t kDerivedFormatVersion = 1;
 
         constexpr uint64_t kFnvOffsetBasis = 0xcbf29ce484222325ull;
         constexpr uint64_t kFnvPrime = 0x100000001b3ull;
+
+        // One read for the whole file: going through istreambuf_iterator is a call per byte, which in debug builds
+        // made reading the cache take longer than the compile it saves.
+        [[nodiscard]] bool ReadWholeFile(const std::filesystem::path& path, std::string& outData)
+        {
+            std::ifstream file(path, std::ios::in | std::ios::binary | std::ios::ate);
+            if (!file.is_open()) return false;
+
+            const std::streamsize size = file.tellg();
+            if (size < 0) return false;
+
+            outData.resize(static_cast<size_t>(size));
+            file.seekg(0);
+            return size == 0 || static_cast<bool>(file.read(outData.data(), size));
+        }
 
         class BinaryWriter final
         {
@@ -133,6 +150,16 @@ namespace EOS::ShaderCache
                 writer.WriteString(define.Value);
             }
 
+            writer.Write(static_cast<uint32_t>(description.LinkModules.size()));
+            for (const std::string& linkModule : description.LinkModules) writer.WriteString(linkModule);
+
+            writer.Write(static_cast<uint32_t>(description.SourceModules.size()));
+            for (const ShaderSourceModule& sourceModule : description.SourceModules)
+            {
+                writer.WriteString(sourceModule.Name);
+                writer.WriteString(sourceModule.Source);
+            }
+
             writer.WriteString(program.CompilerVersion);
             writer.Write(program.PushConstantSize);
 
@@ -198,6 +225,20 @@ namespace EOS::ShaderCache
             for (ShaderMacro& define : description.Defines)
             {
                 if (!reader.ReadString(define.Name) || !reader.ReadString(define.Value)) return false;
+            }
+
+            if (!reader.ReadCount(count, sizeof(uint32_t))) return false;
+            description.LinkModules.resize(count);
+            for (std::string& linkModule : description.LinkModules)
+            {
+                if (!reader.ReadString(linkModule)) return false;
+            }
+
+            if (!reader.ReadCount(count, 2 * sizeof(uint32_t))) return false;
+            description.SourceModules.resize(count);
+            for (ShaderSourceModule& sourceModule : description.SourceModules)
+            {
+                if (!reader.ReadString(sourceModule.Name) || !reader.ReadString(sourceModule.Source)) return false;
             }
 
             if (!reader.ReadString(outProgram.CompilerVersion) || !reader.Read(outProgram.PushConstantSize)) return false;
@@ -297,16 +338,23 @@ namespace EOS::ShaderCache
             hash = HashString(define.Value, hash);
         }
 
+        hash = HashString("|link|", hash);
+        for (const std::string& linkModule : description.LinkModules) hash = HashString(linkModule, hash);
+
+        hash = HashString("|source|", hash);
+        for (const ShaderSourceModule& sourceModule : description.SourceModules)
+        {
+            hash = HashString(sourceModule.Name, hash);
+            hash = HashString(sourceModule.Source, hash);
+        }
+
         return hash;
     }
 
     bool HashFile(const std::filesystem::path& path, uint64_t& outHash)
     {
-        std::ifstream file(path, std::ios::in | std::ios::binary);
-        if (!file.is_open()) return false;
-
-        const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        if (file.bad()) return false;
+        std::string content;
+        if (!ReadWholeFile(path, content)) return false;
 
         outHash = HashBytes(content.data(), content.size(), 0);
         return true;
@@ -315,7 +363,7 @@ namespace EOS::ShaderCache
     std::filesystem::path GetFilePath(const std::filesystem::path& cacheDirectory, const ShaderProgramDescription& description)
     {
         std::string fileName = description.Module;
-        if (!description.EntryPoints.empty() || !description.Defines.empty())
+        if (!description.EntryPoints.empty() || !description.Defines.empty() || !description.LinkModules.empty() || !description.SourceModules.empty())
         {
             char suffix[24];
             std::snprintf(suffix, sizeof(suffix), "-%016llx", static_cast<unsigned long long>(HashDescription(description)));
@@ -323,6 +371,50 @@ namespace EOS::ShaderCache
         }
 
         return cacheDirectory / (fileName + FileExtension);
+    }
+
+    namespace
+    {
+        // Writes next to the destination and renames over it, so a reader (a running application, or another build
+        // invoking the tool) never sees a half-written file.
+        [[nodiscard]] bool WriteFileAtomically(const std::filesystem::path& path, const std::string& bytes, std::string& outError)
+        {
+            std::error_code errorCode;
+            std::filesystem::create_directories(path.parent_path(), errorCode);
+            if (errorCode)
+            {
+                outError = "cannot create shader cache directory " + path.parent_path().string() + ": " + errorCode.message();
+                return false;
+            }
+
+            std::filesystem::path temporaryPath = path;
+            temporaryPath += ".tmp";
+            {
+                std::ofstream file(temporaryPath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!file.is_open())
+                {
+                    outError = "cannot open " + temporaryPath.string() + " for writing";
+                    return false;
+                }
+
+                file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+                if (!file.good())
+                {
+                    outError = "failed writing " + temporaryPath.string();
+                    return false;
+                }
+            }
+
+            std::filesystem::rename(temporaryPath, path, errorCode);
+            if (errorCode)
+            {
+                outError = "cannot move " + temporaryPath.string() + " to " + path.string() + ": " + errorCode.message();
+                std::filesystem::remove(temporaryPath, errorCode);
+                return false;
+            }
+
+            return true;
+        }
     }
 
     bool Write(const std::filesystem::path& path, uint64_t optionsHash, const CompiledShaderProgram& program, std::string& outError)
@@ -334,55 +426,18 @@ namespace EOS::ShaderCache
         writer.Write(HashDescription(program.Description));
         WriteProgram(writer, program);
 
-        std::error_code errorCode;
-        std::filesystem::create_directories(path.parent_path(), errorCode);
-        if (errorCode)
-        {
-            outError = "cannot create shader cache directory " + path.parent_path().string() + ": " + errorCode.message();
-            return false;
-        }
-
-        // Write next to the destination and rename over it, so a reader (a running application, or another build
-        // invoking the tool) never sees a half-written file.
-        std::filesystem::path temporaryPath = path;
-        temporaryPath += ".tmp";
-        {
-            std::ofstream file(temporaryPath, std::ios::out | std::ios::binary | std::ios::trunc);
-            if (!file.is_open())
-            {
-                outError = "cannot open " + temporaryPath.string() + " for writing";
-                return false;
-            }
-
-            file.write(writer.Buffer.data(), static_cast<std::streamsize>(writer.Buffer.size()));
-            if (!file.good())
-            {
-                outError = "failed writing " + temporaryPath.string();
-                return false;
-            }
-        }
-
-        std::filesystem::rename(temporaryPath, path, errorCode);
-        if (errorCode)
-        {
-            outError = "cannot move " + temporaryPath.string() + " to " + path.string() + ": " + errorCode.message();
-            std::filesystem::remove(temporaryPath, errorCode);
-            return false;
-        }
-
-        return true;
+        return WriteFileAtomically(path, writer.Buffer, outError);
     }
 
     bool Read(const std::filesystem::path& path, uint64_t optionsHash, const ShaderProgramDescription& description, CompiledShaderProgram& outProgram, std::string& outError)
     {
-        std::ifstream file(path, std::ios::in | std::ios::binary);
-        if (!file.is_open())
+        std::string data;
+        if (!ReadWholeFile(path, data))
         {
             outError = "no cached program at " + path.string();
             return false;
         }
 
-        const std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         BinaryReader reader(data);
 
         uint32_t magic = 0;
@@ -432,14 +487,69 @@ namespace EOS::ShaderCache
 
     bool AreDependenciesUpToDate(const CompiledShaderProgram& program)
     {
-        if (program.Dependencies.empty()) return false;
+        return AreDependenciesUpToDate(program.Dependencies);
+    }
 
-        for (const ShaderSourceDependency& dependency : program.Dependencies)
+    bool AreDependenciesUpToDate(const std::vector<ShaderSourceDependency>& dependencies)
+    {
+        if (dependencies.empty()) return false;
+
+        for (const ShaderSourceDependency& dependency : dependencies)
         {
             uint64_t hash = 0;
             if (!HashFile(dependency.Path, hash) || hash != dependency.ContentHash) return false;
         }
 
+        return true;
+    }
+
+    bool WriteDerived(const std::filesystem::path& path, const DerivedEntry& entry, std::string& outError)
+    {
+        BinaryWriter writer;
+        writer.Write(kDerivedMagic);
+        writer.Write(kDerivedFormatVersion);
+        writer.Write(entry.Key);
+        writer.WritePath(entry.Source);
+        writer.Write(static_cast<uint32_t>(entry.Dependencies.size()));
+        for (const ShaderSourceDependency& dependency : entry.Dependencies)
+        {
+            writer.WritePath(dependency.Path);
+            writer.Write(dependency.ContentHash);
+        }
+        writer.Write(static_cast<uint64_t>(entry.Payload.size()));
+        writer.Buffer.append(entry.Payload);
+
+        return WriteFileAtomically(path, writer.Buffer, outError);
+    }
+
+    bool ReadDerived(const std::filesystem::path& path, uint64_t key, DerivedEntry& outEntry)
+    {
+        std::string data;
+        if (!ReadWholeFile(path, data)) return false;
+
+        BinaryReader reader(data);
+
+        uint32_t magic = 0;
+        uint32_t formatVersion = 0;
+        DerivedEntry entry;
+        uint32_t numberOfDependencies = 0;
+        if (!reader.Read(magic) || magic != kDerivedMagic || !reader.Read(formatVersion) || formatVersion != kDerivedFormatVersion) return false;
+        if (!reader.Read(entry.Key) || entry.Key != key || !reader.ReadPath(entry.Source)) return false;
+        if (!reader.ReadCount(numberOfDependencies, sizeof(uint32_t) + sizeof(uint64_t))) return false;
+
+        entry.Dependencies.resize(numberOfDependencies);
+        for (ShaderSourceDependency& dependency : entry.Dependencies)
+        {
+            if (!reader.ReadPath(dependency.Path) || !reader.Read(dependency.ContentHash)) return false;
+        }
+
+        uint64_t payloadSize = 0;
+        if (!reader.Read(payloadSize) || payloadSize > data.size()) return false;
+
+        entry.Payload.resize(payloadSize);
+        if (!reader.ReadBytes(entry.Payload.data(), entry.Payload.size()) || !reader.AtEnd()) return false;
+
+        outEntry = std::move(entry);
         return true;
     }
 }

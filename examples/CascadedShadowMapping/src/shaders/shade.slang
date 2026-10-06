@@ -152,7 +152,7 @@ float ComputeInlineRayVisibility(PerFrameData frameData, float3 worldPos, float3
     return (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
 }
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] FramePointers pc;
 
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
@@ -161,11 +161,11 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     const float4x4 transform = pc.draws[drawIndex].transform;
 
     float4 localTransformed = mul(float4(input.Pos, 1.0), transform);
-    float3x3 normalMatrix   = float3x3(mul(transform, frameData.Model));
+    float3x3 normalMatrix   = float3x3(mul(transform, frameData.model));
 
     VSOutput output;
-    output.Pos          = mul(localTransformed, frameData.MVP);
-    output.WorldPos     = mul(localTransformed, frameData.Model).xyz;
+    output.Pos          = mul(localTransformed, frameData.mvp);
+    output.WorldPos     = mul(localTransformed, frameData.model).xyz;
     output.Normal       = mul(input.Normal, normalMatrix);
     output.Tangent      = float4(mul(input.Tangent.xyz, normalMatrix), input.Tangent.w);
     output.UV           = input.UV;
@@ -193,13 +193,13 @@ float4 fragmentMain(VSOutput input) : SV_Target
     const float3 L = -sun.direction;
     const float ndotl = saturate(dot(N, L));
 
-    if (frameData.shadowTechnique == SHADOW_TECHNIQUE_RAY_QUERY)
+    if (frameData.shadowTechnique == ShadowTechnique.RayQuery)
     {
         const float visibility = ComputeInlineRayVisibility(frameData, input.WorldPos, N, L);
         return float4(direct * visibility + indirect, 1.0);
     }
 
-    float4 viewPos = mul(float4(input.WorldPos, 1.0), frameData.View);
+    float4 viewPos = mul(float4(input.WorldPos, 1.0), frameData.view);
     float viewDepth = -viewPos.z;
     uint cascadeIndex = SelectCascade(viewDepth, frameData.cascadeSplits);
     int debugMode = frameData.shadowDebugMode;

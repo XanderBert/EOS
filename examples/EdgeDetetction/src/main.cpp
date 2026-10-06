@@ -1,18 +1,7 @@
 #include "../../Common/App.h"
-
-struct PerFrameData final
-{
-    glm::mat4 model;
-    glm::mat4 mvp;
-    glm::vec4 cameraPos;
-};
-
-// DrawData in indirectModel.slang
-struct DrawData final
-{
-    glm::mat4 transform{};
-    EOS::StandardMaterialData material{};
-};
+#include ".generated/deferredLight.h"
+#include ".generated/edgeDetect.h"
+#include ".generated/indirectModel.h"
 
 // Radiance of the uniform environment that stands in for image-based lighting.
 constexpr float kAmbientRadiance = 0.3f;
@@ -23,37 +12,6 @@ struct Vertex final
     glm::vec3 normal;
     glm::vec2 uv;
     glm::vec4 tangent;
-};
-
-struct FramePointers final
-{
-    uint64_t frameDataPtr;
-    uint64_t drawDataPtr;
-};
-
-// DeferredLightingPC in deferredLight.slang
-struct DeferredLightingPC final
-{
-    EOS::DescriptorHandle gbufferAlbedo;
-    EOS::DescriptorHandle gbufferNormal;
-    EOS::DescriptorHandle gbufferWorldPos;
-    EOS::DescriptorHandle samplerState;
-    uint32_t debugView;
-    glm::vec4 cameraPos;
-    glm::vec4 lightDirIntensity;
-    glm::vec4 lightColorAmbient;
-};
-
-// EdgeDetectPC in edgeDetect.slang
-struct EdgeDetectPC final
-{
-    EOS::DescriptorHandle sceneColor;
-    EOS::DescriptorHandle sceneNormal;
-    EOS::DescriptorHandle samplerState;
-    float    threshold;
-    uint32_t showEdgesOnly;
-    float    texelW;
-    float    texelH;
 };
 
 struct Resources final
@@ -241,8 +199,8 @@ int main()
 
     const FramePointers framePointers
     {
-        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
+        .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .draws = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
     glm::vec3 lightDirection = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));

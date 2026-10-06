@@ -1,25 +1,7 @@
 
 #include "../../Common/App.h"
+#include ".generated/shadowCommon.h"
 
-
-struct PerFrameData final
-{
-    glm::mat4 model;
-    glm::mat4 mvp;
-    glm::mat4 depthMVP;
-    glm::vec4 lightPos;
-    glm::vec4 lightDir;
-    glm::vec3 cameraPos;
-    EOS::DescriptorHandle shadowMap;
-    EOS::DescriptorHandle shadowSampler;
-};
-
-// DrawData in shadowCommon.slang
-struct DrawData final
-{
-    glm::mat4 transform{};
-    EOS::StandardMaterialData material{};
-};
 
 struct Vertex final
 {
@@ -33,12 +15,6 @@ struct Vertex final
 struct VertexShadow final
 {
     glm::vec3 position;
-};
-
-struct FramePointers final
-{
-    uint64_t frameDataPtr;
-    uint64_t drawDataPtr;
 };
 
 struct Resources final
@@ -232,8 +208,8 @@ int main()
     glm::vec3 lightUp           = {0.0f, 1.0f, 0.0f};
     const FramePointers framePointers
     {
-        .frameDataPtr = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-        .drawDataPtr = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
+        .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
+        .draws = App.Context->GetGPUAddress(Handles.PerDrawBuffer),
     };
 
     App.Run([&]()
@@ -323,8 +299,8 @@ int main()
             {
                 const FramePointers alphaTestedPointers
                 {
-                    .frameDataPtr = framePointers.frameDataPtr,
-                    .drawDataPtr = framePointers.drawDataPtr + nOpaqueMeshes * sizeof(DrawData),
+                    .perFrame = framePointers.perFrame,
+                    .draws = framePointers.draws + nOpaqueMeshes * sizeof(DrawData),
                 };
 
                 cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShadowAlphaTestedHandle);

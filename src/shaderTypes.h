@@ -24,17 +24,36 @@ namespace EOS
     };
 
     /**
+     * @brief A Slang module given as source text instead of a file, such as one a shader graph generated.
+     */
+    struct ShaderSourceModule final
+    {
+        std::string Name;       // as used by `import`, and shown in diagnostics
+        std::string Source;
+
+        bool operator==(const ShaderSourceModule&) const = default;
+    };
+
+    /**
      * @brief Identifies one compiled shader program: a Slang module plus the entry points and defines it is compiled with.
      */
     struct ShaderProgramDescription final
     {
         // Slang module name, as used by `import`. "shade" loads shade.slang, "eos.imgui" loads eos/imgui.slang.
+        // It may also name one of SourceModules.
         std::string Module;
 
         // Entry points to compile. Empty compiles every entry point the module marks with [shader("...")].
         std::vector<std::string> EntryPoints{};
 
         std::vector<ShaderMacro> Defines{};
+
+        // More modules linked into the program, from files (by import name) and from memory. This is how a program is
+        // specialized at link time: Module declares `extern struct Material : IMaterial;` and a linked module defines it
+        // with `export struct Material : IMaterial = MyMaterial;`. One pass serves every material, and only the small
+        // module that defines the material is compiled per program.
+        std::vector<std::string> LinkModules{};
+        std::vector<ShaderSourceModule> SourceModules{};
 
         bool operator==(const ShaderProgramDescription&) const = default;
     };
@@ -45,7 +64,7 @@ namespace EOS
     enum class ShaderScalarType : uint8_t
     {
         Unknown = 0,
-        Bool,
+        Boolean,                // not "Bool": X11 headers #define Bool
         Int8,
         UInt8,
         Int16,

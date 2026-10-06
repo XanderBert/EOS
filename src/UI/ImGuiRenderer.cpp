@@ -301,17 +301,17 @@ namespace EOS
                 if (clipMax.x <= clipMin.x || clipMax.y <= clipMin.y) continue;
 
                 const DecodedImGuiTextureID textureData = DecodeImGuiTextureID(static_cast<uint64_t>(ImCmd.GetTexID()));
-                BindData bindData
+                const ImGuiPushConstants pushConstants
                 {
-                    .LRTB               = {left, right, top, bottom},
-                    .vertexBufferPtr    = listVertexBufferPtr,
-                    .texture            = DescriptorHandle(textureData.TextureID),
-                    .samplerState       = Sampler,
-                    .textureLayer       = textureData.Layer,
-                    .textureView        = static_cast<uint32_t>(textureData.View),
+                    .LRTB           = {left, right, top, bottom},
+                    .vertices       = listVertexBufferPtr,
+                    .texture        = DescriptorHandle(textureData.TextureID),
+                    .samplerState   = Sampler,
+                    .textureLayer   = textureData.Layer,
+                    .textureView    = textureData.View,
                 };
 
-                cmdPushConstants(cmd, bindData);
+                cmdPushConstants(cmd, pushConstants);
                 cmdBindScissorRect(cmd, {static_cast<uint32_t>(clipMin.x), static_cast<uint32_t>(clipMin.y), static_cast<uint32_t>(clipMax.x - clipMin.x), static_cast<uint32_t>(clipMax.y - clipMin.y)});
                 cmdDrawIndexed(cmd, ImCmd.ElemCount, 1u, indexOffset + ImCmd.IdxOffset, static_cast<int32_t>(ImCmd.VtxOffset));
             }

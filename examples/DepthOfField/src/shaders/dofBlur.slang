@@ -1,3 +1,6 @@
+import eos.core;
+
+[CppExport]
 public struct DofBlurPC
 {
     public DescriptorHandle<Texture2D>           inputImage;

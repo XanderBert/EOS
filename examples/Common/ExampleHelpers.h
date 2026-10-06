@@ -34,7 +34,7 @@ inline uint32_t PartitionMeshesByAlphaTest(Scene& scene)
 {
     const auto firstAlphaTested = std::stable_partition(scene.meshes.begin(), scene.meshes.end(), [](const MeshEntry& mesh)
     {
-        return mesh.material.Alpha != EOS::AlphaMode::Mask;
+        return mesh.material.alphaMode != EOS::AlphaMode::Mask;
     });
 
     return static_cast<uint32_t>(std::distance(scene.meshes.begin(), firstAlphaTested));
@@ -51,7 +51,7 @@ inline std::vector<DrawDataT> BuildDrawDataFromScene(const Scene& scene, EOS::De
     {
         DrawDataT& draw = drawData.emplace_back();
         draw.material = mesh.material;
-        draw.material.Sampler = materialSampler;
+        draw.material.samplerState = materialSampler;
         draw.transform = mesh.transform;
     }
     return drawData;

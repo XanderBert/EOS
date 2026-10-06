@@ -87,6 +87,10 @@ endif ()
 eos_require_glfw(EOS)
 eos_require_spdlog(EOS)
 eos_require_ktx(EOS)
+# Public: the C++ mirrors of the engine's Slang structs (src/.generated) use glm types.
+eos_require_glm(EOS PUBLIC)
+
+set(ENGINE_SHADER_PATH "${CMAKE_SOURCE_DIR}/src/shaders")
 
 if(EOS_SHADER_TOOLS)
     if(NOT DEFINED EOS_SHADER_OUTPUT_PATH OR EOS_SHADER_OUTPUT_PATH STREQUAL "")
@@ -99,24 +103,35 @@ if(EOS_SHADER_TOOLS)
         message(STATUS "Please call SET_SHADER_PATHS(${PROJECT_NAME} <project_shader_path> <shader_output_path>) in your CMakeLists.txt to set the paths for shader compilation")
     endif()
 
-    set(ENGINE_SHADER_PATH "${CMAKE_SOURCE_DIR}/src/shaders")
     target_compile_definitions(EOS PRIVATE EOS_SHADER_TOOLS)
     target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_ENGINE_SHADER_PATH="${ENGINE_SHADER_PATH}")
     eos_require_slang(EOS)
 endif ()
 
-# ShaderCompiler and ShaderReloader are always part of the library, whether or not EOS_SHADER_TOOLS is set.
-# Both translation units wrap every body in #if defined(EOS_SHADER_TOOLS), so with the option off they still
-# provide the same classes with stub implementations: no Slang, no hot reload, shaders loaded from the cache
-# only. src/ constructs and calls them unconditionally, so leaving them out of the build breaks compilation
-# rather than disabling a feature.
-target_include_directories(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools")
-target_sources(EOS PRIVATE
+# The shader compiler (cache, Slang compilation, reflection, C++ generation) is a library of its own, so that
+# EOSShaderCompilerTool does not depend on EOS: EOS includes headers the tool generates (src/.generated), so the
+# tool has to be built and run first.
+# ShaderCompiler and ShaderReloader are always built, whether or not EOS_SHADER_TOOLS is set. Their translation
+# units wrap every body in #if defined(EOS_SHADER_TOOLS), so with the option off they still provide the same
+# classes with stub implementations: no Slang, no hot reload, shaders loaded from the cache only. src/ constructs
+# and calls them unconditionally, so leaving them out of the build breaks compilation rather than disabling a feature.
+add_library(EOSShaderCompiler STATIC
     "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCache.cpp"
+    "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCodegen.cpp"
     "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderCompiler.cpp"
     "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReflection.cpp"
-    "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReloader.cpp"
 )
+set_property(TARGET EOSShaderCompiler PROPERTY FOLDER "Internal/Tools")
+SETUP_TARGET_DEFAULTS(EOSShaderCompiler)
+target_include_directories(EOSShaderCompiler PUBLIC "${CMAKE_SOURCE_DIR}/tools" "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(EOSShaderCompiler PRIVATE $<$<CONFIG:Debug>:EOS_DEBUG=1>)
+if(EOS_SHADER_TOOLS)
+    target_compile_definitions(EOSShaderCompiler PRIVATE EOS_SHADER_TOOLS)
+    eos_require_slang(EOSShaderCompiler)
+endif()
+
+target_link_libraries(EOS PRIVATE EOSShaderCompiler)
+target_sources(EOS PRIVATE "${CMAKE_SOURCE_DIR}/tools/ShaderTools/shaderReloader.cpp")
 
 if(EOS_USE_TRACY)
     target_compile_definitions(EOS PUBLIC EOS_USE_TRACY)
@@ -137,6 +152,13 @@ endif()
 if(EOS_BUILD_TEXTURE_TOOLS OR EOS_SHADER_TOOLS)
     add_subdirectory(tools)
 endif()
+
+# The engine's shader library, built before EOS compiles: its modules precompiled into EOS_ENGINE_SHADER_CACHE_PATH
+# (every program that imports them loads those instead of parsing the sources again) and the C++ mirrors of its
+# [CppExport] structs in src/.generated. Generated headers are not committed (.gitignore), so a build without
+# EOS_SHADER_TOOLS needs them from an earlier build of the same checkout with the tools on.
+set(EOS_ENGINE_SHADER_CACHE_PATH "${EOS_SHADER_OUTPUT_PATH}/shaders/EOS")
+ADD_SHADER_LIBRARY_TARGET(EOS "${ENGINE_SHADER_PATH}" "${EOS_ENGINE_SHADER_CACHE_PATH}" "${CMAKE_SOURCE_DIR}/src")
 
 if(EOS_BUILD_TEXTURE_TOOLS)
     eos_require_stb(EOS)

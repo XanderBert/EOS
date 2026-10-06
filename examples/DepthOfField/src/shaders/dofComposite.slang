@@ -1,5 +1,7 @@
+import eos.core;
 import dofCommon;
 
+[CppExport]
 public struct DofCompositePC
 {
     public DescriptorHandle<Texture2D>           sceneColor;

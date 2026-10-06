@@ -29,7 +29,7 @@ static const float kShadowMapSize = 4096.0;
 static const float3 kSunRadiance = float3(3.0);
 static const float3 kAmbientRadiance = float3(0.3);
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] FramePointers pc;
 
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
@@ -38,11 +38,11 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
     const float4x4 transform = pc.draws[drawIndex].transform;
 
     const float4 localTransformed = mul(float4(input.Pos, 1.0), transform);
-    const float3x3 normalMatrix   = float3x3(mul(transform, frameData.Model));
+    const float3x3 normalMatrix   = float3x3(mul(transform, frameData.model));
 
     VSOutput output;
-    output.Pos          = mul(localTransformed, frameData.MVP);
-    output.WorldPos     = mul(localTransformed, frameData.Model).xyz;
+    output.Pos          = mul(localTransformed, frameData.mvp);
+    output.WorldPos     = mul(localTransformed, frameData.model).xyz;
     output.Normal       = mul(input.Normal, normalMatrix);
     output.Tangent      = float4(mul(input.Tangent.xyz, normalMatrix), input.Tangent.w);
     output.UV           = input.UV;

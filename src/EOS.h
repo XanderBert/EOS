@@ -9,6 +9,8 @@
 #include "window.h"
 #include "defines.h"
 #include "enums.h"
+#include "descriptorHandle.h"
+#include ".generated/eos/material.h"     // StandardMaterialData, AlphaMode
 #include "handle.h"
 #include "shaderTypes.h"
 
@@ -38,45 +40,6 @@ namespace EOS
 {
     class ShaderCompiler;
 
-    /**
-    * @brief Concept for the required HandleType operations.
-    */    
-    template<typename T>
-    concept ValidHolder = requires(T t)
-    {
-        { t.Valid() } -> std::convertible_to<bool>;
-        { t.Empty() } -> std::convertible_to<bool>;
-        { t.Gen() } -> std::convertible_to<uint32_t>;        { t.Index() } -> std::convertible_to<uint32_t>;
-        { t.IndexAsVoid() } -> std::convertible_to<void*>;
-    };
-
-    //Forward declare
-    class IContext;
-
-    template<typename HandleType>
-    requires ValidHolder<HandleType>
-    class Holder;
-
-    //Create our Handle structures
-    using ComputePipelineHandle     = Handle<struct ComputePipeline>;
-    using RenderPipelineHandle      = Handle<struct RenderPipeline>;
-    using RayTracingPipelineHandle  = Handle<struct RayTracingPipeline>;
-    using ShaderProgramHandle       = Handle<struct ShaderProgram>;
-    using SamplerHandle             = Handle<struct Sampler>;
-    using BufferHandle              = Handle<struct Buffer>;
-    using TextureHandle             = Handle<struct Texture>;
-    using QueryPoolHandle           = Handle<struct QueryPool>;
-    using AccelStructHandle         = Handle<struct AccelerationStructure>;
-
-    using ComputePipelineHolder     = Holder<ComputePipelineHandle>;
-    using RenderPipelineHolder      = Holder<RenderPipelineHandle>;
-    using RayTracingPipelineHolder  = Holder<RayTracingPipelineHandle>;
-    using ShaderProgramHolder       = Holder<ShaderProgramHandle>;
-    using SamplerHolder             = Holder<SamplerHandle>;
-    using BufferHolder              = Holder<BufferHandle>;
-    using TextureHolder             = Holder<TextureHandle>;
-    using QueryPoolHolder           = Holder<QueryPoolHandle>;
-    using AccelStructHolder         = Holder<AccelStructHandle>;
 
 
     /**
@@ -122,6 +85,13 @@ namespace EOS
         std::filesystem::path   ShaderOutputPath{EOS_SHADER_OUTPUT_PATH};
 #else
         std::filesystem::path   ShaderOutputPath{"./"};
+#endif
+
+        // The engine's shader cache, holding its precompiled shader modules (built with EOS, see CompileShaders_EOS).
+#if defined(EOS_ENGINE_SHADER_CACHE_PATH)
+        std::filesystem::path   EngineShaderCachePath{EOS_ENGINE_SHADER_CACHE_PATH};
+#else
+        std::filesystem::path   EngineShaderCachePath{"./shaders/EOS"};
 #endif
 
         const char*             ApplicationName{};
@@ -1048,74 +1018,11 @@ namespace EOS
     };
     static_assert(sizeof(Holder<Handle<class Foo>>) == sizeof(uint64_t) + PTR_SIZE);
 
-    /**
-     * @brief A bindless reference to a texture, sampler or acceleration structure: the C++ side of Slang's
-     *        DescriptorHandle<T> (see src/shaders/eos/bindless.slang). Put it in push constants or GPU buffers; shaders
-     *        use it like the resource itself, e.g. albedo.Sample(linearSampler, uv).
-     *        A default-constructed handle refers to nothing, which shaders can test with IsValid(handle).
-     */
-    struct DescriptorHandle final
-    {
-        static constexpr uint32_t InvalidIndex = 0xFFFFFFFF;
+    // DescriptorHandle (descriptorHandle.h) is declared before Holder exists, so its Holder constructors are defined here.
+    inline DescriptorHandle::DescriptorHandle(const TextureHolder& texture) : DescriptorHandle(static_cast<TextureHandle>(texture)) {}
+    inline DescriptorHandle::DescriptorHandle(const SamplerHolder& sampler) : DescriptorHandle(static_cast<SamplerHandle>(sampler)) {}
+    inline DescriptorHandle::DescriptorHandle(const AccelStructHolder& accelerationStructure) : DescriptorHandle(static_cast<AccelStructHandle>(accelerationStructure)) {}
 
-        uint32_t Index = InvalidIndex;  // index into the bindless array of the resource's kind
-        uint32_t Reserved = 0;          // Slang's DescriptorHandle is a uint2; EOS only uses the first component
-
-        constexpr DescriptorHandle() = default;
-        constexpr explicit DescriptorHandle(uint32_t index) : Index(index) {}
-
-        DescriptorHandle(const TextureHandle& texture) : Index(ToIndex(texture)) {}
-        DescriptorHandle(const SamplerHandle& sampler) : Index(ToIndex(sampler)) {}
-        DescriptorHandle(const AccelStructHandle& accelerationStructure) : Index(ToIndex(accelerationStructure)) {}
-        DescriptorHandle(const TextureHolder& texture) : DescriptorHandle(static_cast<TextureHandle>(texture)) {}
-        DescriptorHandle(const SamplerHolder& sampler) : DescriptorHandle(static_cast<SamplerHandle>(sampler)) {}
-        DescriptorHandle(const AccelStructHolder& accelerationStructure) : DescriptorHandle(static_cast<AccelStructHandle>(accelerationStructure)) {}
-
-        [[nodiscard]] bool Valid() const { return Index != InvalidIndex; }
-
-    private:
-        template<typename HandleType>
-        [[nodiscard]] static uint32_t ToIndex(const HandleType& handle) { return handle.Valid() ? handle.Index() : InvalidIndex; }
-    };
-    static_assert(sizeof(DescriptorHandle) == 8, "Must match the size of Slang's DescriptorHandle<T> (a uint2)");
-
-    /**
-     * @brief glTF alphaMode, as eos.material reads it.
-     */
-    enum class AlphaMode : uint32_t
-    {
-        Opaque = 0,
-        Mask = 1,
-        Blend = 2,
-    };
-
-    /**
-     * @brief Parameters of a glTF 2.0 core metallic-roughness material: the C++ side of StandardMaterialData in
-     *        src/shaders/eos/material.slang (scalar layout). Defaults are glTF's. Textures are optional; an empty
-     *        DescriptorHandle means the factor alone is used. Base color and emissive textures must use an sRGB format.
-     */
-    struct StandardMaterialData final
-    {
-        float BaseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};     // linear RGB, A = alpha
-        float EmissiveFactor[3] = {0.0f, 0.0f, 0.0f};            // linear RGB
-        float MetallicFactor = 1.0f;
-        float RoughnessFactor = 1.0f;
-        float NormalScale = 1.0f;
-        float OcclusionStrength = 1.0f;
-        float AlphaCutoff = 0.5f;                                // only used with AlphaMode::Mask
-        AlphaMode Alpha = AlphaMode::Opaque;
-
-        DescriptorHandle BaseColorTexture{};                     // RGB color, A alpha
-        DescriptorHandle MetallicRoughnessTexture{};             // G roughness, B metallic
-        DescriptorHandle NormalTexture{};                        // tangent-space normal in RG or RGB
-        DescriptorHandle EmissiveTexture{};
-        DescriptorHandle OcclusionTexture{};                     // R occlusion
-        DescriptorHandle Sampler{};
-    };
-    static_assert(sizeof(StandardMaterialData) == 100, "Must match StandardMaterialData in eos/material.slang");
-    static_assert(offsetof(StandardMaterialData, Alpha) == 48, "Must match StandardMaterialData in eos/material.slang");
-    static_assert(offsetof(StandardMaterialData, BaseColorTexture) == 52, "Must match StandardMaterialData in eos/material.slang");
-    static_assert(offsetof(StandardMaterialData, Sampler) == 92, "Must match StandardMaterialData in eos/material.slang");
 
 
     /**

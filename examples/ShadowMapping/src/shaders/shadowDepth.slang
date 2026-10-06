@@ -15,7 +15,7 @@ struct VSOutput
     uint   DrawIndex : TEXCOORD1;
 }
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] FramePointers pc;
 
 [shader("vertex")]
 VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)

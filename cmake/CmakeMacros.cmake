@@ -120,11 +120,34 @@ macro(CREATE_LIB name)
 endmacro()
 
 
+# Without EOSShaderCompilerTool (EOS_SHADER_TOOLS=OFF) nothing writes the C++ mirrors of [CppExport] structs, and they
+# are not committed, so they have to be left by an earlier build of this checkout with the tools on. Stops at configure
+# time with that explanation instead of failing later on a missing include.
+function(EOS_CHECK_GENERATED_HEADERS TARGET_NAME SHADER_PATH GENERATED_PATH)
+    if(IS_DIRECTORY "${GENERATED_PATH}")
+        return()
+    endif()
+
+    file(GLOB_RECURSE shader_files "${SHADER_PATH}/*.slang")
+    foreach(shader_file IN LISTS shader_files)
+        file(STRINGS "${shader_file}" export_lines REGEX "\\[CppExport\\]")
+        if(export_lines)
+            message(FATAL_ERROR "${TARGET_NAME} includes C++ headers generated from its shaders (${GENERATED_PATH}), which only "
+                                "builds with EOS_SHADER_TOOLS=ON write. Build this checkout once with EOS_SHADER_TOOLS=ON.")
+        endif()
+    endforeach()
+endfunction()
+
 # Runs EOSShaderCompilerTool before TARGET_NAME builds. The custom target runs on every build; the tool itself skips
 # every module whose cache is up to date (it hashes each module's sources, imports included), so an unchanged build
 # costs a few file reads and never starts Slang.
-function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH)
+# C++ mirrors of the project's [CppExport] structs are written to CPP_INCLUDE_ROOT/.generated, and CPP_INCLUDE_ROOT is
+# put on TARGET_NAME's include path, so they are included as ".generated/<module>.h".
+function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SHADER_PATH OUTPUT_PATH CPP_INCLUDE_ROOT)
+    target_include_directories(${TARGET_NAME} PRIVATE "${CPP_INCLUDE_ROOT}")
+
     if(NOT TARGET EOSShaderCompilerTool)
+        EOS_CHECK_GENERATED_HEADERS(${TARGET_NAME} "${PROJECT_SHADER_PATH}" "${CPP_INCLUDE_ROOT}/.generated")
         return()
     endif()
 
@@ -135,8 +158,42 @@ function(ADD_SHADER_COMPILATION_TARGET TARGET_NAME PROJECT_SHADER_PATH ENGINE_SH
             --project-shaders "${PROJECT_SHADER_PATH}"
             --engine-shaders "${ENGINE_SHADER_PATH}"
             --output "${OUTPUT_PATH}"
+            --cpp-output "${CPP_INCLUDE_ROOT}/.generated"
+            --library-cache "${EOS_ENGINE_SHADER_CACHE_PATH}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Compiling shaders for ${TARGET_NAME}"
+        USES_TERMINAL
+        VERBATIM
+    )
+    set_property(TARGET ${SHADER_COMPILE_TARGET} PROPERTY FOLDER "Internal/Shaders")
+    add_dependencies(${SHADER_COMPILE_TARGET} EOSShaderCompilerTool)
+    add_dependencies(${TARGET_NAME} ${SHADER_COMPILE_TARGET})
+
+    # The engine's precompiled modules have to be current before the project's programs import them.
+    if(TARGET CompileShaders_EOS)
+        add_dependencies(${SHADER_COMPILE_TARGET} CompileShaders_EOS)
+    endif()
+endfunction()
+
+# Builds the engine's shader library before TARGET_NAME compiles: every module precompiled into OUTPUT_PATH, and the
+# C++ mirrors of its [CppExport] structs written to CPP_INCLUDE_ROOT/.generated. Like ADD_SHADER_COMPILATION_TARGET it
+# runs on every build and skips what is up to date.
+function(ADD_SHADER_LIBRARY_TARGET TARGET_NAME SHADER_PATH OUTPUT_PATH CPP_INCLUDE_ROOT)
+    if(NOT TARGET EOSShaderCompilerTool)
+        EOS_CHECK_GENERATED_HEADERS(${TARGET_NAME} "${SHADER_PATH}" "${CPP_INCLUDE_ROOT}/.generated")
+        return()
+    endif()
+
+    set(SHADER_COMPILE_TARGET "CompileShaders_${TARGET_NAME}")
+
+    add_custom_target(${SHADER_COMPILE_TARGET}
+        COMMAND $<TARGET_FILE:EOSShaderCompilerTool>
+            --engine-shaders "${SHADER_PATH}"
+            --output "${OUTPUT_PATH}"
+            --cpp-output "${CPP_INCLUDE_ROOT}/.generated"
+            --library-only
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Building the shader library of ${TARGET_NAME}"
         USES_TERMINAL
         VERBATIM
     )
@@ -148,6 +205,9 @@ endfunction()
 macro(SET_SHADER_PATHS TARGET_NAME PROJECT_SHADER_PATH_VALUE SHADER_OUTPUT_PATH_VALUE)
     target_compile_definitions(${TARGET_NAME} PRIVATE EOS_PROJECT_SHADER_PATH="${PROJECT_SHADER_PATH_VALUE}")
     target_compile_definitions(${TARGET_NAME} PRIVATE EOS_SHADER_OUTPUT_PATH="${SHADER_OUTPUT_PATH_VALUE}")
+    if(EOS_ENGINE_SHADER_CACHE_PATH)
+        target_compile_definitions(${TARGET_NAME} PRIVATE EOS_ENGINE_SHADER_CACHE_PATH="${EOS_ENGINE_SHADER_CACHE_PATH}")
+    endif()
     message(STATUS "[${TARGET_NAME}] PROJECT_SHADER_PATH = [${PROJECT_SHADER_PATH_VALUE}]")
     message(STATUS "[${TARGET_NAME}] SHADER_OUTPUT_PATH = [${SHADER_OUTPUT_PATH_VALUE}]")
 endmacro()
@@ -180,6 +240,7 @@ macro(CREATE_EXAMPLE name)
         "${PROJECT_SHADER_PATH}"
         "${ENGINE_SHADER_PATH}"
         "${SHADER_OUTPUT_PATH}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
 endmacro()
 
