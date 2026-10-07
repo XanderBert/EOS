@@ -8,6 +8,7 @@
 namespace EOS
 {
     struct Window;
+    class GraphFile;
 
     namespace UI
     {
@@ -63,12 +64,23 @@ namespace EOS
         void Separator();
         void Text(const char* format, ...);
 
+        // Widgets with the same label need different IDs: everything between PushID and PopID is told apart by id.
+        void PushID(const char* id);
+        void PopID();
+        void Indent();
+        void Unindent();
+
         bool Checkbox(const char* label, bool* value);
         bool SliderFloat(const char* label, float* value, float minimum, float maximum);
+        bool SliderFloat2(const char* label, float* values, float minimum, float maximum);
         bool SliderFloat3(const char* label, float* values, float minimum, float maximum);
+        bool SliderFloat4(const char* label, float* values, float minimum, float maximum);
         bool SliderInt(const char* label, int* value, int minimum, int maximum);
+        bool DragFloat(const char* label, float* value);
         bool DragFloat2(const char* label, float* values);
         bool DragFloat3(const char* label, float* values);
+        bool DragFloat4(const char* label, float* values);
+        bool DragInt(const char* label, int* value);
         bool ColorEdit3(const char* label, float* colour);
         bool Combo(const char* label, int* currentItem, const char* const* items, int itemCount);
 
@@ -79,6 +91,10 @@ namespace EOS
         }
 
         void Image(uint64_t textureID, float width, float height);
+
+        // Every pass of a graph file with an enable checkbox and a widget per property, sliders where the property
+        // has a range. Edits last until the file is reloaded.
+        void GraphFileProperties(GraphFile& file);
 
         [[nodiscard]] bool WantCaptureMouse();
         [[nodiscard]] bool WantCaptureKeyboard();

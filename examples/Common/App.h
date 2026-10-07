@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include "EOS.h"
 #include "renderGraph.h"
+#include "renderGraphFile.h"
 #include "UI/UI.h"
 #include "glm/gtc/type_ptr.hpp"
 
@@ -54,6 +55,21 @@ public:
 
     DELETE_COPY_MOVE(ExampleApp)
 
+    // A graph file whose pass types are registered in Passes, from its generated header
+    // (#include ".generated/graphs/depthOfField.h", then LoadGraphFile(DepthOfFieldGraph)). The '-' key reloads it, with
+    // the shaders, in builds with EOS_GRAPH_TOOLS.
+    EOS::GraphFile& LoadGraphFile(const EOS::GraphFileDescription& file)
+    {
+        return *GraphFiles.emplace_back(std::make_unique<EOS::GraphFile>(Passes, file));
+    }
+
+    // Shaders and graph files whose sources changed since they were last loaded.
+    void Reload()
+    {
+        Context->ReloadShaders();
+        for (const std::unique_ptr<EOS::GraphFile>& graphFile : GraphFiles) graphFile->Reload();
+    }
+
     // Declares the UI of this frame (declareWidgets calls EOS::UI functions) and draws it on top of target. Textures the
     // UI shows have to be imported into the graph and added with .Sample() on the returned pass.
     template <typename Function>
@@ -74,6 +90,7 @@ public:
     EOS::Window Window;
     std::unique_ptr<EOS::IContext> Context;
     std::unique_ptr<EOS::RenderGraph> Graph;        // destroyed before the context, which its textures belong to
+    EOS::PassRegistry Passes;                       // the pass types graph files can use
     std::unique_ptr<EOS::UI::Renderer> UIRenderer;
     EOS::Holder<EOS::SamplerHandle> DefaultSampler;
     InputState Input;
@@ -172,9 +189,9 @@ private:
                 default: break;
             }
 
-            if (key == GLFW_KEY_MINUS)
+            if (key == GLFW_KEY_MINUS && action == GLFW_PRESS)
             {
-                Context->ReloadShaders();
+                Reload();
             }
         });
 
@@ -237,4 +254,5 @@ private:
     glm::vec2 StartingCameraRotation;
 
     bool ShouldExit = false;
+    std::vector<std::unique_ptr<EOS::GraphFile>> GraphFiles;    // after Passes, which they use
 };

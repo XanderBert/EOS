@@ -335,6 +335,18 @@ function(eos_require_ktx TARGET_NAME)
     endif()
 endfunction()
 
+function(eos_require_rapidyaml TARGET_NAME)
+    eos_set_option(RYML_INSTALL OFF BOOL)
+    eos_set_option(RYML_BUILD_TOOLS OFF BOOL)
+
+    if(NOT TARGET ryml::ryml)
+        eos_dep(rapidyaml GIT https://github.com/biojppm/rapidyaml TAG ${EOS_DEP_RAPIDYAML_TAG})
+        eos_dep_add_subdirectory(rapidyaml BINARY_DIR "${CMAKE_BINARY_DIR}/rapidyaml-build" EXCLUDE_FROM_ALL)
+    endif()
+
+    target_link_libraries(${TARGET_NAME} PRIVATE ryml::ryml)
+endfunction()
+
 function(eos_require_imgui TARGET_NAME)
     if(NOT TARGET imgui)
         eos_dep(imgui GIT https://github.com/ocornut/imgui.git TAG ${EOS_DEP_IMGUI_TAG})

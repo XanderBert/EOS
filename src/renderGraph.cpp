@@ -12,13 +12,6 @@ namespace EOS
 {
     namespace
     {
-        enum class PassKind : uint8_t
-        {
-            Raster,
-            Compute,
-            Transfer,
-        };
-
         enum class ResourceOrigin : uint8_t
         {
             Transient,      // created by the graph, contents do not survive the frame
@@ -538,6 +531,11 @@ namespace EOS
         return Graph->SwapchainSize;
     }
 
+    Format RenderGraph::GetSwapchainFormat() const
+    {
+        return Context->GetSwapchainFormat();
+    }
+
     Dimensions RenderGraph::GetSize(GraphTexture texture) const
     {
         CHECK(texture.Index < Graph->Textures.size(), "Invalid graph texture");
@@ -667,15 +665,11 @@ namespace EOS
         return {.Current = current, .Previous = previous, .PreviousIsValid = history.HasBeenWritten && history.LastWrittenFrame + 1 == Graph->FrameNumber};
     }
 
-    PassBuilder RenderGraph::AddPass(const char* name, uint8_t kind)
+    PassBuilder RenderGraph::AddPass(const char* name, PassKind kind)
     {
-        Graph->Passes.push_back({.Name = name, .Kind = static_cast<PassKind>(kind), .FirstAccess = static_cast<uint32_t>(Graph->Accesses.size())});
+        Graph->Passes.push_back({.Name = name, .Kind = kind, .FirstAccess = static_cast<uint32_t>(Graph->Accesses.size())});
         return PassBuilder(*this, static_cast<uint32_t>(Graph->Passes.size() - 1));
     }
-
-    PassBuilder RenderGraph::AddRasterPass(const char* name) { return AddPass(name, static_cast<uint8_t>(PassKind::Raster)); }
-    PassBuilder RenderGraph::AddComputePass(const char* name) { return AddPass(name, static_cast<uint8_t>(PassKind::Compute)); }
-    PassBuilder RenderGraph::AddTransferPass(const char* name) { return AddPass(name, static_cast<uint8_t>(PassKind::Transfer)); }
 
     void* RenderGraph::AllocatePassFunction(size_t size, size_t alignment)
     {

@@ -3,6 +3,7 @@
 #include ".generated/dofBlur.h"
 #include ".generated/dofComposite.h"
 #include ".generated/dofDownsample.h"
+#include ".generated/graphs/depthOfField.h"
 #include ".generated/indirectModel.h"
 #include ".generated/present.h"
 
@@ -47,7 +48,7 @@ int main()
     {
         .Config                 = { .EnableValidationLayers = true },
         .PreferredHardwareType  = EOS::HardwareDeviceType::Discrete,
-        .ApplicationName        = "EOS - Deferred Lighting Compute",
+        .ApplicationName        = "EOS - Depth Of Field",
     };
 
     constexpr CameraDescription cameraDescription
@@ -205,10 +206,174 @@ int main()
     glm::vec3 lightDirection = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
     float     lightIntensity = 1.0f;
     glm::vec3 lightColor{1.0f, 0.98f, 0.92f};
-    int       debugView = 0;
     float     focusDistance = 6.0f;
     float     focusRange = 3.0f;
     float     maxBlurRadius = 1.0f;
+
+    // The pass types graphs/depthOfField.yaml is built from. The file decides which passes run and how they connect.
+    App.Passes.Register(
+    {
+        .Name = "GBuffer",
+        .Kind = EOS::PassKind::Raster,
+        .Pins =
+        {
+            EOS::Pin::ReadBuffer("perFrame"),
+            EOS::Pin::ColorOutput("albedo", EOS::Format::RGBA_UN8, {.ClearColor = {0.36f, 0.4f, 1.0f, 1.0f}}),
+            EOS::Pin::ColorOutput("normal", EOS::Format::RGBA_UN8, {.ClearColor = {0.5f, 0.5f, 1.0f, 1.0f}}),
+            EOS::Pin::ColorOutput("worldPos", EOS::Format::RGBA_F16, {.ClearColor = {0.0f, 0.0f, 0.0f, 1.0f}}),
+            EOS::Pin::DepthOutput("depth", EOS::Format::Z_F32),
+        },
+        .Execute = [&](EOS::PassContext& pass, const EOS::PassData&)
+        {
+            constexpr EOS::DepthState depthState{.CompareOpState = EOS::CompareOp::Less, .IsDepthWriteEnabled = true};
+
+            cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipeline);
+            cmdPushConstants(pass.Cmd, framePointers);
+            cmdSetDepthState(pass.Cmd, depthState);
+            cmdDrawIndexedIndirect(pass.Cmd, Handles.IndirectDrawBuffer, 0, scene.meshes.size());
+        },
+    });
+
+    static constexpr const char* kDebugViews[] = {"Lit", "Albedo", "Normals", "Roughness", "World Position"};
+    App.Passes.Register(
+    {
+        .Name = "DeferredLighting",
+        .Kind = EOS::PassKind::Compute,
+        .Pins =
+        {
+            EOS::Pin::Sampled("albedo"),
+            EOS::Pin::Sampled("normal"),
+            EOS::Pin::Sampled("worldPos"),
+            EOS::Pin::StorageOutput("output", EOS::Pin::SwapchainFormat),
+        },
+        .Properties = {EOS::Property::Choice("debugView", kDebugViews)},
+        .Execute = [&](EOS::PassContext& pass, const EOS::PassData& data)
+        {
+            const EOS::GraphTexture output = data.Texture("output");
+            cmdBindComputePipeline(pass.Cmd, Handles.DeferredLightingPipeline);
+            cmdPushConstants(pass.Cmd, DeferredLightingPC
+            {
+                .gbufferAlbedo     = pass.Descriptor(data.Texture("albedo")),
+                .gbufferNormal     = pass.Descriptor(data.Texture("normal")),
+                .gbufferWorldPos   = pass.Descriptor(data.Texture("worldPos")),
+                .samplerState      = App.DefaultSampler,
+                .outputImage       = pass.Descriptor(output),
+                .debugView         = static_cast<uint32_t>(data.Int("debugView")),
+                .cameraPos         = glm::vec4(App.MainCamera.GetPosition(), 1.0f),
+                .lightDirIntensity = glm::vec4(lightDirection, lightIntensity),
+                .lightColorAmbient = glm::vec4(lightColor, kAmbientRadiance),
+            });
+            cmdDispatchThreads(pass.Cmd, pass.Size(output));
+        },
+    });
+
+    App.Passes.Register(
+    {
+        .Name = "DofDownsample",
+        .Kind = EOS::PassKind::Compute,
+        .Pins =
+        {
+            EOS::Pin::Sampled("color"),
+            EOS::Pin::Sampled("worldPos"),
+            EOS::Pin::StorageOutput("output", EOS::Format::RGBA_F16, {.Scale = 0.5f, .SizeOf = "color"}),
+        },
+        .Execute = [&](EOS::PassContext& pass, const EOS::PassData& data)
+        {
+            const EOS::GraphTexture output = data.Texture("output");
+            cmdBindComputePipeline(pass.Cmd, Handles.DofDownsamplePipeline);
+            cmdPushConstants(pass.Cmd, DofDownsamplePC
+            {
+                .sceneColor    = pass.Descriptor(data.Texture("color")),
+                .worldPos      = pass.Descriptor(data.Texture("worldPos")),
+                .samplerState  = App.DefaultSampler,
+                .outputImage   = pass.Descriptor(output),
+                .focusDistance = focusDistance,
+                .focusRange    = focusRange,
+            });
+            cmdDispatchThreads(pass.Cmd, pass.Size(output));
+        },
+    });
+
+    // One direction of the separable blur.
+    static constexpr const char* kBlurDirections[] = {"Horizontal", "Vertical"};
+    App.Passes.Register(
+    {
+        .Name = "DofBlur",
+        .Kind = EOS::PassKind::Compute,
+        .Pins =
+        {
+            EOS::Pin::Sampled("input"),
+            EOS::Pin::StorageOutput("output", EOS::Format::RGBA_F16, {.SizeOf = "input", .BypassFrom = "input"}),
+        },
+        .Properties = {EOS::Property::Choice("direction", kBlurDirections)},
+        .Execute = [&](EOS::PassContext& pass, const EOS::PassData& data)
+        {
+            const EOS::GraphTexture output = data.Texture("output");
+            const EOS::Dimensions size = pass.Size(output);
+            cmdBindComputePipeline(pass.Cmd, data.Int("direction") == 0 ? Handles.DofBlurHPipeline : Handles.DofBlurVPipeline);
+            cmdPushConstants(pass.Cmd, DofBlurPC
+            {
+                .inputImage    = pass.Descriptor(data.Texture("input")),
+                .outputImage   = pass.Descriptor(output),
+                .samplerState  = App.DefaultSampler,
+                .maxBlurRadius = maxBlurRadius,
+                .texelSizeX    = 1.0f / static_cast<float>(size.Width),
+                .texelSizeY    = 1.0f / static_cast<float>(size.Height),
+            });
+            cmdDispatchThreads(pass.Cmd, size);
+        },
+    });
+
+    App.Passes.Register(
+    {
+        .Name = "DofComposite",
+        .Kind = EOS::PassKind::Compute,
+        .Pins =
+        {
+            EOS::Pin::Sampled("color"),
+            EOS::Pin::Sampled("blurred"),
+            EOS::Pin::Sampled("worldPos"),
+            EOS::Pin::StorageOutput("output", EOS::Pin::SwapchainFormat, {.BypassFrom = "color"}),
+        },
+        .Execute = [&](EOS::PassContext& pass, const EOS::PassData& data)
+        {
+            const EOS::GraphTexture output = data.Texture("output");
+            cmdBindComputePipeline(pass.Cmd, Handles.DofCompositePipeline);
+            cmdPushConstants(pass.Cmd, DofCompositePC
+            {
+                .sceneColor    = pass.Descriptor(data.Texture("color")),
+                .blurred       = pass.Descriptor(data.Texture("blurred")),
+                .worldPos      = pass.Descriptor(data.Texture("worldPos")),
+                .samplerState  = App.DefaultSampler,
+                .outputImage   = pass.Descriptor(output),
+                .focusDistance = focusDistance,
+                .focusRange    = focusRange,
+                .maxBlurRadius = maxBlurRadius,
+            });
+            cmdDispatchThreads(pass.Cmd, pass.Size(output));
+        },
+    });
+
+    App.Passes.Register(
+    {
+        .Name = "Present",
+        .Kind = EOS::PassKind::Raster,
+        .Pins =
+        {
+            EOS::Pin::Sampled("input"),
+            EOS::Pin::ColorOutput("output", EOS::Pin::SwapchainFormat, {.ClearColor = {0.02f, 0.02f, 0.02f, 1.0f}}),
+        },
+        .Execute = [&](EOS::PassContext& pass, const EOS::PassData& data)
+        {
+            cmdBindRenderPipeline(pass.Cmd, Handles.PresentPipeline);
+            cmdPushConstants(pass.Cmd, PresentPC{.sceneColor = pass.Descriptor(data.Texture("input")), .samplerState = App.DefaultSampler});
+            cmdDraw(pass.Cmd, 3);
+        },
+    });
+
+    EOS::GraphFile& graphFile = App.LoadGraphFile(DepthOfFieldGraph);
 
     App.Run([&]()
     {
@@ -226,125 +391,16 @@ int main()
             .cameraPos = glm::vec4(App.MainCamera.GetPosition(), 0),
         };
 
-
-        constexpr EOS::DepthState depthState
-        {
-            .CompareOpState      = EOS::CompareOp::Less,
-            .IsDepthWriteEnabled = true,
-        };
-
         EOS::RenderGraph& graph = *App.Graph;
         const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
-        const EOS::GraphTexture depth      = graph.CreateTexture({.TextureFormat = EOS::Format::Z_F32, .DebugName = "Depth"});
-        const EOS::GraphTexture albedo     = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_UN8, .DebugName = "GBuffer AlbedoMetallic"});
-        const EOS::GraphTexture normal     = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_UN8, .DebugName = "GBuffer NormalRoughness"});
-        const EOS::GraphTexture worldPos   = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_F16, .DebugName = "GBuffer WorldPosition"});
-        const EOS::GraphTexture lit        = graph.CreateTexture({.TextureFormat = App.Context->GetSwapchainFormat(), .DebugName = "Deferred Lit Scene"});
-        const EOS::GraphTexture dofHalf    = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_F16, .Scale = 0.5f, .DebugName = "DOF Half"});
-        const EOS::GraphTexture dofBlurH   = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_F16, .Scale = 0.5f, .DebugName = "DOF Blur H"});
-        const EOS::GraphTexture dofBlurred = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_F16, .Scale = 0.5f, .DebugName = "DOF Blurred"});
-        const EOS::GraphTexture dof        = graph.CreateTexture({.TextureFormat = App.Context->GetSwapchainFormat(), .DebugName = "DOF Output"});
         const EOS::GraphBuffer perFrame = graph.ImportBuffer(Handles.PerFrameBuffer, "PerFrameBuffer");
         graph.AddUpload("Upload Frame Data", perFrame, perFrameData);
 
-        graph.AddRasterPass("Geometry")
-            .Color(EOS::Clear(albedo, {0.36f, 0.4f, 1.0f, 1.0f}))
-            .Color(EOS::Clear(normal, {0.5f, 0.5f, 1.0f, 1.0f}))
-            .Color(EOS::Clear(worldPos, {0.0f, 0.0f, 0.0f, 1.0f}))
-            .Depth(EOS::ClearDepth(depth))
-            .Read(perFrame)
-            .Execute([&](EOS::PassContext& pass)
-        {
-            cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
-            cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipeline);
-            cmdPushConstants(pass.Cmd, framePointers);
-            cmdSetDepthState(pass.Cmd, depthState);
-            cmdDrawIndexedIndirect(pass.Cmd, Handles.IndirectDrawBuffer, 0, scene.meshes.size());
-        });
-
-        graph.AddComputePass("Deferred Lighting").Sample({albedo, normal, worldPos}).Write(lit).Execute([&](EOS::PassContext& pass)
-        {
-            cmdBindComputePipeline(pass.Cmd, Handles.DeferredLightingPipeline);
-            cmdPushConstants(pass.Cmd, DeferredLightingPC
-            {
-                .gbufferAlbedo     = pass.Descriptor(albedo),
-                .gbufferNormal     = pass.Descriptor(normal),
-                .gbufferWorldPos   = pass.Descriptor(worldPos),
-                .samplerState      = App.DefaultSampler,
-                .outputImage       = pass.Descriptor(lit),
-                .debugView         = static_cast<uint32_t>(debugView),
-                .cameraPos         = glm::vec4(App.MainCamera.GetPosition(), 1.0f),
-                .lightDirIntensity = glm::vec4(lightDirection, lightIntensity),
-                .lightColorAmbient = glm::vec4(lightColor, kAmbientRadiance),
-            });
-            cmdDispatchThreads(pass.Cmd, pass.Size(lit));
-        });
-
-        graph.AddComputePass("DOF Downsample").Sample({lit, worldPos}).Write(dofHalf).Execute([&](EOS::PassContext& pass)
-        {
-            cmdBindComputePipeline(pass.Cmd, Handles.DofDownsamplePipeline);
-            cmdPushConstants(pass.Cmd, DofDownsamplePC
-            {
-                .sceneColor    = pass.Descriptor(lit),
-                .worldPos      = pass.Descriptor(worldPos),
-                .samplerState  = App.DefaultSampler,
-                .outputImage   = pass.Descriptor(dofHalf),
-                .focusDistance = focusDistance,
-                .focusRange    = focusRange,
-            });
-            cmdDispatchThreads(pass.Cmd, pass.Size(dofHalf));
-        });
-
-        // Separable blur: horizontal, then vertical.
-        const auto addBlurPass = [&](const char* name, EOS::GraphTexture input, EOS::GraphTexture output, EOS::ComputePipelineHandle pipeline)
-        {
-            graph.AddComputePass(name).Sample(input).Write(output).Execute([&, input, output, pipeline](EOS::PassContext& pass)
-            {
-                const EOS::Dimensions size = pass.Size(output);
-                cmdBindComputePipeline(pass.Cmd, pipeline);
-                cmdPushConstants(pass.Cmd, DofBlurPC
-                {
-                    .inputImage    = pass.Descriptor(input),
-                    .outputImage   = pass.Descriptor(output),
-                    .samplerState  = App.DefaultSampler,
-                    .maxBlurRadius = maxBlurRadius,
-                    .texelSizeX    = 1.0f / static_cast<float>(size.Width),
-                    .texelSizeY    = 1.0f / static_cast<float>(size.Height),
-                });
-                cmdDispatchThreads(pass.Cmd, size);
-            });
-        };
-        addBlurPass("DOF Blur H", dofHalf, dofBlurH, Handles.DofBlurHPipeline);
-        addBlurPass("DOF Blur V", dofBlurH, dofBlurred, Handles.DofBlurVPipeline);
-
-        graph.AddComputePass("DOF Composite").Sample({lit, dofBlurred, worldPos}).Write(dof).Execute([&](EOS::PassContext& pass)
-        {
-            cmdBindComputePipeline(pass.Cmd, Handles.DofCompositePipeline);
-            cmdPushConstants(pass.Cmd, DofCompositePC
-            {
-                .sceneColor    = pass.Descriptor(lit),
-                .blurred       = pass.Descriptor(dofBlurred),
-                .worldPos      = pass.Descriptor(worldPos),
-                .samplerState  = App.DefaultSampler,
-                .outputImage   = pass.Descriptor(dof),
-                .focusDistance = focusDistance,
-                .focusRange    = focusRange,
-                .maxBlurRadius = maxBlurRadius,
-            });
-            cmdDispatchThreads(pass.Cmd, pass.Size(dof));
-        });
-
-        graph.AddRasterPass("Present").Color(EOS::Clear(backbuffer, {0.02f, 0.02f, 0.02f, 1.0f})).Sample(dof).Execute([&](EOS::PassContext& pass)
-        {
-            cmdBindRenderPipeline(pass.Cmd, Handles.PresentPipeline);
-            cmdPushConstants(pass.Cmd, PresentPC{.sceneColor = pass.Descriptor(dof), .samplerState = App.DefaultSampler});
-            cmdDraw(pass.Cmd, 3);
-        });
+        graphFile.AddTo(graph, {{"swapchain", backbuffer}, {"perFrame", perFrame}});
 
         App.AddUIPass(backbuffer, [&]
         {
-            EOS::UI::SetNextWindowSize(420, 360);
+            EOS::UI::SetNextWindowSize(420, 560);
             EOS::UI::Begin("Deferred Lighting + DOF");
             EOS::UI::SliderFloat3("Light direction", &lightDirection.x, -1.0f, 1.0f);
             if (glm::length(lightDirection) > 0.0001f)
@@ -357,8 +413,9 @@ int main()
             EOS::UI::SliderFloat("Focus distance", &focusDistance, 0.1f, 25.0f);
             EOS::UI::SliderFloat("Focus range", &focusRange, 0.1f, 20.0f);
             EOS::UI::SliderFloat("Max blur radius", &maxBlurRadius, 0.0f, 12.0f);
-            constexpr const char* debugModes[] = {"Lit", "Albedo", "Normals", "Roughness", "World Position"};
-            EOS::UI::Combo("Debug view", &debugView, debugModes);
+            EOS::UI::Separator();
+            EOS::UI::Text("Render graph (graphs/depthOfField.yaml)");
+            EOS::UI::GraphFileProperties(graphFile);
             EOS::UI::End();
         });
 

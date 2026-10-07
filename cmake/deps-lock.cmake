@@ -9,6 +9,7 @@ set(EOS_DEP_VULKAN_UTILS_TAG main)
 set(EOS_DEP_IMGUI_TAG v1.92.6)
 set(EOS_DEP_FASTGLTF_TAG v0.9.0)
 set(EOS_DEP_STB_TAG master)
+set(EOS_DEP_RAPIDYAML_TAG v0.16.0)
 
 set(EOS_DEP_SLANG_VERSION 2026.4)
 set(EOS_DEP_SLANG_WINDOWS_URL "https://github.com/shader-slang/slang/releases/download/v${EOS_DEP_SLANG_VERSION}/slang-${EOS_DEP_SLANG_VERSION}-windows-x86_64.zip")

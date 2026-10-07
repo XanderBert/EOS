@@ -1,6 +1,8 @@
 #include "UI.h"
 #include <cstdarg>
 
+#include "renderGraphFile.h"
+
 #if defined(EOS_USE_IMGUI)
 #include "imgui.h"
 
@@ -130,6 +132,130 @@ namespace EOS::UI
         ImGui::TextV(format, arguments);
         va_end(arguments);
 #endif
+    }
+
+    void PushID([[maybe_unused]] const char* id)
+    {
+#if defined(EOS_USE_IMGUI)
+        ImGui::PushID(id);
+#endif
+    }
+
+    void PopID()
+    {
+#if defined(EOS_USE_IMGUI)
+        ImGui::PopID();
+#endif
+    }
+
+    void Indent()
+    {
+#if defined(EOS_USE_IMGUI)
+        ImGui::Indent();
+#endif
+    }
+
+    void Unindent()
+    {
+#if defined(EOS_USE_IMGUI)
+        ImGui::Unindent();
+#endif
+    }
+
+    bool SliderFloat2([[maybe_unused]] const char* label, [[maybe_unused]] float* values, [[maybe_unused]] const float minimum, [[maybe_unused]] const float maximum)
+    {
+#if defined(EOS_USE_IMGUI)
+        return ImGui::SliderFloat2(label, values, minimum, maximum);
+#else
+        return false;
+#endif
+    }
+
+    bool SliderFloat4([[maybe_unused]] const char* label, [[maybe_unused]] float* values, [[maybe_unused]] const float minimum, [[maybe_unused]] const float maximum)
+    {
+#if defined(EOS_USE_IMGUI)
+        return ImGui::SliderFloat4(label, values, minimum, maximum);
+#else
+        return false;
+#endif
+    }
+
+    bool DragFloat([[maybe_unused]] const char* label, [[maybe_unused]] float* value)
+    {
+#if defined(EOS_USE_IMGUI)
+        return ImGui::DragFloat(label, value, 0.01f);
+#else
+        return false;
+#endif
+    }
+
+    bool DragFloat4([[maybe_unused]] const char* label, [[maybe_unused]] float* values)
+    {
+#if defined(EOS_USE_IMGUI)
+        return ImGui::DragFloat4(label, values, 0.01f);
+#else
+        return false;
+#endif
+    }
+
+    bool DragInt([[maybe_unused]] const char* label, [[maybe_unused]] int* value)
+    {
+#if defined(EOS_USE_IMGUI)
+        return ImGui::DragInt(label, value);
+#else
+        return false;
+#endif
+    }
+
+    void GraphFileProperties(GraphFile& file)
+    {
+        for (uint32_t passIndex = 0; passIndex < file.GetPassCount(); ++passIndex)
+        {
+            const GraphFilePass pass = file.GetPass(passIndex);
+            PushID(pass.Name);
+            Checkbox(pass.Name, pass.Enabled);
+
+            Indent();
+            for (uint32_t propertyIndex = 0; propertyIndex < pass.PropertyCount; ++propertyIndex)
+            {
+                const GraphFileProperty property = file.GetProperty(passIndex, propertyIndex);
+                PropertyValue& value = *property.Value;
+                const bool ranged = property.Min < property.Max;
+                float* components = &value.Float.x;
+
+                switch (property.Type)
+                {
+                    case PropertyType::Bool:
+                        Checkbox(property.Name, &value.Bool);
+                        break;
+                    case PropertyType::Int:
+                        if (ranged) SliderInt(property.Name, &value.Int, static_cast<int>(property.Min), static_cast<int>(property.Max));
+                        else DragInt(property.Name, &value.Int);
+                        break;
+                    case PropertyType::Float:
+                        if (ranged) SliderFloat(property.Name, components, property.Min, property.Max);
+                        else DragFloat(property.Name, components);
+                        break;
+                    case PropertyType::Float2:
+                        if (ranged) SliderFloat2(property.Name, components, property.Min, property.Max);
+                        else DragFloat2(property.Name, components);
+                        break;
+                    case PropertyType::Float3:
+                        if (ranged) SliderFloat3(property.Name, components, property.Min, property.Max);
+                        else DragFloat3(property.Name, components);
+                        break;
+                    case PropertyType::Float4:
+                        if (ranged) SliderFloat4(property.Name, components, property.Min, property.Max);
+                        else DragFloat4(property.Name, components);
+                        break;
+                    case PropertyType::Choice:
+                        Combo(property.Name, &value.Int, property.Choices.data(), static_cast<int>(property.Choices.size()));
+                        break;
+                }
+            }
+            Unindent();
+            PopID();
+        }
     }
 
     bool Checkbox([[maybe_unused]] const char* label, [[maybe_unused]] bool* value)

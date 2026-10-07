@@ -1,0 +1,33 @@
+# The frame of the depth of field example. Edit it while the example runs and press '-' to reload it (and the shaders).
+#
+# The pass types are registered in main.cpp. An edge connects an output pin to an input pin ("Pass.pin");
+# a name without a dot is a resource main.cpp hands over (swapchain, perFrame).
+# Try disabling "DOF Composite" (enabled: false): Present then gets the lit scene through the composite's bypass.
+
+passes:
+  Geometry:          { type: GBuffer }
+  Deferred Lighting: { type: DeferredLighting, debugView: Lit }
+  DOF Downsample:    { type: DofDownsample }
+  DOF Blur H:        { type: DofBlur, direction: Horizontal }
+  DOF Blur V:        { type: DofBlur, direction: Vertical }
+  DOF Composite:     { type: DofComposite }
+  Present:           { type: Present }
+
+edges:
+  - perFrame                 -> Geometry.perFrame
+
+  - Geometry.albedo          -> Deferred Lighting.albedo
+  - Geometry.normal          -> Deferred Lighting.normal
+  - Geometry.worldPos        -> Deferred Lighting.worldPos
+
+  - Deferred Lighting.output -> DOF Downsample.color
+  - Geometry.worldPos        -> DOF Downsample.worldPos
+  - DOF Downsample.output    -> DOF Blur H.input
+  - DOF Blur H.output        -> DOF Blur V.input
+
+  - Deferred Lighting.output -> DOF Composite.color
+  - DOF Blur V.output        -> DOF Composite.blurred
+  - Geometry.worldPos        -> DOF Composite.worldPos
+
+  - DOF Composite.output     -> Present.input
+  - Present.output           -> swapchain

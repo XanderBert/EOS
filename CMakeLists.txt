@@ -16,6 +16,7 @@ option(EOS_USE_IMGUI "Enable ImGui integration" ON)
 option(EOS_USE_TRACY "Enable Tracy profiler" ON)
 option(EOS_BUILD_EXAMPLES "Build example applications" ON)
 option(EOS_SHADER_TOOLS "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" ON)
+option(EOS_GRAPH_TOOLS "Enable render graph file tools (read the YAML at runtime with hot reload, generate the headers builds without the tools use)" ON)
 option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
 
 # User-configurable shader paths for runtime and shader compilation.
@@ -149,7 +150,22 @@ else()
     )
 endif()
 
-if(EOS_BUILD_TEXTURE_TOOLS OR EOS_SHADER_TOOLS)
+# Render graph files are authored in the editor: with EOS_GRAPH_TOOLS, EOS reads their YAML (hot reload) through this
+# parser, and EOSGraphTool turns every file into the header a build without the tools uses instead. Without the tools
+# neither is built, and nothing parses YAML.
+if(EOS_GRAPH_TOOLS)
+    add_library(EOSGraphTools STATIC "${CMAKE_SOURCE_DIR}/tools/GraphTools/graphFileParser.cpp")
+    set_property(TARGET EOSGraphTools PROPERTY FOLDER "Internal/Tools")
+    SETUP_TARGET_DEFAULTS(EOSGraphTools)
+    # src for graphFileDescription.h only, which includes nothing of EOS.
+    target_include_directories(EOSGraphTools PUBLIC "${CMAKE_SOURCE_DIR}/tools" "${CMAKE_SOURCE_DIR}/src")
+    eos_require_rapidyaml(EOSGraphTools)
+
+    target_link_libraries(EOS PRIVATE EOSGraphTools)
+    target_compile_definitions(EOS PRIVATE EOS_GRAPH_TOOLS)
+endif()
+
+if(EOS_BUILD_TEXTURE_TOOLS OR EOS_SHADER_TOOLS OR EOS_GRAPH_TOOLS)
     add_subdirectory(tools)
 endif()
 

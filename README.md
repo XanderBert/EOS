@@ -27,6 +27,7 @@ Eos aims to be:
 - [GLM](https://github.com/g-truc/glm) 
 ### Optional EOS dependencies
 - [Slang](https://github.com/shader-slang/slang) when `EOS_SHADER_TOOLS=ON`
+- [rapidyaml](https://github.com/biojppm/rapidyaml) when `EOS_GRAPH_TOOLS=ON`
 - [stb](https://github.com/nothings/stb) when `EOS_BUILD_TEXTURE_TOOLS=ON`
 - [Dear ImGui](https://github.com/ocornut/imgui) when `EOS_USE_IMGUI=ON`
 - [Tracy](https://github.com/wolfpld/tracy) when `EOS_USE_TRACY=ON`
@@ -47,6 +48,7 @@ option(EOS_USE_IMGUI "Enable ImGui integration" ON)
 option(EOS_USE_TRACY "Enable Tracy profiler" ON)
 option(EOS_BUILD_EXAMPLES "Build example applications" ON)
 option(EOS_SHADER_TOOLS "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" ON)
+option(EOS_GRAPH_TOOLS "Enable render graph file tools (read the YAML at runtime with hot reload, generate the headers builds without the tools use)" ON)
 option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
 ```
 
@@ -207,6 +209,59 @@ graph.Execute();   // barriers, render passes, markers, submit and present
   in a reused arena, so building a frame allocates nothing once the graph is warm.
 
 In the examples, `App.AddUIPass(target, [&] { ... })` declares the frame's UI and draws it on top of `target`.
+
+## Render graph files
+A graph file (YAML, `src/renderGraphFile.h`) lists a frame's passes, their settings and how their pins connect, in
+the style of Falcor's render graphs. It is what a node editor would save: passes are nodes, edges are wires.
+
+Graph files are authored in the editor and built into the application, like shaders:
+
+- **Build**: `EOSGraphTool` turns every `src/graphs/<file>.yaml` of an example into `src/.generated/graphs/<file>.h`,
+  the file as constants (`GraphFileDescription`, `src/graphFileDescription.h`). The application loads it from there:
+  `EOS::GraphFile file{registry, DepthOfFieldGraph}`. A file with mistakes in its shape fails the build like a
+  compiler error.
+- **Editor (`EOS_GRAPH_TOOLS=ON`)**: `GraphFile` reads the YAML itself, and `graphFile.Reload()` loads it again when it
+  changed on disk, so passes can be added, rewired or tuned while the application runs; the examples call it on the
+  same key as shader reloading (`-`).
+- **Shipping build (`EOS_GRAPH_TOOLS=OFF`)**: the generated constants are used as they are. No YAML is read or parsed,
+  and neither rapidyaml nor the tool is built. The generated headers are not committed (`.generated/`), so like the
+  `[CppExport]` headers they come from an earlier build of the same checkout with the tools on.
+
+```yaml
+passes:
+  Geometry:      { type: GBuffer }
+  Lighting:      { type: DeferredLighting, debugView: Normals }
+  DOF Composite: { type: DofComposite, enabled: false, output: { format: RGBA_F16 } }
+  Present:       { type: Present }
+edges:
+  - perFrame             -> Geometry.perFrame
+  - Geometry.albedo      -> Lighting.albedo
+  - Lighting.output      -> DOF Composite.color
+  - DOF Composite.output -> Present.input
+  - Present.output       -> swapchain
+```
+
+- **Pass types** are registered in a `PassRegistry`: their pins (the textures and buffers they read and write, with how
+  they use them), their properties (bool, int, float, float2-4, a choice of names) and the function that records them.
+  The function reads its pins and properties by name through `PassData`.
+- **A pass** has a `type`, may set `enabled`, sets property values by name, and can override an output's `format` and
+  `scale`.
+- **Edges** connect an output to an input: `Pass.pin -> Pass.pin`. A name without a dot is a resource of the
+  application, handed over every frame: `graphFile.AddTo(graph, {{"swapchain", backbuffer}, {"perFrame", perFrame}})`.
+- **Order:** every pass runs after the passes it reads from; otherwise the file's order is kept. Passes added to the
+  graph before and after `AddTo` run before and after the file's passes. Outputs nobody reads are culled as usual.
+- **Disabled passes** pass on what they received: an input-output keeps its input, and an output can name an input as
+  its bypass (`BypassFrom`). In the depth of field example, disabling `DOF Composite` shows the scene without blur.
+- **Mistakes** are reported like compiler errors (`file:line:column: message`) and the last version without errors
+  keeps running, so a typo while editing never takes the frame down.
+- **UI:** `EOS::UI::GraphFileProperties(graphFile)` shows every pass with an enable checkbox and its properties. Changes
+  last until the file is reloaded.
+- **In the examples**, `App.Passes` holds the pass types and `App.LoadGraphFile(DepthOfFieldGraph)` loads a file that
+  `-` reloads.
+
+The depth of field example is built this way (`examples/DepthOfField/src/graphs/depthOfField.yaml`). Pass types are
+registered in C++ for now; next, fullscreen and compute passes will declare their pins and properties in Slang, so they
+need no C++ at all.
 
 # Building
 This project is built using CMake and Ninja.

@@ -42,6 +42,16 @@ namespace EOS
     class RenderGraph;
 
     /**
+     * @brief What a pass records: draws inside cmdBeginRendering for its targets, dispatches, or copies.
+     */
+    enum class PassKind : uint8_t
+    {
+        Raster,
+        Compute,
+        Transfer,
+    };
+
+    /**
      * @brief A texture of the graph being built. Only valid until the graph's Execute().
      */
     struct GraphTexture final
@@ -234,9 +244,11 @@ namespace EOS
         // A texture that keeps its contents into the next frame, for temporal effects. Identified by its name.
         [[nodiscard]] HistoryTexture CreateHistoryTexture(const char* name, const GraphTextureDescription& description);
 
-        [[nodiscard]] PassBuilder AddRasterPass(const char* name);
-        [[nodiscard]] PassBuilder AddComputePass(const char* name);
-        [[nodiscard]] PassBuilder AddTransferPass(const char* name);
+        // The name has to stay valid until Execute().
+        [[nodiscard]] PassBuilder AddPass(const char* name, PassKind kind);
+        [[nodiscard]] PassBuilder AddRasterPass(const char* name) { return AddPass(name, PassKind::Raster); }
+        [[nodiscard]] PassBuilder AddComputePass(const char* name) { return AddPass(name, PassKind::Compute); }
+        [[nodiscard]] PassBuilder AddTransferPass(const char* name) { return AddPass(name, PassKind::Transfer); }
 
         /**
          * @brief Writes data into buffer on the GPU, in order with the passes around it (a transfer pass running
@@ -264,6 +276,7 @@ namespace EOS
         // The size a texture of this frame has (known as soon as it is declared).
         [[nodiscard]] Dimensions GetSize(GraphTexture texture) const;
         [[nodiscard]] Dimensions GetSwapchainSize() const;
+        [[nodiscard]] Format GetSwapchainFormat() const;
 
         /**
          * @brief Removes unused passes, creates the resources, records every pass with its barriers and submits,
@@ -281,7 +294,6 @@ namespace EOS
         using PassFunction = void (*)(void* function, PassContext& context);
         using DestroyFunction = void (*)(void* function);
 
-        [[nodiscard]] PassBuilder AddPass(const char* name, uint8_t kind);
         [[nodiscard]] void* AllocatePassFunction(size_t size, size_t alignment);
         void SetPassFunction(uint32_t passIndex, void* function, PassFunction invoke, DestroyFunction destroy);
 
