@@ -14,8 +14,9 @@
 // A render graph rebuilt every frame (as Frostbite's FrameGraph and Unreal's RDG are): passes declare what they read
 // and write, and Execute() derives the rest. It orders nothing itself (passes run in the order they were added, which
 // is already an order where every resource is written before it is read), but it removes passes whose results nothing
-// uses, creates and pools the textures and buffers the graph owns, recreates them when the window is resized, inserts
-// every barrier, begins and ends rendering for raster passes, and names each pass in debug markers.
+// uses, creates the textures and buffers the graph owns (textures that are never alive at the same time share memory),
+// recreates them when the window is resized, inserts every barrier, begins and ends rendering for raster passes, and
+// names each pass in debug markers.
 //
 //     EOS::RenderGraph& graph = ...;
 //     const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
@@ -245,6 +246,20 @@ namespace EOS
          */
         template<typename Payload>
         void AddUpload(const char* name, GraphBuffer buffer, const Payload& data, size_t offset = 0);
+
+        /**
+         * @brief Memory of the graph's own textures in the last executed frame.
+         */
+        struct MemoryStatistics final
+        {
+            uint64_t TextureBytes = 0;          // what they would take with memory of their own
+            uint64_t HeapBytes = 0;             // what they take sharing heaps
+        };
+        [[nodiscard]] MemoryStatistics GetMemoryStatistics() const;
+
+        // Textures whose lifetimes do not overlap share memory (on by default). Turning it off gives each texture memory
+        // of its own, to rule aliasing out while debugging.
+        void SetAliasing(bool enabled);
 
         // The size a texture of this frame has (known as soon as it is declared).
         [[nodiscard]] Dimensions GetSize(GraphTexture texture) const;

@@ -40,22 +40,13 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
     }
     VulkanTexturePool&  texturePool = cmdBuffer->VkContext->TexturePool;
 
-    for (const auto&[Texture, CurrentState, NextState] : imageBarriers)
+    for (const auto&[Texture, CurrentState, NextState, DiscardContents] : imageBarriers)
     {
         const VulkanImage& currentImage = *texturePool.Get(Texture);
 
-        VkImageAspectFlags aspectMask = VkSynchronization::ConvertToVkImageAspectFlags(CurrentState);
-        if (VulkanImage::IsDepthAttachment(currentImage))
-        {
-            if (VulkanImage::IsStencilFormat(currentImage.ImageFormat))
-            {
-                aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-            }
-            else if (VulkanImage::IsDepthFormat(currentImage.ImageFormat))
-            {
-                aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-            }
-        }
+        // The aspect follows the image's format, not the states: a texture placed over memory a depth buffer used last
+        // has a depth state as its CurrentState.
+        const VkImageAspectFlags aspectMask = currentImage.GetImageAspectFlags();
 
 
         VkImageMemoryBarrier2 vkBarrier
@@ -66,7 +57,7 @@ void cmdPipelineBarrier(const EOS::ICommandBuffer& commandBuffer, const std::vec
             .srcAccessMask      = VkSynchronization::ConvertToVkAccessFlags2(CurrentState),
             .dstStageMask       = VkSynchronization::ConvertToVkPipelineStage2(NextState),
             .dstAccessMask      = VkSynchronization::ConvertToVkAccessFlags2(NextState),
-            .oldLayout          = VkSynchronization::ConvertToVkImageLayout(CurrentState),
+            .oldLayout          = DiscardContents ? VK_IMAGE_LAYOUT_UNDEFINED : VkSynchronization::ConvertToVkImageLayout(CurrentState),
             .newLayout          = VkSynchronization::ConvertToVkImageLayout(NextState),
             .image              = currentImage.Image,
             .subresourceRange   = {aspectMask, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}
@@ -925,7 +916,6 @@ void VulkanImage::GenerateMipmaps(VkCommandBuffer commandBuffer) const
 
 VkImageAspectFlags VulkanImage::GetImageAspectFlags() const
 {
-    //TODO Move this functionality towards  VkSynchronization::ConvertToVkImageAspectFlags or remove that one and use this one. which may be even better.
     const bool isDepthFormat =  IsDepthFormat(ImageFormat);
     const bool isStencilFormat =  IsStencilFormat(ImageFormat);
 
@@ -3616,11 +3606,8 @@ EOS::Holder<EOS::BufferHandle> VulkanContext::CreateBuffer(const EOS::BufferDesc
     return {this, handle};
 }
 
-EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureDescription& textureDescription)
+bool VulkanContext::PrepareImage(EOS::TextureDescription& desc, VulkanImage& image, VkImageCreateInfo& outCreateInfo) const
 {
-    //Store copy to modify
-    EOS::TextureDescription desc{textureDescription};
-
     const bool isDepthOrStencil = VkContext::IsDepthOrStencilFormat(desc.TextureFormat);
     VkFormat vkFormat = VkContext::FormatTovkFormat(desc.TextureFormat);
     if (isDepthOrStencil) { vkFormat = VkContext::GetClosestDepthStencilFormat(desc.TextureFormat, VulkanPhysicalDevice); }     // Change to a depth or stencil format
@@ -3661,7 +3648,6 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
     }
     CHECK(usageFlags != 0, "Invalid Usage Flags");
 
-    const VkMemoryPropertyFlags memFlags = VkContext::StorageTypeToVkMemoryPropertyFlags(desc.Storage);
     VkImageCreateFlags vkCreateFlags = 0;
     VkSampleCountFlagBits vkSamples = VK_SAMPLE_COUNT_1_BIT;
 
@@ -3687,7 +3673,7 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
         if (desc.Type != EOS::ImageType::Image_3D)
         {
             CHECK(false, "This is a unsupported image type");
-            return {};
+            return false;
         }
     }
 
@@ -3702,7 +3688,6 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
     CHECK(vkExtent.height > 0, "The texture height is 0");
     CHECK(vkExtent.depth > 0, "The texture depth is 0");
 
-    VulkanImage image{};
     image.UsageFlags = usageFlags;
     image.Extent = vkExtent;
     image.ImageType = desc.Type;
@@ -3716,7 +3701,7 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
     CHECK(numPlanes == 1, "Cannot handle multiplanar images at the moment");
 
 
-    const VkImageCreateInfo ci
+    outCreateInfo =
     {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = nullptr,
@@ -3735,8 +3720,82 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    VmaAllocationCreateInfo vmaAllocInfo = {.usage = memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? VMA_MEMORY_USAGE_CPU_TO_GPU : VMA_MEMORY_USAGE_AUTO};
-    VK_ASSERT(vmaCreateImage(vmaAllocator, &ci, &vmaAllocInfo, &image.Image, &image.Allocation, nullptr));
+    return true;
+}
+
+EOS::MemoryRequirements VulkanContext::GetMemoryRequirements(const EOS::TextureDescription& textureDescription)
+{
+    EOS::TextureDescription desc{textureDescription};
+    VulkanImage image{};
+    VkImageCreateInfo createInfo{};
+    if (!PrepareImage(desc, image, createInfo)) return {};
+
+    const VkDeviceImageMemoryRequirements info{.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS, .pCreateInfo = &createInfo};
+    VkMemoryRequirements2 requirements{.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+    vkGetDeviceImageMemoryRequirements(VulkanDevice, &info, &requirements);
+
+    return
+    {
+        .Size = requirements.memoryRequirements.size,
+        .Alignment = requirements.memoryRequirements.alignment,
+        .MemoryTypeBits = requirements.memoryRequirements.memoryTypeBits,
+    };
+}
+
+EOS::Holder<EOS::MemoryHeapHandle> VulkanContext::CreateMemoryHeap(const EOS::MemoryHeapDescription& description)
+{
+    CHECK(description.Size > 0, "A memory heap needs a size");
+
+    // Placed resources need at most 64 KiB alignment; the heap itself starts on such a boundary.
+    const VkMemoryRequirements requirements
+    {
+        .size = description.Size,
+        .alignment = 64 * 1024,
+        .memoryTypeBits = description.MemoryTypeBits != 0 ? description.MemoryTypeBits : ~0u,
+    };
+    const VmaAllocationCreateInfo allocationInfo
+    {
+        .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+        .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    };
+
+    VulkanMemoryHeap heap{.Size = description.Size};
+    VK_ASSERT(vmaAllocateMemory(vmaAllocator, &requirements, &allocationInfo, &heap.Allocation, nullptr));
+    vmaSetAllocationName(vmaAllocator, heap.Allocation, description.DebugName);
+
+    return {this, MemoryHeapPool.Create(std::move(heap))};
+}
+
+void VulkanContext::Destroy(EOS::MemoryHeapHandle handle)
+{
+    const VulkanMemoryHeap* heap = MemoryHeapPool.Get(handle);
+    if (!heap) return;
+
+    Defer(std::packaged_task<void()>([vma = vmaAllocator, allocation = heap->Allocation]() { vmaFreeMemory(vma, allocation); }));
+    MemoryHeapPool.Destroy(handle);
+}
+
+EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureDescription& textureDescription)
+{
+    //Store copy to modify
+    EOS::TextureDescription desc{textureDescription};
+    VulkanImage image{};
+    VkImageCreateInfo ci{};
+    if (!PrepareImage(desc, image, ci)) return {};
+
+    const VkMemoryPropertyFlags memFlags = VkContext::StorageTypeToVkMemoryPropertyFlags(desc.Storage);
+
+    if (const VulkanMemoryHeap* heap = desc.Heap.Valid() ? MemoryHeapPool.Get(desc.Heap) : nullptr)
+    {
+        // Placed in a heap: the image owns no memory (image.Allocation stays empty), so destroying it frees nothing.
+        CHECK(!(memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) && !desc.Data, "Textures in a memory heap are device-local and start without data");
+        VK_ASSERT(vmaCreateAliasingImage2(vmaAllocator, heap->Allocation, desc.HeapOffset, &ci, &image.Image));
+    }
+    else
+    {
+        VmaAllocationCreateInfo vmaAllocInfo = {.usage = memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? VMA_MEMORY_USAGE_CPU_TO_GPU : VMA_MEMORY_USAGE_AUTO};
+        VK_ASSERT(vmaCreateImage(vmaAllocator, &ci, &vmaAllocInfo, &image.Image, &image.Allocation, nullptr));
+    }
 
     // handle memory-mapped buffers
     if (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
@@ -3748,10 +3807,10 @@ EOS::Holder<EOS::TextureHandle> VulkanContext::CreateTexture(const EOS::TextureD
     // Get physical device's properties for the image's format
     vkGetPhysicalDeviceFormatProperties(VulkanPhysicalDevice, image.ImageFormat, &image.FormatProperties);
 
-    VulkanImage::CreateImageView(image.ImageView, VulkanDevice, image.Image, desc.Type, vkFormat, VK_REMAINING_MIP_LEVELS, desc.NumberOfLayers, fmt::format("{} - Image View",desc.DebugName).c_str(), desc.Swizzle);
+    VulkanImage::CreateImageView(image.ImageView, VulkanDevice, image.Image, desc.Type, image.ImageFormat, VK_REMAINING_MIP_LEVELS, desc.NumberOfLayers, fmt::format("{} - Image View",desc.DebugName).c_str(), desc.Swizzle);
     if (image.UsageFlags & VK_IMAGE_USAGE_STORAGE_BIT && !desc.Swizzle.Identity())
     {
-        VulkanImage::CreateImageView(image.ImageViewStorage, VulkanDevice, image.Image, desc.Type, vkFormat, VK_REMAINING_MIP_LEVELS, desc.NumberOfLayers, fmt::format("{} - Image View Storage",desc.DebugName).c_str(), desc.Swizzle);
+        VulkanImage::CreateImageView(image.ImageViewStorage, VulkanDevice, image.Image, desc.Type, image.ImageFormat, VK_REMAINING_MIP_LEVELS, desc.NumberOfLayers, fmt::format("{} - Image View Storage",desc.DebugName).c_str(), desc.Swizzle);
     }
 
     EOS::TextureHandle handle = TexturePool.Create(std::move(image));

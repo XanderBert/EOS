@@ -43,6 +43,14 @@ using VulkanBufferPool = EOS::Pool<EOS::Buffer, VulkanBuffer>;
 using VulkanSamplerPool = EOS::Pool<EOS::Sampler, VkSampler>;
 using VulkanAccelerationStructurePool = EOS::Pool<EOS::AccelerationStructure, VulkanAccelerationStructure>;
 
+// Device memory textures are placed into (EOS::MemoryHeapDescription).
+struct VulkanMemoryHeap final
+{
+    VmaAllocation Allocation = VK_NULL_HANDLE;
+    uint64_t Size = 0;
+};
+using VulkanMemoryHeapPool = EOS::Pool<EOS::MemoryHeap, VulkanMemoryHeap>;
+
 //TODO: Split up in hot and cold data
 struct VulkanBuffer final
 {
@@ -498,6 +506,8 @@ public:
     [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateTexture(const EOS::TextureDescription& textureDescription) override;
     [[nodiscard]] EOS::Holder<EOS::SamplerHandle> CreateSampler(const EOS::SamplerDescription& samplerDescription) override;
     [[nodiscard]] EOS::Holder<EOS::AccelStructHandle> CreateAccelerationStructure(const EOS::AccelerationStructDescription& desc) override;
+    [[nodiscard]] EOS::Holder<EOS::MemoryHeapHandle> CreateMemoryHeap(const EOS::MemoryHeapDescription& description) override;
+    [[nodiscard]] EOS::MemoryRequirements GetMemoryRequirements(const EOS::TextureDescription& description) override;
 
     void Destroy(EOS::TextureHandle handle) override;
     void Destroy(EOS::ShaderProgramHandle handle) override;
@@ -506,6 +516,7 @@ public:
     void Destroy(EOS::BufferHandle handle) override;
     void Destroy(EOS::SamplerHandle handle) override;
     void Destroy(EOS::AccelStructHandle handle) override;
+    void Destroy(EOS::MemoryHeapHandle handle) override;
 
     void Upload(EOS::BufferHandle handle, const void* data, size_t size, size_t offset) override;
     [[nodiscard]] uint64_t GetGPUAddress(EOS::BufferHandle handle, size_t offset = 0) const override;
@@ -559,6 +570,7 @@ public:
     VulkanBufferPool BufferPool{};
     VulkanSamplerPool SamplerPool{};
     VulkanAccelerationStructurePool AccelerationStructurePool{};
+    VulkanMemoryHeapPool MemoryHeapPool{};
 
     VmaAllocator vmaAllocator                       = VK_NULL_HANDLE;
 
@@ -586,6 +598,9 @@ private:
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window);
+    // What CreateTexture and GetMemoryRequirements both derive from a description: desc is normalized in place (array
+    // and cube types, cube layers), image gets its format, extent and usage. False for an unsupported description.
+    [[nodiscard]] bool PrepareImage(EOS::TextureDescription& desc, VulkanImage& image, VkImageCreateInfo& outCreateInfo) const;
     // Recreates the swapchain between frames when the window changed size or the swapchain went out of date.
     void UpdateSwapChain();
     void CreateAllocator();

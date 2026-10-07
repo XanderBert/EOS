@@ -118,6 +118,7 @@ namespace EOS
     using TextureHandle             = Handle<struct Texture>;
     using QueryPoolHandle           = Handle<struct QueryPool>;
     using AccelStructHandle         = Handle<struct AccelerationStructure>;
+    using MemoryHeapHandle          = Handle<struct MemoryHeap>;
 
     using ComputePipelineHolder     = Holder<ComputePipelineHandle>;
     using RenderPipelineHolder      = Holder<RenderPipelineHandle>;
@@ -128,6 +129,7 @@ namespace EOS
     using TextureHolder             = Holder<TextureHandle>;
     using QueryPoolHolder           = Holder<QueryPoolHandle>;
     using AccelStructHolder         = Holder<AccelStructHandle>;
+    using MemoryHeapHolder          = Holder<MemoryHeapHandle>;
 
     struct SubmitHandle final
     {

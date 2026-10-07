@@ -163,6 +163,19 @@ namespace EOS
 
         // Pooled resources nothing used for this many frames are released. Enough to ride out a window being resized.
         constexpr uint64_t kFramesBeforeRelease = 8;
+
+        // A heap is recreated smaller when it stayed more than twice as large as needed for this many frames.
+        constexpr uint64_t kHeapShrinkFrames = 120;
+
+        [[nodiscard]] constexpr uint64_t AlignUp(uint64_t value, uint64_t alignment)
+        {
+            return alignment <= 1 ? value : (value + alignment - 1) / alignment * alignment;
+        }
+
+        [[nodiscard]] constexpr bool RangesOverlap(uint64_t offsetA, uint64_t sizeA, uint64_t offsetB, uint64_t sizeB)
+        {
+            return offsetA < offsetB + sizeB && offsetB < offsetA + sizeA;
+        }
     }
 
     struct RenderGraph::Data final
@@ -180,6 +193,15 @@ namespace EOS
             bool LastAccessWrote = false;
             bool Written = false;
             bool Needed = false;
+
+            // Transient textures: lifetime in pass indices, and where they live in their heap.
+            uint32_t FirstPass = kNone;
+            uint32_t LastPass = 0;
+            uint32_t HeapIndex = kNone;
+            uint64_t HeapOffset = 0;
+            uint64_t MemorySize = 0;
+            uint64_t MemoryAlignment = 1;
+            bool Touched = false;                   // has had its first barrier this frame
         };
 
         struct BufferNode final
@@ -215,18 +237,41 @@ namespace EOS
             DestroyFunction Destroy = nullptr;
         };
 
-        struct PooledTexture final
+        // A texture placed in a heap, kept as long as frames keep placing a texture with that description there.
+        struct PlacedTexture final
         {
             TextureKey Key;
+            uint64_t Offset = 0;
             Holder<TextureHandle> Texture;
             uint64_t LastUsedFrame = 0;
-            bool InUse = false;
+        };
+
+        // A range of heap memory and the state its last user left it in: the next texture placed there waits for it.
+        struct Occupancy final
+        {
+            uint64_t Offset = 0;
+            uint64_t Size = 0;
+            ResourceState State = ResourceState::Undefined;
+        };
+
+        // Device memory the graph's textures share. Textures whose lifetimes do not overlap may use the same range.
+        struct Heap final
+        {
+            uint32_t MemoryTypeBits = 0;
+            Holder<MemoryHeapHandle> Memory;
+            uint64_t Size = 0;
+            uint64_t RequiredSize = 0;              // this frame's packing
+            uint64_t PeakSize = 0;                  // the largest packing since the last shrink check
+            uint64_t PeakFrames = 0;
+            std::vector<PlacedTexture> Textures;
+            std::vector<Occupancy> Occupancies;     // the last users of each range, possibly from earlier frames
         };
 
         struct PooledBuffer final
         {
             size_t Size = 0;
             Holder<BufferHandle> Buffer;
+            ResourceState State = ResourceState::Undefined;     // how the last frame that used it left it
             uint64_t LastUsedFrame = 0;
             bool InUse = false;
         };
@@ -268,16 +313,21 @@ namespace EOS
         bool SwapchainSizeKnown = false;
 
         // Across frames.
-        std::vector<PooledTexture> TexturePool;
+        std::vector<Heap> Heaps;
+        std::vector<std::pair<TextureKey, MemoryRequirements>> Requirements;   // per description, asked once
         std::vector<PooledBuffer> BufferPool;
+        bool AliasingEnabled = true;
+        RenderGraph::MemoryStatistics Statistics{};
         std::vector<ImportedState> ImportedTextures;
         std::vector<ImportedState> ImportedBuffers;
         std::vector<History> Histories;
         uint64_t FrameNumber = 1;
 
-        // Scratch, reused by every pass.
+        // Scratch, reused by every pass and frame.
         std::vector<ImageBarrier> ImageBarriers;
         std::vector<GlobalBarrier> GlobalBarriers;
+        std::vector<uint32_t> PackingOrder;
+        std::vector<uint64_t> PackingCandidates;
 
         // Each warning is logged once per pass, instead of every frame.
         std::set<std::pair<const void*, int>> Warned;
@@ -745,6 +795,130 @@ namespace EOS
         }
     }
 
+    namespace
+    {
+        [[nodiscard]] TextureKey MakeTextureKey(const RenderGraph::Data::TextureNode& texture)
+        {
+            return
+            {
+                .Type = texture.Description.Type,
+                .TextureFormat = texture.Description.TextureFormat,
+                .Width = texture.Size.Width,
+                .Height = texture.Size.Height,
+                .Depth = texture.Size.Depth,
+                .NumberOfLayers = texture.Description.NumberOfLayers,
+                .NumberOfMipLevels = texture.Description.NumberOfMipLevels,
+                .NumberOfSamples = texture.Description.NumberOfSamples,
+                .Usage = texture.Usage,
+            };
+        }
+
+        [[nodiscard]] TextureDescription MakeTextureDescription(const TextureKey& key, const char* debugName)
+        {
+            return
+            {
+                .Type = key.Type,
+                .TextureFormat = key.TextureFormat,
+                .TextureDimensions = {key.Width, key.Height, key.Depth},
+                .NumberOfLayers = key.NumberOfLayers,
+                .NumberOfMipLevels = key.NumberOfMipLevels,
+                .NumberOfSamples = key.NumberOfSamples,
+                .Usage = key.Usage,
+                .DebugName = debugName,
+            };
+        }
+
+        [[nodiscard]] bool LifetimesOverlap(const RenderGraph::Data::TextureNode& a, const RenderGraph::Data::TextureNode& b)
+        {
+            return a.FirstPass <= b.LastPass && b.FirstPass <= a.LastPass;
+        }
+
+        // Packs one heap's textures (largest first) at the lowest offset where nothing they are alive at the same time as
+        // already lives. Returns the size the packing needs.
+        [[nodiscard]] uint64_t PackHeap(RenderGraph::Data& graph, uint32_t heapIndex, bool aliasing, std::vector<uint32_t>& scratch, std::vector<uint64_t>& candidates)
+        {
+            scratch.clear();
+            for (uint32_t i = 0; i < graph.Textures.size(); ++i)
+            {
+                if (graph.Textures[i].Needed && graph.Textures[i].HeapIndex == heapIndex) scratch.push_back(i);
+            }
+
+            std::ranges::stable_sort(scratch, [&graph](uint32_t a, uint32_t b)
+            {
+                return graph.Textures[a].MemorySize > graph.Textures[b].MemorySize;
+            });
+
+            uint64_t requiredSize = 0;
+            for (size_t placed = 0; placed < scratch.size(); ++placed)
+            {
+                RenderGraph::Data::TextureNode& texture = graph.Textures[scratch[placed]];
+                const auto conflicts = [&](const RenderGraph::Data::TextureNode& other)
+                {
+                    return !aliasing || LifetimesOverlap(texture, other);
+                };
+
+                // The lowest offset is either the start of the heap or right after a texture this one conflicts with.
+                candidates.clear();
+                candidates.push_back(0);
+                for (size_t i = 0; i < placed; ++i)
+                {
+                    const RenderGraph::Data::TextureNode& other = graph.Textures[scratch[i]];
+                    if (conflicts(other)) candidates.push_back(AlignUp(other.HeapOffset + other.MemorySize, texture.MemoryAlignment));
+                }
+                std::ranges::sort(candidates);
+
+                for (const uint64_t offset : candidates)
+                {
+                    const bool free = std::none_of(scratch.begin(), scratch.begin() + static_cast<ptrdiff_t>(placed), [&](uint32_t index)
+                    {
+                        const RenderGraph::Data::TextureNode& other = graph.Textures[index];
+                        return conflicts(other) && RangesOverlap(offset, texture.MemorySize, other.HeapOffset, other.MemorySize);
+                    });
+
+                    if (free)
+                    {
+                        texture.HeapOffset = offset;
+                        break;
+                    }
+                }
+
+                requiredSize = std::max(requiredSize, texture.HeapOffset + texture.MemorySize);
+            }
+
+            return requiredSize;
+        }
+
+        // How the previous users of a texture's memory left it: textures of this frame that are done with it, and the
+        // last users from earlier frames (which may still be running on the GPU).
+        [[nodiscard]] ResourceState GetPreviousUsersState(const RenderGraph::Data& graph, const RenderGraph::Data::TextureNode& texture)
+        {
+            uint32_t state = ResourceState::Undefined;
+            const RenderGraph::Data::Heap& heap = graph.Heaps[texture.HeapIndex];
+            for (const RenderGraph::Data::Occupancy& occupancy : heap.Occupancies)
+            {
+                if (RangesOverlap(texture.HeapOffset, texture.MemorySize, occupancy.Offset, occupancy.Size)) state |= occupancy.State;
+            }
+
+            for (const RenderGraph::Data::TextureNode& other : graph.Textures)
+            {
+                if (&other == &texture || !other.Touched || other.HeapIndex != texture.HeapIndex || other.LastPass >= texture.FirstPass) continue;
+                if (RangesOverlap(texture.HeapOffset, texture.MemorySize, other.HeapOffset, other.MemorySize)) state |= other.State;
+            }
+
+            return static_cast<ResourceState>(state);
+        }
+    }
+
+    RenderGraph::MemoryStatistics RenderGraph::GetMemoryStatistics() const
+    {
+        return Graph->Statistics;
+    }
+
+    void RenderGraph::SetAliasing(bool enabled)
+    {
+        Graph->AliasingEnabled = enabled;
+    }
+
     SubmitHandle RenderGraph::Execute()
     {
         EOS_PROFILER_FUNCTION();
@@ -804,53 +978,122 @@ namespace EOS
             history.HasBeenWritten = false;
         }
 
+        // Lifetimes: the first and the last kept pass that uses each texture.
+        for (uint32_t passIndex = 0; passIndex < graph.Passes.size(); ++passIndex)
+        {
+            const Data::PassNode& pass = graph.Passes[passIndex];
+            if (pass.Culled) continue;
+
+            for (uint32_t i = pass.FirstAccess; i < pass.FirstAccess + pass.AccessCount; ++i)
+            {
+                const Access& access = graph.Accesses[i];
+                if (IsBufferAccess(access.Type)) continue;
+
+                Data::TextureNode& texture = graph.Textures[access.Resource];
+                texture.FirstPass = std::min(texture.FirstPass, passIndex);
+                texture.LastPass = std::max(texture.LastPass, passIndex);
+            }
+        }
+
+        // Transient textures live in heaps, one per kind of memory they need, packed by lifetime: textures that are
+        // never alive at the same time share memory.
+        for (Data::Heap& heap : graph.Heaps) heap.RequiredSize = 0;
+        uint64_t textureBytes = 0;
+        for (Data::TextureNode& texture : graph.Textures)
+        {
+            if (!texture.Needed || texture.Origin != ResourceOrigin::Transient) continue;
+
+            const TextureKey key = MakeTextureKey(texture);
+            auto requirements = std::ranges::find_if(graph.Requirements, [&key](const auto& entry) { return entry.first == key; });
+            if (requirements == graph.Requirements.end())
+            {
+                graph.Requirements.emplace_back(key, Context->GetMemoryRequirements(MakeTextureDescription(key, texture.Description.DebugName)));
+                requirements = graph.Requirements.end() - 1;
+            }
+
+            texture.MemoryAlignment = std::max<uint64_t>(requirements->second.Alignment, 1);
+            texture.MemorySize = AlignUp(requirements->second.Size, texture.MemoryAlignment);
+            textureBytes += texture.MemorySize;
+
+            auto heap = std::ranges::find_if(graph.Heaps, [&requirements](const Data::Heap& entry) { return entry.MemoryTypeBits == requirements->second.MemoryTypeBits; });
+            if (heap == graph.Heaps.end())
+            {
+                graph.Heaps.push_back({.MemoryTypeBits = requirements->second.MemoryTypeBits});
+                heap = graph.Heaps.end() - 1;
+            }
+            texture.HeapIndex = static_cast<uint32_t>(heap - graph.Heaps.begin());
+        }
+
+        std::vector<uint32_t>& packingOrder = graph.PackingOrder;
+        std::vector<uint64_t>& packingCandidates = graph.PackingCandidates;
+        uint64_t heapBytes = 0;
+        for (uint32_t heapIndex = 0; heapIndex < graph.Heaps.size(); ++heapIndex)
+        {
+            Data::Heap& heap = graph.Heaps[heapIndex];
+            heap.RequiredSize = PackHeap(graph, heapIndex, graph.AliasingEnabled, packingOrder, packingCandidates);
+            if (heap.RequiredSize == 0)
+            {
+                heapBytes += heap.Size;
+                continue;
+            }
+
+            heap.PeakSize = std::max(heap.PeakSize, heap.RequiredSize);
+            ++heap.PeakFrames;
+
+            // Grow when this frame does not fit; shrink when the heap stayed far larger than needed (a smaller window).
+            bool recreate = heap.RequiredSize > heap.Size;
+            if (!recreate && heap.PeakFrames >= kHeapShrinkFrames)
+            {
+                recreate = heap.Size > 2 * heap.PeakSize;
+                heap.PeakSize = heap.RequiredSize;
+                heap.PeakFrames = 0;
+            }
+
+            if (recreate)
+            {
+                // Some headroom, so a slightly larger frame does not recreate it again. The placed textures go first;
+                // both are destroyed once the GPU no longer uses them.
+                constexpr uint64_t kHeapGranularity = 1024 * 1024;
+                heap.Textures.clear();
+                heap.Occupancies.clear();
+                heap.Memory = nullptr;
+                heap.Size = AlignUp(heap.RequiredSize + heap.RequiredSize / 4, kHeapGranularity);
+                heap.Memory = Context->CreateMemoryHeap({.Size = heap.Size, .MemoryTypeBits = heap.MemoryTypeBits, .DebugName = "Render Graph Heap"});
+                heap.PeakSize = heap.RequiredSize;
+                heap.PeakFrames = 0;
+
+                Logger->info("Render graph: textures need {:.1f} MiB, aliased into {:.1f} MiB; heap is now {:.1f} MiB",
+                             static_cast<double>(textureBytes) / (1024.0 * 1024.0), static_cast<double>(heap.RequiredSize) / (1024.0 * 1024.0), static_cast<double>(heap.Size) / (1024.0 * 1024.0));
+            }
+
+            heapBytes += heap.Size;
+        }
+        graph.Statistics = {.TextureBytes = textureBytes, .HeapBytes = heapBytes};
+
         // Physical resources.
         for (Data::TextureNode& texture : graph.Textures)
         {
             if (!texture.Needed) continue;
 
-            const TextureKey key
-            {
-                .Type = texture.Description.Type,
-                .TextureFormat = texture.Description.TextureFormat,
-                .Width = texture.Size.Width,
-                .Height = texture.Size.Height,
-                .Depth = texture.Size.Depth,
-                .NumberOfLayers = texture.Description.NumberOfLayers,
-                .NumberOfMipLevels = texture.Description.NumberOfMipLevels,
-                .NumberOfSamples = texture.Description.NumberOfSamples,
-                .Usage = texture.Usage,
-            };
-
-            const auto createTexture = [&](const char* debugName)
-            {
-                return Context->CreateTexture(
-                {
-                    .Type = key.Type,
-                    .TextureFormat = key.TextureFormat,
-                    .TextureDimensions = {key.Width, key.Height, key.Depth},
-                    .NumberOfLayers = key.NumberOfLayers,
-                    .NumberOfMipLevels = key.NumberOfMipLevels,
-                    .NumberOfSamples = key.NumberOfSamples,
-                    .Usage = key.Usage,
-                    .DebugName = debugName,
-                });
-            };
-
+            const TextureKey key = MakeTextureKey(texture);
             switch (texture.Origin)
             {
                 case ResourceOrigin::Transient:
                 {
-                    auto pooled = std::ranges::find_if(graph.TexturePool, [&key](const Data::PooledTexture& entry) { return !entry.InUse && entry.Key == key; });
-                    if (pooled == graph.TexturePool.end())
+                    // The texture placed at this offset with this description is kept from frame to frame.
+                    Data::Heap& heap = graph.Heaps[texture.HeapIndex];
+                    auto placed = std::ranges::find_if(heap.Textures, [&](const Data::PlacedTexture& entry) { return entry.Key == key && entry.Offset == texture.HeapOffset; });
+                    if (placed == heap.Textures.end())
                     {
-                        graph.TexturePool.push_back({.Key = key, .Texture = createTexture(texture.Description.DebugName)});
-                        pooled = graph.TexturePool.end() - 1;
+                        TextureDescription description = MakeTextureDescription(key, texture.Description.DebugName);
+                        description.Heap = static_cast<MemoryHeapHandle>(heap.Memory);
+                        description.HeapOffset = texture.HeapOffset;
+                        heap.Textures.push_back({.Key = key, .Offset = texture.HeapOffset, .Texture = Context->CreateTexture(description)});
+                        placed = heap.Textures.end() - 1;
                     }
 
-                    pooled->InUse = true;
-                    pooled->LastUsedFrame = frame;
-                    texture.Physical = static_cast<TextureHandle>(pooled->Texture);
+                    placed->LastUsedFrame = frame;
+                    texture.Physical = static_cast<TextureHandle>(placed->Texture);
                     texture.State = ResourceState::Undefined;
                     break;
                 }
@@ -864,17 +1107,7 @@ namespace EOS
 
                         TextureKey historyKey = key;
                         historyKey.Usage = history.Usage;
-                        history.Textures[slot] = Context->CreateTexture(
-                        {
-                            .Type = historyKey.Type,
-                            .TextureFormat = historyKey.TextureFormat,
-                            .TextureDimensions = {historyKey.Width, historyKey.Height, historyKey.Depth},
-                            .NumberOfLayers = historyKey.NumberOfLayers,
-                            .NumberOfMipLevels = historyKey.NumberOfMipLevels,
-                            .NumberOfSamples = historyKey.NumberOfSamples,
-                            .Usage = historyKey.Usage,
-                            .DebugName = history.Name.c_str(),
-                        });
+                        history.Textures[slot] = Context->CreateTexture(MakeTextureDescription(historyKey, history.Name.c_str()));
                         history.States[slot] = ResourceState::Undefined;
                     }
 
@@ -912,8 +1145,9 @@ namespace EOS
 
                 pooled->InUse = true;
                 pooled->LastUsedFrame = frame;
+                buffer.PersistentIndex = static_cast<uint32_t>(pooled - graph.BufferPool.begin());
                 buffer.Physical = static_cast<BufferHandle>(pooled->Buffer);
-                buffer.State = ResourceState::Undefined;
+                buffer.State = pooled->State;
             }
             else
             {
@@ -962,8 +1196,21 @@ namespace EOS
                     graph.Warn(pass.Name, 0, std::string("reads '") + texture.Description.DebugName + "' before any pass wrote it this frame");
                 }
 
-                const bool needsBarrier = texture.State != required.State || texture.LastAccessWrote || required.Writes;
-                if (needsBarrier) graph.ImageBarriers.push_back({.Texture = texture.Physical, .CurrentState = texture.State, .NextState = required.State});
+                if (texture.Origin == ResourceOrigin::Transient && !texture.Touched)
+                {
+                    // First use this frame: the contents are discarded, but the memory may have been used by another
+                    // texture earlier this frame or by an earlier frame still on the GPU, so that work is waited for. The
+                    // global barrier covers accesses made through those other textures.
+                    const ResourceState previousUsers = GetPreviousUsersState(graph, texture);
+                    graph.ImageBarriers.push_back({.Texture = texture.Physical, .CurrentState = previousUsers, .NextState = required.State, .DiscardContents = true});
+                    if (previousUsers != ResourceState::Undefined) graph.GlobalBarriers.push_back({.Buffer = {}, .CurrentState = previousUsers, .NextState = required.State});
+                    texture.Touched = true;
+                }
+                else
+                {
+                    const bool needsBarrier = texture.State != required.State || texture.LastAccessWrote || required.Writes;
+                    if (needsBarrier) graph.ImageBarriers.push_back({.Texture = texture.Physical, .CurrentState = texture.State, .NextState = required.State});
+                }
 
                 texture.State = required.State;
                 texture.LastAccessWrote = required.Writes;
@@ -1066,7 +1313,27 @@ namespace EOS
 
         for (const Data::BufferNode& buffer : graph.Buffers)
         {
-            if (buffer.Needed && buffer.Origin == ResourceOrigin::Imported) graph.ImportedBuffers[buffer.PersistentIndex].State = buffer.State;
+            if (!buffer.Needed) continue;
+            if (buffer.Origin == ResourceOrigin::Imported) graph.ImportedBuffers[buffer.PersistentIndex].State = buffer.State;
+            else graph.BufferPool[buffer.PersistentIndex].State = buffer.State;
+        }
+
+        // Each range of heap memory used this frame now has a new last user; ranges this frame left alone keep theirs.
+        for (uint32_t heapIndex = 0; heapIndex < graph.Heaps.size(); ++heapIndex)
+        {
+            Data::Heap& heap = graph.Heaps[heapIndex];
+            for (const Data::TextureNode& texture : graph.Textures)
+            {
+                if (!texture.Needed || texture.HeapIndex != heapIndex) continue;
+                std::erase_if(heap.Occupancies, [&texture](const Data::Occupancy& occupancy) { return RangesOverlap(texture.HeapOffset, texture.MemorySize, occupancy.Offset, occupancy.Size); });
+            }
+
+            for (const Data::TextureNode& texture : graph.Textures)
+            {
+                if (texture.Needed && texture.HeapIndex == heapIndex) heap.Occupancies.push_back({.Offset = texture.HeapOffset, .Size = texture.MemorySize, .State = texture.State});
+            }
+
+            std::erase_if(heap.Textures, [frame](const Data::PlacedTexture& entry) { return entry.LastUsedFrame + kFramesBeforeRelease < frame; });
         }
 
         const SubmitHandle submitHandle = Context->Submit(commandBuffer, presentTexture);
@@ -1079,11 +1346,9 @@ namespace EOS
         }
 
         std::erase_if(graph.Histories, [frame](const Data::History& history) { return history.LastUsedFrame + kFramesBeforeRelease < frame; });
-        std::erase_if(graph.TexturePool, [frame](const Data::PooledTexture& entry) { return entry.LastUsedFrame + kFramesBeforeRelease < frame; });
         std::erase_if(graph.BufferPool, [frame](const Data::PooledBuffer& entry) { return entry.LastUsedFrame + kFramesBeforeRelease < frame; });
         std::erase_if(graph.ImportedTextures, [frame](const Data::ImportedState& entry) { return entry.LastUsedFrame + kFramesBeforeRelease < frame; });
         std::erase_if(graph.ImportedBuffers, [frame](const Data::ImportedState& entry) { return entry.LastUsedFrame + kFramesBeforeRelease < frame; });
-        for (Data::PooledTexture& entry : graph.TexturePool) entry.InUse = false;
         for (Data::PooledBuffer& entry : graph.BufferPool) entry.InUse = false;
 
         for (const Data::Function& function : graph.Functions)

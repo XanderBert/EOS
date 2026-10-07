@@ -1803,24 +1803,4 @@ namespace VkSynchronization
 
         return VK_IMAGE_LAYOUT_UNDEFINED;
     }
-
-    VkImageAspectFlags ConvertToVkImageAspectFlags(const EOS::ResourceState &state)
-    {
-        VkImageAspectFlags aspectMask = 0;
-
-        if (state & EOS::ResourceState::RenderTarget)
-        {
-            aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        }else
-        {
-            aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        }
-
-        if (state & (EOS::ResourceState::DepthRead | EOS::ResourceState::DepthWrite))
-        {
-            aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        }
-
-        return aspectMask;
-    }
 }

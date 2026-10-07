@@ -118,6 +118,11 @@ namespace EOS
         const TextureHandle    Texture;
         const ResourceState     CurrentState;
         const ResourceState     NextState;
+
+        // The texture's contents are not needed: it starts from an undefined layout, but still waits for the work
+        // CurrentState describes. For memory a texture shares with others (MemoryHeap), CurrentState is how the previous
+        // users of that memory left it.
+        const bool              DiscardContents = false;
     };
 
     /**
@@ -419,6 +424,28 @@ namespace EOS
     };
 
     /**
+     * @brief The device memory a resource needs: how much, its alignment, and which memory types can hold it.
+     */
+    struct MemoryRequirements final
+    {
+        uint64_t Size = 0;
+        uint64_t Alignment = 1;
+        uint32_t MemoryTypeBits = 0;
+    };
+
+    /**
+     * @brief A block of device memory textures are placed into (TextureDescription::Heap) instead of each allocating
+     *        their own. Textures that are never used at the same time can share the same range (aliasing), which is
+     *        how the render graph keeps its textures small.
+     */
+    struct MemoryHeapDescription final
+    {
+        uint64_t Size = 0;
+        uint32_t MemoryTypeBits = 0;            // from MemoryRequirements; 0 for any device-local type
+        const char* DebugName = "";
+    };
+
+    /**
      * @brief Texture creation and upload settings.
      */
     struct TextureDescription final
@@ -435,6 +462,8 @@ namespace EOS
         const void* Data = nullptr;
         uint32_t DataNumberOfMipLevels = 1;     // how many mip-levels we want to upload
         bool GenerateMipmaps = false;           // generate mip-levels immediately, valid only with non-null data
+        MemoryHeapHandle Heap{};                // places the texture in this heap instead of allocating memory for it
+        uint64_t HeapOffset = 0;                // within Heap, a multiple of GetMemoryRequirements().Alignment
         const char* DebugName = "";
     };
 
@@ -731,6 +760,16 @@ namespace EOS
          */
         virtual EOS::Holder<AccelStructHandle> CreateAccelerationStructure(const AccelerationStructDescription& desc) = 0;
 
+        /**
+         * @brief Creates a block of device memory to place textures in (TextureDescription::Heap).
+         */
+        virtual EOS::Holder<MemoryHeapHandle> CreateMemoryHeap(const MemoryHeapDescription& description) = 0;
+
+        /**
+         * @brief The memory a texture with this description needs, without creating it.
+         */
+        [[nodiscard]] virtual MemoryRequirements GetMemoryRequirements(const TextureDescription& description) = 0;
+
 
         /**
         * @brief Handles the destruction of a TextureHandle and what it holds.
@@ -774,6 +813,11 @@ namespace EOS
         * @param handle The handle to the AccelStructure you want to destroy
         */
         virtual void Destroy(EOS::AccelStructHandle handle) = 0;
+
+        /**
+        * @brief Frees a memory heap once the GPU is done with it. The textures placed in it have to be destroyed first.
+        */
+        virtual void Destroy(EOS::MemoryHeapHandle handle) = 0;
 
         /**
         * @brief Handles the uploading of buffers to the GPU.
@@ -969,6 +1013,13 @@ namespace EOS
          */
         void Reset()
         {
+            // An empty holder owns nothing, so there is nothing to destroy.
+            if (Handle.Empty())
+            {
+                HolderContext = nullptr;
+                return;
+            }
+
             CHECK(HolderContext, "the context of the holder is no longer valid while resetting the holder");
             if (HolderContext)
             {

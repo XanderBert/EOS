@@ -183,6 +183,14 @@ graph.Execute();   // barriers, render passes, markers, submit and present
   swapchain (`Scale`) or fixed (`Size`), get their usage flags from how passes use them, are pooled across frames and
   are recreated when the window is resized. Their contents do not survive the frame; `CreateHistoryTexture` gives a
   texture that does, together with last frame's version (temporal effects).
+- **Memory aliasing**: `CreateTexture` textures live in memory heaps that the graph keeps across frames. A texture is
+  alive from the first pass that uses it to the last one, and textures that are never alive at the same time share
+  memory (the depth of field example needs 73 MiB of textures and fits them in 42 MiB). The first pass that uses a
+  texture discards its old contents and waits for the earlier users of that memory, this frame's or a previous one's.
+  A heap grows when a frame needs more and shrinks when it stays more than twice as large as needed for 120 frames,
+  for example after the window got smaller. `GetMemoryStatistics()` returns the texture bytes and the heap bytes;
+  `SetAliasing(false)` gives every texture its own memory, which helps to tell an aliasing bug from another one.
+  Heaps come from `IContext::CreateMemoryHeap`, and `TextureDescription::Heap`/`HeapOffset` place a texture in one.
 - **Imports**: resources owned elsewhere are imported (`ImportTexture`, `ImportBuffer`, `ImportSwapchain`). The graph
   keeps the state it left them in for the next frame. Anything referenced before the graph executes, such as a texture
   the UI shows or a handle uploaded in a buffer, has to be such an import: graph resources only exist inside passes,
