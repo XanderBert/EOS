@@ -155,10 +155,12 @@ namespace EOS::SlangReflection
             }
         }
 
+        // The stride, not the size: a struct starting with a pointer has 8-byte alignment, so its C++ twin (and the
+        // generated header) is padded to a multiple of 8 and pushed whole, while Slang's size stops at the last field.
         [[nodiscard]] uint32_t GetPushConstantBlockSize(slang::TypeLayoutReflection* containerTypeLayout)
         {
             slang::VariableLayoutReflection* element = containerTypeLayout->getElementVarLayout();
-            return element ? static_cast<uint32_t>(element->getTypeLayout()->getSize()) : 0;
+            return element ? static_cast<uint32_t>(element->getTypeLayout()->getStride()) : 0;
         }
 
         // Global scope: [[vk::push_constant]] blocks, [[vk::constant_id]] constants and descriptor bindings.

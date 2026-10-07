@@ -681,6 +681,7 @@ VulkanImage::VulkanImage(const ImageDescription &description)
 , Extent(description.Extent)
 , ImageType(description.ImageType)
 , ImageFormat(description.ImageFormat)
+, IsOwningImage(false)      // wraps an image created elsewhere (the swapchain's); destroying the texture keeps it
 , Levels(description.Levels)
 , Layers(description.Layers)
 , DebugName(description.DebugName)
@@ -3924,10 +3925,8 @@ void VulkanContext::Destroy(EOS::TextureHandle handle)
         vmaUnmapMemory(vmaAllocator, image->Allocation);
     }
 
-    if (image->Allocation)
-    {
-        Defer(std::packaged_task<void()>([vma = vmaAllocator, image = image->Image, allocation = image->Allocation](){ vmaDestroyImage(vma, image, allocation); }));
-    }
+    // A texture placed in a memory heap has no allocation of its own; vmaDestroyImage then only destroys the image.
+    Defer(std::packaged_task<void()>([vma = vmaAllocator, image = image->Image, allocation = image->Allocation](){ vmaDestroyImage(vma, image, allocation); }));
 
     TexturePool.Destroy(handle);
 }

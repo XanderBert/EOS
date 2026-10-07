@@ -11,7 +11,7 @@ namespace EOS::ShaderCache
     namespace
     {
         constexpr uint32_t kMagic = 0x50534F45;     // "EOSP"
-        constexpr uint32_t kFormatVersion = 3;      // bump whenever the layout written below changes
+        constexpr uint32_t kFormatVersion = 4;      // bump whenever the layout or the meaning of what is written below changes
 
         constexpr uint32_t kDerivedMagic = 0x44534F45;  // "EOSD"
         constexpr uint32_t kDerivedFormatVersion = 1;
