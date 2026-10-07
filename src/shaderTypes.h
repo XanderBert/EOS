@@ -153,6 +153,113 @@ namespace EOS
     };
 
     /**
+     * @brief What a field of a Slang pass (eos.pass) is: a pin, a value the engine fills, or a property.
+     */
+    enum class ShaderPassFieldKind : uint8_t
+    {
+        // Pins.
+        Texture,                // DescriptorHandle<Texture*>
+        StorageTexture,         // DescriptorHandle<RWTexture*>
+        Buffer,                 // a pointer
+        Scene,                  // a pointer to eos.scene's Scene: the scene a gltfScene node loads
+        DepthTarget,            // eos.pass's DepthTarget: the depth attachment, no push-constant space
+        ColorTarget,            // a field of the fragment shader's output
+
+        // Filled by the engine.
+        Sampler,                // DescriptorHandle<SamplerState>: a sampler of [Sampler]'s description
+
+        // Properties.
+        Bool,
+        Int,
+        UInt,
+        Float,
+        Float2,
+        Float3,
+        Float4,
+        Enum,
+    };
+
+    enum class ShaderPassDirection : uint8_t
+    {
+        None,                   // not a pin
+        Input,
+        Output,
+        InOut,
+    };
+
+    /**
+     * @brief A field of the [Pass] struct of a Slang pass, or a color target of its fragment shader, with its attributes.
+     */
+    struct ShaderPassField final
+    {
+        std::string Name;
+        ShaderPassFieldKind Kind = ShaderPassFieldKind::Float;
+        ShaderPassDirection Direction = ShaderPassDirection::None;
+        uint32_t Offset = 0;                    // in the push constants; a color target's location
+        bool Optional = false;
+
+        // Outputs.
+        std::string Format;                     // a name of formatNames.h; empty for the swapchain's format
+        float Scale = 1.0f;
+        uint32_t Width = 0;                     // [Size]: a fixed size instead of Scale; 0 when none
+        uint32_t Height = 0;
+        uint32_t Layers = 1;                    // [Layers]: an array texture, rendered into a layer per triangle
+        std::string SizeOf;
+        std::string Bypass;
+        std::array<float, 4> Clear{0.0f, 0.0f, 0.0f, 0.0f};
+        uint32_t BufferSize = 0;                // pointer outputs: the size of what it points to
+        std::string BufferType;                 // pointers: the name of the type they point to ("Scene", "View")
+
+        // Depth pins (a DepthTarget, or a texture input marked [DepthTest]): an EOS::CompareOp, -1 for the default.
+        int8_t DepthCompare = -1;
+
+        // Samplers ([Sampler]): an EOS::SamplerFilter (min, mag and mip) and an EOS::SamplerWrap.
+        uint8_t SamplerFilter = 1;
+        uint8_t SamplerAddress = 0;
+
+        // Properties.
+        float Minimum = 0.0f;                   // [Range]; none when equal
+        float Maximum = 0.0f;
+        double Default = 0.0;                   // scalars
+        std::vector<std::string> EnumNames{};   // enums, with the value of each case
+        std::vector<int64_t> EnumValues{};
+
+        bool operator==(const ShaderPassField&) const = default;
+    };
+
+    /**
+     * @brief A fragment entry point of a raster pass, and the materials it draws ([DrawScene] passes, eos.scene).
+     */
+    struct ShaderPassFragment final
+    {
+        std::string EntryPoint;
+        uint8_t Materials = 0x7;                // bit (1 << AlphaMode): the alpha modes of the instances it draws
+
+        bool operator==(const ShaderPassFragment&) const = default;
+    };
+
+    /**
+     * @brief The render graph pass a Slang module declares (eos.pass), when its push constants are a [Pass] struct.
+     */
+    struct ShaderPassReflection final
+    {
+        bool IsPass = false;
+        std::vector<ShaderPassField> Fields{};  // push-constant fields in offset order, then color targets by location
+
+        // Compute passes: [DispatchThreads], or [DispatchSizeOf] a texture pin, else the first storage texture output.
+        std::array<uint32_t, 3> DispatchThreads{0, 0, 0};
+        std::string DispatchSizeOf;
+
+        // Raster passes.
+        std::vector<ShaderPassFragment> Fragments{};
+        bool DrawScene = false;                 // [DrawScene]: draws the scene on its Scene pin
+        uint8_t Cull = 0;                       // [Cull]: an EOS::CullMode
+        bool DepthClamp = false;                // [DepthClamp]
+
+        bool operator==(const ShaderPassReflection&) const = default;
+    };
+
+    /**
      * @brief A fully compiled shader program with its reflection.
      */
     struct CompiledShaderProgram final
@@ -164,6 +271,7 @@ namespace EOS
         std::vector<ShaderSourceDependency> Dependencies{};
         std::string CompilerVersion{};          // Slang build tag the program was compiled with
         uint32_t PushConstantSize = 0;          // largest push-constant block of any entry point
+        ShaderPassReflection Pass{};            // the render graph pass the module declares, if any
 
         [[nodiscard]] const ShaderEntryPoint* FindEntryPoint(std::string_view name) const
         {

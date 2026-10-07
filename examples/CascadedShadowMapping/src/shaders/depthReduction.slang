@@ -1,18 +1,19 @@
 import eos.bindless;
 import eos.core;
+import eos.pass;
 import shadowCommon;
 
-[CppExport]
-public struct DepthReductionPushConstants
+// Finds the depth range of the visible scene: every 16x16 group reduces its pixels to one min/max in shared memory and a
+// wave, and one lane folds it into the result with atomics. The dispatch is one thread per pixel of the depth.
+[Pass]
+[DispatchSizeOf("depth")]
+struct DepthReduction
 {
-    public DepthReductionData*          depthRange;
-    public DescriptorHandle<Texture2D>  depthTexture;
-    public uint                         width;
-    public uint                         height;
-    public uint                         numGroupsX;
+    [Input] DescriptorHandle<Texture2D> depth;
+    [InOut] DepthReductionData*         depthRange;     // reset to {1, 0} by resetDepthRange before this pass
 };
 
-[[vk::push_constant]] DepthReductionPushConstants pc;
+[[vk::push_constant]] DepthReduction pass;
 
 // Two Stage strategy:
 // each group reduces its assigned tiles into one result,
@@ -22,43 +23,29 @@ groupshared float gsMinDepth[256];
 groupshared float gsMaxDepth[256];
 
 
-[numthreads(256, 1, 1)]
+[numthreads(16, 16, 1)]
 [shader("compute")]
 void computeMain(
     uint3 dispatchThreadID : SV_DispatchThreadID,
-    uint3 groupID          : SV_GroupID,
     uint  localIndex       : SV_GroupIndex)
 {
     // ---------------------------------------------------------------------------
     // Phase 1 — each thread checks its own pixel
     // ---------------------------------------------------------------------------
 
-    // Map flat 256-thread group back to a 16x16 logical tile position.
-    uint lx = localIndex % 16;
-    uint ly = localIndex / 16;
-
-    // This group's starting pixel in the texture.
-    uint startX = groupID.x * 16 + lx;
-    uint startY = groupID.y * 16 + ly;
-
-    // Stride by the full dispatch so groups tile the image.
-    uint strideX = pc.numGroupsX * 16;
+    uint2 depthSize;
+    pass.depth.GetDimensions(depthSize.x, depthSize.y);
 
     float lMin = 1.0;
     float lMax = 0.0;
 
-    // X stride loop handles widths that aren't a multiple of (numGroupsX * 16).
-    for (uint x = startX; x < pc.width; x += strideX)
+    if (all(dispatchThreadID.xy < depthSize))
     {
-        uint y = startY;
-        if (y < pc.height)
+        float d = pass.depth.Load(int3(dispatchThreadID.xy, 0)).r;
+        if (d < 1.0) // skip clear / sky pixels
         {
-            float d = pc.depthTexture.Load(int3(x, y, 0)).r;
-            if (d < 1.0) // skip clear / sky pixels
-            {
-                lMin = min(lMin, d);
-                lMax = max(lMax, d);
-            }
+            lMin = d;
+            lMax = d;
         }
     }
 
@@ -113,11 +100,11 @@ void computeMain(
         // we only want one lane to write to the output buffer, so we pick lane 0.
         if (WaveIsFirstLane())
         {
-            Ptr<DepthReductionData> outPtr = pc.depthRange;
+            Ptr<DepthReductionData> outPtr = pass.depthRange;
 
             // Atomic float min/max via uint bit-cast. Depths are non-negative, and non-negative
             // IEEE floats sort identically to their uint bits, so no bit flipping is needed and the
-            // buffer holds plain floats (reset to {1.0, 0.0} on the CPU, read as floats in cascadeSetup).
+            // buffer holds plain floats (reset to {1.0, 0.0} by resetDepthRange, read as floats in cascadeSetup).
             // https://www.jeremyong.com/graphics/2023/09/05/f32-interlocked-min-max-hlsl/
             InterlockedMin(((Ptr<uint>)outPtr)[0], asuint(waveMin)); // performs an atomic min of value to memory
             InterlockedMax(((Ptr<uint>)outPtr)[1], asuint(waveMax)); // performs an atomic max of value to memory

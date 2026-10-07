@@ -1,3 +1,15 @@
+// A triangle in three colors: the smallest render graph pass written in Slang. It has a vertex shader of its own, so
+// the pass draws its 3 vertices.
+import eos.pass;
+
+[Pass]
+struct Triangle
+{
+    [Range(0.1, 2.0)] float scale = 1.0;
+};
+
+[[vk::push_constant]] Triangle pass;
+
 struct VertexOutput
 {
     float4 position : SV_Position;
@@ -22,13 +34,20 @@ static const float3 colors[3] =
 VertexOutput vertexMain(uint vertexID : SV_VertexID)
 {
     VertexOutput output;
-    output.position = float4(positions[vertexID], 0.0, 1.0);
+    output.position = float4(positions[vertexID] * pass.scale, 0.0, 1.0);
     output.color    = colors[vertexID];
     return output;
 }
 
-[shader("fragment")]
-float4 fragmentMain(VertexOutput input) : SV_Target
+struct Targets
 {
-    return float4(input.color, 1.0);
+    [Output] [Clear(0.36, 0.4, 1.0, 0.28)] float4 color : SV_Target0;
+};
+
+[shader("fragment")]
+Targets fragmentMain(VertexOutput input)
+{
+    Targets targets;
+    targets.color = float4(input.color, 1.0);
+    return targets;
 }

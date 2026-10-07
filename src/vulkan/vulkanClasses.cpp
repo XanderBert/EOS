@@ -269,7 +269,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
             .imageView = depthTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer, descDepth.LayerCount),
-            .imageLayout = descDepth.ReadOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .imageLayout = descDepth.ReadOnly ? VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -2132,7 +2132,7 @@ void VulkanStagingDevice::ImageData2D(const VulkanImage &image, const VkRect2D &
                 planeOffset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, plane); //TODO Should also take into account of YUV images which are not supported yet.
             }
 
-            // 3. Transition TRANSFER_DST_OPTIMAL into SHADER_READ_ONLY_OPTIMAL
+            // 3. Transition TRANSFER_DST_OPTIMAL into READ_ONLY_OPTIMAL
             image.InsertMemoryBarrier(wrapper->VulkanCommandBuffer, EOS::CopyDest, EOS::ShaderResource, VkImageSubresourceRange{imageAspect, currentMipLevel, 1, currentLayer, 1});
             offset += VkContext::GetTextureBytesPerLayer(imageRegion.extent.width, imageRegion.extent.height, texFormat, currentMipLevel);
         }
@@ -2293,6 +2293,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
         .Data                   = &pixel,
         .DebugName              = "Dummy Texture",
     });
+
+    // Fills the sampler slots nothing is in, as the dummy texture fills the texture slots.
+    DummySampler = CreateSampler({.debugName = "Dummy Sampler"});
 }
 
 VulkanContext::~VulkanContext()
@@ -2322,6 +2325,7 @@ VulkanContext::~VulkanContext()
 
     vkDestroySemaphore(VulkanDevice, TimelineSemaphore, nullptr);
     DummyTexture.Reset();
+    DummySampler.Reset();
 
     const auto clearPool = [](auto& pool, const char* leakedObjectName)
     {
@@ -4661,7 +4665,7 @@ void VulkanContext::UpdateDescriptorSet()
 
     // use dummies to avoid sparse arrays
     VkImageView dummyImageView = TexturePool.At(DummyTexture.Index()).ImageView;
-    VkSampler dummySampler = SamplerPool.At(0);
+    VkSampler dummySampler = SamplerPool.At(DummySampler.Index());
 
 
     // 1. Sampled and Storage images
@@ -4685,7 +4689,7 @@ void VulkanContext::UpdateDescriptorSet()
         {
             .sampler = VK_NULL_HANDLE,
             .imageView = isSampledImage ? view : dummyImageView,
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
         });
 
         CHECK(infoSampledImages.back().imageView != VK_NULL_HANDLE, "sampled Image is not valid");

@@ -1,3 +1,1 @@
 CREATE_EXAMPLE(EdgeDetection)
-eos_require_fastgltf(EdgeDetection)
-eos_require_glm(EdgeDetection)

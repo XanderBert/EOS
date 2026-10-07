@@ -1,31 +1,9 @@
 #include "../../Common/App.h"
 #include ".generated/compute.h"
 
-struct Resources final
-{
-    EOS::ShaderProgramHolder ComputeShader;
-    EOS::BufferHolder ComputeBuffer;
-    EOS::ComputePipelineHolder ComputePipeline;
-};
-
-Resources Handles;
-
 int main()
 {
-    const EOS::ContextCreationDescription contextDescr
-    {
-        .Config                 = { .EnableValidationLayers = true },
-        .PreferredHardwareType  = EOS::HardwareDeviceType::Discrete,
-        .ApplicationName        = "EOS - Compute Pipeline",
-    };
-
-    ExampleAppDescription appDescription
-    {
-        .contextDescription = contextDescr,
-    };
-
-    ExampleApp App{appDescription};
-    Handles.ComputeShader = App.Context->CreateShaderProgram({.Module = "compute"});
+    ExampleApp App{{.Name = "EOS - Compute Pipeline"}};
 
     constexpr ComputePayload initialPayload
     {
@@ -34,7 +12,8 @@ int main()
         .result = 0,
     };
 
-    Handles.ComputeBuffer = App.Context->CreateBuffer({
+    // Host visible, so the result can be read back after the frame.
+    const EOS::BufferHolder payloadBuffer = App.Context->CreateBuffer({
         .Usage     = EOS::BufferUsageFlags::StorageFlag,
         .Storage   = EOS::StorageType::HostVisible,
         .Size      = sizeof(ComputePayload),
@@ -42,29 +21,19 @@ int main()
         .DebugName = "ComputePayloadBuffer",
     });
 
-    const EOS::ComputePipelineDescription computePipelineDescription
-    {
-        .ComputeShader = {Handles.ComputeShader, "computeMain"},
-        .DebugName = "Compute Validation Pipeline",
-    };
-    Handles.ComputePipeline = App.Context->CreateComputePipeline(computePipelineDescription);
+    // The frame is graphs/compute.yaml; its pass is shaders/compute.slang. This example checks the result, so it runs
+    // its own loop instead of App.Run(file).
+    EOS::GraphFile& graphFile = App.LoadGraphFile("compute");
 
     App.Run([&]()
     {
         // A graph without a swapchain image: Execute() submits without presenting.
         EOS::RenderGraph& graph = *App.Graph;
-        const EOS::GraphBuffer payload = graph.ImportBuffer(Handles.ComputeBuffer, "ComputePayloadBuffer");
-
-        graph.AddComputePass("Compute Validation").Write(payload).Execute([payload](EOS::PassContext& pass)
-        {
-            cmdBindComputePipeline(pass.Cmd, Handles.ComputePipeline);
-            cmdPushConstants(pass.Cmd, ComputePushConstants{.payload = pass.Address(payload)});
-            cmdDispatchThreadGroups(pass.Cmd, {1, 1, 1});
-        });
+        graphFile.AddTo(graph, {{"payload", graph.ImportBuffer(payloadBuffer, "ComputePayloadBuffer")}});
 
         App.Context->Wait(graph.Execute());
 
-        const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(Handles.ComputeBuffer));
+        const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(payloadBuffer));
         if (computeData->result == computeData->lhs * computeData->rhs)
         {
             EOS::Logger->info("Compute validation success: {} * {} = {}", computeData->lhs, computeData->rhs, computeData->result);
@@ -75,8 +44,6 @@ int main()
             EOS::Logger->error("Compute validation failed: {} * {} != {}", computeData->lhs, computeData->rhs, computeData->result);
         }
     });
-
-    Handles = {};
 
     return 0;
 }

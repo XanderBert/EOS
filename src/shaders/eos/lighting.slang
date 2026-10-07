@@ -2,8 +2,11 @@
 // Lights carry radiometric quantities: the color times the intensity, in linear RGB.
 module "eos/lighting";
 
+import eos.core;
 import eos.bsdf;
 
+// What a sun graph node (EOS::RegisterSunPass) hands passes on its light pin.
+[CppExport]
 public struct DirectionalLight
 {
     public float3 direction;    // direction the light travels in, unit length

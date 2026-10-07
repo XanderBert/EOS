@@ -1,0 +1,7 @@
+# The frame of the compute example: one compute pass, written in Slang (../shaders/compute.slang), that changes the
+# payload buffer main.cpp hands over and reads back.
+passes:
+  Compute Validation: { type: compute }
+
+edges:
+  - payload -> Compute Validation.payload

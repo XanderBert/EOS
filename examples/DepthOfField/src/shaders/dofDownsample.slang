@@ -1,24 +1,27 @@
+// Depth of field, 1/3: the scene at half resolution, with the circle of confusion in alpha.
 import eos.core;
+import eos.pass;
 import dofCommon;
 
-[CppExport]
-public struct DofDownsamplePC
+[Pass]
+struct DofDownsample
 {
-    public DescriptorHandle<Texture2D>           sceneColor;
-    public DescriptorHandle<Texture2D>           worldPos;
-    public DescriptorHandle<SamplerState>        samplerState;
-    public DescriptorHandle<RWTexture2D<float4>> outputImage;
-    public float focusDistance;
-    public float focusRange;
+    [Input] DescriptorHandle<Texture2D> color;
+    [Input] DescriptorHandle<Texture2D> worldPos;
+    [Output] [Format("RGBA_F16")] [Scale(0.5)] [SizeOf("color")] DescriptorHandle<RWTexture2D<float4>> output;
+    DescriptorHandle<SamplerState> linearSampler;
+
+    [Range(0.1, 25.0)] float focusDistance = 6.0;
+    [Range(0.1, 20.0)] float focusRange = 3.0;
 };
 
-[[vk::push_constant]] DofDownsamplePC pc;
+[[vk::push_constant]] DofDownsample pass;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    const RWTexture2D<float4> outputImage = pc.outputImage;
+    const RWTexture2D<float4> outputImage = pass.output;
     uint2 imageSize;
     outputImage.GetDimensions(imageSize.x, imageSize.y);
 
@@ -37,9 +40,9 @@ void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     for (int i = 0; i < 4; ++i)
     {
         const float2 sampleUV = uv + offsets[i] * texel;
-        const float3 worldPos = pc.worldPos.SampleLevel(pc.samplerState, sampleUV, 0.0).xyz;
-        coc = max(coc, ComputeCoC(length(worldPos), pc.focusDistance, pc.focusRange));
-        color += pc.sceneColor.SampleLevel(pc.samplerState, sampleUV, 0.0).rgb;
+        const float3 worldPos = pass.worldPos.SampleLevel(pass.linearSampler, sampleUV, 0.0).xyz;
+        coc = max(coc, ComputeCoC(length(worldPos), pass.focusDistance, pass.focusRange));
+        color += pass.color.SampleLevel(pass.linearSampler, sampleUV, 0.0).rgb;
     }
 
     outputImage[pixelCoord] = float4(color * 0.25, coc);

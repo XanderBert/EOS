@@ -1,0 +1,23 @@
+# The frame of the shadow mapping example. lightView is a pass type written in C++ (main.cpp): it turns the sun into
+# the View of a light at a position, which the shadow map is rendered with. The other pass types are the Slang files in
+# ../shaders; gltfScene, flyCamera and sun come with the engine.
+passes:
+  Camera:     { type: flyCamera, origin: [0, 1, 0], speed: 100 }
+  Sponza:     { type: gltfScene, path: sponza/Sponza.gltf }
+  Sun:        { type: sun, rotation: [-73, -90], intensity: 3 }
+  Light View: { type: lightView, position: [0, 20, 20], extent: 25, near: 0.1, far: 50 }
+  Shadow:     { type: shadowDepth }
+  Shade:      { type: shade, ambient: 0.3 }
+
+edges:
+  - Sun.light          -> Light View.light
+
+  - Sponza.scene       -> Shadow.scene
+  - Light View.view    -> Shadow.view
+
+  - Sponza.scene       -> Shade.scene
+  - Camera.view        -> Shade.view
+  - Light View.view    -> Shade.lightView
+  - Sun.light          -> Shade.sun
+  - Shadow.shadowMap   -> Shade.shadowMap
+  - Shade.color        -> swapchain

@@ -3,27 +3,24 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <initializer_list>
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include <glm/glm.hpp>
 
-#include "graphFileDescription.h"
 #include "renderGraph.h"
 
 // The data layer of the render graph, in the style of Falcor's render passes and graph scripts. C++ registers pass
 // types: named pins (the textures and buffers a pass reads and writes), properties, and the function that records the
 // pass. A graph file (YAML) says which passes a frame has, their property values and how their pins are connected. It is
-// what a node editor would save: passes are nodes, edges are wires.
-//
-// Graph files are authored in the editor and built into the application: the build turns each one into a header,
-// .generated/graphs/<file>.h, with the file as constants (graphFileDescription.h). With EOS_GRAPH_TOOLS (the editor),
-// GraphFile reads the YAML itself, and GraphFile::Reload() picks up changes to it. Without (a shipping build), it uses
-// the generated constants: no YAML is read or parsed.
+// what a node editor would save: passes are nodes, edges are wires. GraphFile reads the YAML at runtime, and
+// GraphFile::Reload() picks up changes to it.
 //
 //     passes:
 //       Geometry: { type: GBuffer }
@@ -86,6 +83,8 @@ namespace EOS
     {
         float Scale = 1.0f;                         // of the swapchain size, or of SizeOf's texture
         const char* SizeOf = "";                    // an input pin: this output is that texture's size times Scale
+        uint32_t Width = 0;                         // a fixed size instead (shadow maps); 0 when it follows the window
+        uint32_t Height = 0;
         std::array<float, 4> ClearColor{0.0f, 0.0f, 0.0f, 0.0f};
         float ClearDepth = 1.0f;
         uint8_t LayerCount = 1;                     // layers a target renders at once (a shader picks one per triangle)
@@ -100,6 +99,8 @@ namespace EOS
         bool Optional = false;                      // inputs that may stay unconnected
         Format TextureFormat = Format::Invalid;     // outputs; Format::Invalid is the swapchain's format
         size_t BufferSize = 0;                      // buffer outputs
+        const char* BufferType = "";                // buffers: what they hold ("Scene", "View"); only pins of the same
+                                                    // type connect, and one without a type connects to any buffer
         OutputOptions Output{};
     };
 
@@ -118,6 +119,13 @@ namespace EOS
         [[nodiscard]] constexpr PinDescription Optional(PinDescription pin)
         {
             pin.Optional = true;
+            return pin;
+        }
+
+        // A buffer pin that holds a type: see PinDescription::BufferType.
+        [[nodiscard]] constexpr PinDescription Typed(PinDescription pin, const char* bufferType)
+        {
+            pin.BufferType = bufferType;
             return pin;
         }
 
@@ -161,6 +169,7 @@ namespace EOS
         Float3,
         Float4,
         Choice,         // one of a list of names; the value is its index
+        String,         // text, such as a file path; set by graph files
     };
 
     struct PropertyValue final
@@ -168,6 +177,7 @@ namespace EOS
         glm::vec4 Float{0.0f};                      // Float to Float4: the components they use
         int32_t Int = 0;                            // Int, and Choice (the index)
         bool Bool = false;
+        const char* String = "";                    // stays valid while the graph file's version that set it is in use
     };
 
     struct PropertyDescription final
@@ -218,7 +228,24 @@ namespace EOS
         {
             return {.Name = name, .Type = PropertyType::Choice, .Default = {.Int = value}, .Choices = choices};
         }
+
+        // value has to stay valid while the pass type is registered (a string literal).
+        [[nodiscard]] inline PropertyDescription String(const char* name, const char* value = "")
+        {
+            return {.Name = name, .Type = PropertyType::String, .Default = {.String = value}};
+        }
     }
+
+    /**
+     * @brief How [DrawScene] passes (eos.scene) draw a scene: what a scene node hands out with its scene buffer.
+     */
+    struct SceneDrawData final
+    {
+        BufferHandle IndexBuffer;                   // 32-bit indices
+        BufferHandle IndirectBuffer;                // a DrawIndexedIndirectCommand per instance, whose firstInstance is its index
+        std::array<uint32_t, 3> FirstInstance{};    // per alpha mode (opaque, alpha-tested, blended), instances are sorted by it
+        std::array<uint32_t, 3> InstanceCount{};
+    };
 
     /**
      * @brief What a pass function gets besides the PassContext: the resources on its pins and its property values.
@@ -233,15 +260,31 @@ namespace EOS
         [[nodiscard]] GraphTexture Texture(std::string_view pin) const;
         [[nodiscard]] GraphBuffer Buffer(std::string_view pin) const;
 
+        // How to draw the scene on a buffer pin; nullptr when what is connected is not a scene.
+        [[nodiscard]] const SceneDrawData* Scene(std::string_view pin) const;
+
+        // What a C++ pass type uploaded this frame into the buffer on a pin (PassSetup::Upload), for C++ pass types
+        // downstream to read: the camera's View, the sun's DirectionalLight. nullptr when the buffer comes from
+        // elsewhere (a Slang pass writes it on the GPU) or holds something of another size.
+        template<typename T>
+        [[nodiscard]] const T* Host(std::string_view pin) const
+        {
+            static_assert(std::is_trivially_copyable_v<T>, "Uploaded data is copied byte for byte");
+            return static_cast<const T*>(HostData(pin, sizeof(T)));
+        }
+        [[nodiscard]] const void* HostData(std::string_view pin, size_t size) const;
+
         [[nodiscard]] bool Bool(std::string_view property) const;
         [[nodiscard]] int32_t Int(std::string_view property) const; // also a Choice's index
         [[nodiscard]] float Float(std::string_view property) const;
         [[nodiscard]] glm::vec2 Float2(std::string_view property) const;
         [[nodiscard]] glm::vec3 Float3(std::string_view property) const;
         [[nodiscard]] glm::vec4 Float4(std::string_view property) const;
+        [[nodiscard]] const char* String(std::string_view property) const;
 
     private:
         friend struct GraphFileData;
+        friend class PassSetup;
         PassData(const GraphFileData& file, uint32_t pass) : File(file), Pass(pass) {}
 
         [[nodiscard]] uint32_t FindPin(std::string_view pin) const;
@@ -253,6 +296,44 @@ namespace EOS
 
     using PassTypeFunction = std::function<void(PassContext& context, const PassData& data)>;
 
+    /**
+     * @brief What a pass type's Setup function gets: called while a graph file's passes are added to a frame, before the
+     *        graph creates the pass's outputs. A pass that owns its resources (a scene, a camera) hands them out on its
+     *        output pins here, imported into the graph or written by passes Setup adds (RenderGraph::AddUpload).
+     */
+    class PassSetup final
+    {
+    public:
+        RenderGraph& Graph;
+        const PassData& Data;
+
+        // The resource on an output pin, instead of one the graph creates. scene: how [DrawScene] passes draw it.
+        void Output(std::string_view pin, GraphTexture texture);
+        void Output(std::string_view pin, GraphBuffer buffer, const SceneDrawData* scene = nullptr);
+
+        // Uploads value into a buffer of this frame and hands it out on an output pin, with a copy C++ pass types
+        // downstream can read (PassData::Host).
+        template<typename T>
+        void Upload(std::string_view pin, const T& value)
+        {
+            const GraphBuffer buffer = Graph.CreateBuffer({.Size = sizeof(T), .DebugName = Data.Name()});
+            Graph.AddUpload(Data.Name(), buffer, value);
+            Output(pin, buffer, &value, sizeof(T));
+        }
+
+    private:
+        friend struct GraphFileData;
+        PassSetup(RenderGraph& graph, const PassData& data, GraphFileData& file, uint32_t pass) : Graph(graph), Data(data), File(file), Pass(pass) {}
+
+        // Copies host into storage that lasts until the file's passes are added to the next frame.
+        void Output(std::string_view pin, GraphBuffer buffer, const void* host, size_t size);
+
+        GraphFileData& File;
+        uint32_t Pass;
+    };
+
+    using PassSetupFunction = std::function<void(PassSetup& setup)>;
+
     struct PassTypeDescription final
     {
         const char* Name = "";
@@ -260,15 +341,23 @@ namespace EOS
         std::vector<PinDescription> Pins{};
         std::vector<PropertyDescription> Properties{};
         PassTypeFunction Execute;                   // recorded like a PassBuilder::Execute function
+        PassSetupFunction Setup;                    // optional; a type with Setup may have no Execute, it adds no pass then
     };
 
     /**
-     * @brief The pass types graph files can use. Register every type before loading a graph file that uses it.
+     * @brief The pass types graph files can use.
+     *
+     * Two kinds: pass types registered from C++ (Register), and passes written in Slang (eos.pass), which the registry
+     * loads by module name the first time a graph file uses one (`type: dofComposite` loads dofComposite.slang). A
+     * Slang pass's pins, properties and pipeline come from its shader; the registry creates the pipeline, fills the push
+     * constants and records the dispatch or the fullscreen draw. When a hot reload changes a Slang pass's pins or
+     * properties, it registers the pass again, and graph files using it are resolved again.
      */
     class PassRegistry final
     {
     public:
-        PassRegistry();
+        // Without a context only C++ pass types are available.
+        explicit PassRegistry(IContext* context = nullptr);
         ~PassRegistry();
         DELETE_COPY_MOVE(PassRegistry)
 
@@ -302,7 +391,18 @@ namespace EOS
         const char* Name = "";
         const char* Type = "";
         bool* Enabled = nullptr;
+        uint32_t PinCount = 0;
         uint32_t PropertyCount = 0;
+    };
+
+    /**
+     * @brief A pin of a pass of a graph file, for UIs that show it.
+     */
+    struct GraphFilePin final
+    {
+        const char* Name = "";
+        PinDirection Direction = PinDirection::Input;
+        PinUsage Usage = PinUsage::Sampled;
     };
 
     /**
@@ -319,16 +419,17 @@ namespace EOS
     };
 
     /**
-     * @brief A graph file, from its generated header: `GraphFile file{registry, DepthOfFieldGraph};`.
+     * @brief A graph file: `GraphFile file{registry, "graphs/depthOfField.yaml"};`.
      *
      * A file with errors is reported (path:line:column, like a compiler) and the last version without errors stays in
-     * use, so a typo while editing never takes the frame down.
+     * use, so a typo while editing never takes the frame down. When the first version read has errors, the file's
+     * passes do not run until a Reload() finds it fixed.
      */
     class GraphFile final
     {
     public:
-        // file has to outlive the GraphFile (the generated constants do).
-        GraphFile(const PassRegistry& registry, const GraphFileDescription& file);
+        // registry loads the Slang passes the file names.
+        GraphFile(PassRegistry& registry, std::filesystem::path path);
         ~GraphFile();
         DELETE_COPY_MOVE(GraphFile)
 
@@ -340,10 +441,10 @@ namespace EOS
         void AddTo(RenderGraph& graph, std::initializer_list<GraphResource> resources);
 
         /**
-         * @brief Loads the YAML file again when it changed on disk since it was last read, like
-         *        IContext::ReloadShaders() (the examples bind both to the same key). Can be called at any time: the new
-         *        version is used from the next AddTo on. A version with errors is reported and the one in use stays.
-         *        Does nothing without EOS_GRAPH_TOOLS.
+         * @brief Loads the YAML file again when it changed on disk since it was last read, or when that read had errors
+         *        (they may have been in a Slang pass fixed since), like IContext::ReloadShaders() (the examples bind both
+         *        to the same key). Can be called at any time: the new version is used from the next AddTo on. A version
+         *        with errors is reported and the one in use stays.
          * @return Whether a new version was loaded.
          */
         bool Reload();
@@ -356,8 +457,8 @@ namespace EOS
         [[nodiscard]] GraphTexture GetTexture(std::string_view pin) const;
         [[nodiscard]] GraphBuffer GetBuffer(std::string_view pin) const;
 
-        // Changes made from code or a UI last until the file is reloaded. Return false when there is no such pass or
-        // property (a property of another type counts as none).
+        // Changes made from code or a UI last until the file is reloaded; set every frame, they also hold across
+        // reloads. Return false when there is no such pass or property (a property of another type counts as none).
         bool SetEnabled(std::string_view pass, bool enabled);
         bool SetProperty(std::string_view pass, std::string_view property, bool value);
         bool SetProperty(std::string_view pass, std::string_view property, int32_t value);
@@ -366,6 +467,7 @@ namespace EOS
         // For UIs that edit the file's passes. Pointers stay valid until a reloaded version is put in use (AddTo).
         [[nodiscard]] uint32_t GetPassCount() const;
         [[nodiscard]] GraphFilePass GetPass(uint32_t pass);
+        [[nodiscard]] GraphFilePin GetPin(uint32_t pass, uint32_t pin) const;
         [[nodiscard]] GraphFileProperty GetProperty(uint32_t pass, uint32_t property);
 
     private:

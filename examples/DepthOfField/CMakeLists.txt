@@ -1,3 +1,1 @@
 CREATE_EXAMPLE(DepthOfField)
-eos_require_fastgltf(DepthOfField)
-eos_require_glm(DepthOfField)

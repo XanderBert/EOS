@@ -542,6 +542,17 @@ namespace EOS
         return Graph->Textures[texture.Index].Size;
     }
 
+    const GraphTextureDescription& RenderGraph::GetDescription(GraphTexture texture) const
+    {
+        CHECK(texture.Index < Graph->Textures.size(), "Invalid graph texture");
+        return Graph->Textures[texture.Index].Description;
+    }
+
+    bool RenderGraph::IsSwapchain(GraphTexture texture) const
+    {
+        return texture.Valid() && texture == Graph->Swapchain;
+    }
+
     GraphTexture RenderGraph::ImportSwapchain()
     {
         if (Graph->Swapchain.Valid()) return Graph->Swapchain;
@@ -731,7 +742,8 @@ namespace EOS
 
             if (colorTarget) return {ResourceState::RenderTarget, true};
             if (depthTarget) return {ResourceState::DepthWrite, true};
-            if (depthReadOnly) return {ResourceState::DepthRead, false};   // the read-only depth layout can also be sampled
+            // The read-only depth layout can also be sampled.
+            if (depthReadOnly) return {sampled ? static_cast<ResourceState>(ResourceState::DepthRead | ResourceState::ShaderResource) : ResourceState::DepthRead, false};
             if (storage) return {storageState, true};                      // GENERAL, which can also be sampled
             if (copyDest) return {ResourceState::CopyDest, true};
             if (copySource) return {ResourceState::CopySource, false};

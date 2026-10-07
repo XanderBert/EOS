@@ -1,24 +1,37 @@
-# The frame of the depth of field example. Edit it while the example runs and press '-' to reload it (and the shaders).
+# The frame of the depth of field example, and all there is to it: main.cpp only runs this file. Edit it while the
+# example runs and press '-' to reload it (and the shaders).
 #
-# The pass types are registered in main.cpp. An edge connects an output pin to an input pin ("Pass.pin");
-# a name without a dot is a resource main.cpp hands over (swapchain, perFrame).
+# gltfScene and flyCamera are nodes the engine provides; the other pass types are the Slang files in ../shaders, used by
+# module name, whose [Pass] struct declares their pins and properties. An edge connects an output pin to an input pin
+# ("Pass.pin"); swapchain is the window's image.
 # Try disabling "DOF Composite" (enabled: false): Present then gets the lit scene through the composite's bypass.
 
 passes:
-  Geometry:          { type: GBuffer }
-  Deferred Lighting: { type: DeferredLighting, debugView: Lit }
-  DOF Downsample:    { type: DofDownsample }
-  DOF Blur H:        { type: DofBlur, direction: Horizontal }
-  DOF Blur V:        { type: DofBlur, direction: Vertical }
-  DOF Composite:     { type: DofComposite }
-  Present:           { type: Present }
+  Camera:  { type: flyCamera, origin: [0, 1, 0], speed: 100 }
+  Sponza:  { type: gltfScene, path: sponza/Sponza.gltf }
+  Geometry:
+    type: gbuffer
+  Deferred Lighting:
+    type: deferredLightCompute
+    debugView: Lit
+    lightDirection: [-0.4, -1.0, -0.3]
+    lightIntensity: 1.0
+    lightColor: [1.0, 0.98, 0.92]
+    ambient: 0.3
+  DOF Downsample: { type: dofDownsample, focusDistance: 6.0, focusRange: 3.0 }
+  DOF Blur H:     { type: dofBlur, direction: Horizontal, maxBlurRadius: 1.0 }
+  DOF Blur V:     { type: dofBlur, direction: Vertical, maxBlurRadius: 1.0 }
+  DOF Composite:  { type: dofComposite, focusDistance: 6.0, focusRange: 3.0 }
+  Present:        { type: present }
 
 edges:
-  - perFrame                 -> Geometry.perFrame
+  - Sponza.scene             -> Geometry.scene
+  - Camera.view              -> Geometry.view
 
   - Geometry.albedo          -> Deferred Lighting.albedo
   - Geometry.normal          -> Deferred Lighting.normal
   - Geometry.worldPos        -> Deferred Lighting.worldPos
+  - Camera.view              -> Deferred Lighting.view
 
   - Deferred Lighting.output -> DOF Downsample.color
   - Geometry.worldPos        -> DOF Downsample.worldPos

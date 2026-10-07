@@ -1,7 +1,11 @@
 #include "UI.h"
+#include <algorithm>
 #include <cstdarg>
+#include <string>
 
+#include "formatNames.h"
 #include "renderGraphFile.h"
+#include ".generated/eos/preview.h"
 
 #if defined(EOS_USE_IMGUI)
 #include "imgui.h"
@@ -251,11 +255,181 @@ namespace EOS::UI
                     case PropertyType::Choice:
                         Combo(property.Name, &value.Int, property.Choices.data(), static_cast<int>(property.Choices.size()));
                         break;
+                    case PropertyType::String:
+                        Text("%s: %s", property.Name, value.String);
+                        break;
                 }
             }
             Unindent();
             PopID();
         }
+    }
+
+    // -------------------------------------------------------------------------------------------------------------------
+    // GraphFilePanel
+
+    namespace
+    {
+        // Formats a float sampler cannot read.
+        [[nodiscard]] bool IsIntegerFormat(Format format)
+        {
+            return format == Format::R_UI16 || format == Format::R_UI32 || format == Format::RG_UI16 || format == Format::RG_UI32 || format == Format::RGBA_UI32;
+        }
+
+        [[nodiscard]] bool IsSingleChannelFormat(Format format)
+        {
+            return IsDepthFormat(format) || format == Format::R_UN8 || format == Format::R_UN16 || format == Format::R_F16 || format == Format::R_F32;
+        }
+
+        constexpr uint32_t kPreviewWidth = 384;
+    }
+
+    struct GraphFilePanel::Implementation final
+    {
+        Implementation(IContext* context, GraphFile& file) : Context(context), File(file) {}
+
+        IContext* Context;
+        GraphFile& File;
+
+        std::string Previewed;                  // "Pass.pin"; empty for none
+        int Layer = 0;
+        float Range[2]{0.0f, 1.0f};
+
+        // What the last preview pass found.
+        bool Drawn = false;
+        bool Integer = false;
+        uint32_t LayerCount = 1;
+
+        TextureHolder Image;
+        Dimensions ImageSize{0, 0, 0};
+        ShaderProgramHolder Program;            // eos.preview
+        ShaderProgramHolder Fullscreen;         // eos.fullscreen's vertex shader
+        RenderPipelineHolder Pipeline;
+        SamplerHolder Sampler;
+    };
+
+    GraphFilePanel::GraphFilePanel(IContext* context, GraphFile& file)
+    : Impl(std::make_unique<Implementation>(context, file))
+    {
+    }
+
+    GraphFilePanel::~GraphFilePanel() = default;
+
+    GraphTexture GraphFilePanel::AddPreviewPass([[maybe_unused]] RenderGraph& graph)
+    {
+#if defined(EOS_USE_IMGUI)
+        Implementation& panel = *Impl;
+        panel.Drawn = false;
+        if (panel.Previewed.empty()) return {};
+
+        // Nothing when the pass did not run this frame; the swapchain cannot be sampled.
+        const GraphTexture source = panel.File.GetTexture(panel.Previewed);
+        if (!source.Valid() || graph.IsSwapchain(source)) return {};
+
+        const GraphTextureDescription& description = graph.GetDescription(source);
+        panel.Integer = IsIntegerFormat(description.TextureFormat);
+        if (panel.Integer) return {};
+
+        const bool array = description.Type == ImageType::Image_2D_Array;
+        panel.LayerCount = array ? description.NumberOfLayers : 1;
+        panel.Layer = std::clamp(panel.Layer, 0, static_cast<int>(panel.LayerCount) - 1);
+
+        const Dimensions size = graph.GetSize(source);
+        const uint32_t height = std::clamp(kPreviewWidth * size.Height / std::max(size.Width, 1u), 1u, 2 * kPreviewWidth);
+        if (!panel.Image.Valid() || panel.ImageSize.Width != kPreviewWidth || panel.ImageSize.Height != height)
+        {
+            panel.ImageSize = {kPreviewWidth, height, 1};
+            panel.Image = panel.Context->CreateTexture(
+            {
+                .TextureFormat = Format::RGBA_UN8,
+                .TextureDimensions = panel.ImageSize,
+                .Usage = TextureUsageFlags::Attachment | TextureUsageFlags::Sampled,
+                .DebugName = "Graph Preview",
+            });
+        }
+        if (panel.Pipeline.Empty())
+        {
+            panel.Program = panel.Context->CreateShaderProgram({.Module = "eos.preview"});
+            panel.Fullscreen = panel.Context->CreateShaderProgram({.Module = "eos.fullscreen"});
+            panel.Pipeline = panel.Context->CreateRenderPipeline(
+            {
+                .VertexShader = {panel.Fullscreen},
+                .FragmentShader = {panel.Program},
+                .ColorAttachments = {{.ColorFormat = Format::RGBA_UN8}},
+                .PipelineCullMode = CullMode::None,
+                .DebugName = "Graph Preview",
+            });
+            panel.Sampler = panel.Context->CreateSampler({.wrapU = SamplerWrap::Clamp, .wrapV = SamplerWrap::Clamp, .wrapW = SamplerWrap::Clamp, .maxAnisotropic = 0, .debugName = "Graph Preview"});
+        }
+
+        const GraphTexture image = graph.ImportTexture(panel.Image, "Graph Preview");
+        PreviewConstants constants
+        {
+            .samplerState = panel.Sampler,
+            .layer = static_cast<uint32_t>(panel.Layer),
+            .grey = IsSingleChannelFormat(description.TextureFormat) ? 1u : 0u,
+            .minimum = panel.Range[0],
+            .maximum = panel.Range[1],
+        };
+
+        graph.AddRasterPass("Graph Preview").Color(Clear(image)).Sample(source).Execute([&panel, source, array, constants](PassContext& pass) mutable
+        {
+            (array ? constants.textureArray : constants.texture) = pass.Descriptor(source);
+            cmdBindRenderPipeline(pass.Cmd, panel.Pipeline);
+            cmdPushConstants(pass.Cmd, constants);
+            cmdDraw(pass.Cmd, 3);
+        });
+
+        panel.Drawn = true;
+        return image;
+#else
+        return {};
+#endif
+    }
+
+    void GraphFilePanel::Declare()
+    {
+        Implementation& panel = *Impl;
+
+#if defined(EOS_USE_IMGUI)
+        // The preview first, so it stays in view above a long list of passes.
+        if (ImGui::BeginCombo("Preview", panel.Previewed.empty() ? "None" : panel.Previewed.c_str()))
+        {
+            if (ImGui::Selectable("None", panel.Previewed.empty())) panel.Previewed.clear();
+
+            // Every texture a pass writes.
+            for (uint32_t passIndex = 0; passIndex < panel.File.GetPassCount(); ++passIndex)
+            {
+                const GraphFilePass pass = panel.File.GetPass(passIndex);
+                for (uint32_t pinIndex = 0; pinIndex < pass.PinCount; ++pinIndex)
+                {
+                    const GraphFilePin pin = panel.File.GetPin(passIndex, pinIndex);
+                    if (pin.Direction == PinDirection::Input || IsBufferUsage(pin.Usage)) continue;
+
+                    const std::string name = std::string(pass.Name) + "." + pin.Name;
+                    if (ImGui::Selectable(name.c_str(), name == panel.Previewed)) panel.Previewed = name;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        if (!panel.Previewed.empty())
+        {
+            if (panel.Integer) Text("An integer format cannot be shown");
+            else if (!panel.Drawn) Text("Not written this frame (disabled, or the swapchain)");
+            else
+            {
+                if (panel.LayerCount > 1) SliderInt("Layer", &panel.Layer, 0, static_cast<int>(panel.LayerCount) - 1);
+                ImGui::DragFloatRange2("Range", &panel.Range[0], &panel.Range[1], 0.01f);
+                // As wide as the panel, at most at its own size.
+                const float width = std::min(ImGui::GetContentRegionAvail().x, static_cast<float>(panel.ImageSize.Width));
+                Image(MakeTextureID(panel.Image), width, width * static_cast<float>(panel.ImageSize.Height) / static_cast<float>(panel.ImageSize.Width));
+            }
+        }
+        Separator();
+#endif
+
+        GraphFileProperties(panel.File);
     }
 
     bool Checkbox([[maybe_unused]] const char* label, [[maybe_unused]] bool* value)

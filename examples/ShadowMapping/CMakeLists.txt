@@ -1,3 +1,1 @@
 CREATE_EXAMPLE(ShadowMapping)
-eos_require_fastgltf(ShadowMapping)
-eos_require_glm(ShadowMapping)

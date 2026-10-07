@@ -1,33 +1,29 @@
+// Copies a texture to the screen.
 import eos.core;
 import eos.fullscreen;
+import eos.pass;
 
-[CppExport]
-public struct PresentPC
+[Pass]
+struct Present
 {
-    public DescriptorHandle<Texture2D>    sceneColor;
-    public DescriptorHandle<SamplerState> samplerState;
+    [Input] DescriptorHandle<Texture2D> input;
+    DescriptorHandle<SamplerState> linearSampler;
 };
 
-[[vk::push_constant]] PresentPC pc;
+[[vk::push_constant]] Present pass;
 
-struct VSOutput
+struct Targets
 {
-    float4 Pos : SV_Position;
-    float2 UV  : TEXCOORD0;
+    [Output] [Clear(0.02, 0.02, 0.02, 1.0)] float4 output : SV_Target0;
 };
-
-[shader("vertex")]
-VSOutput vertexMain(uint id : SV_VertexID)
-{
-    VSOutput o;
-    FullscreenTriangle(id, o.UV, o.Pos);
-    return o;
-}
 
 [shader("fragment")]
-float4 fragmentMain(VSOutput input) : SV_Target
+Targets fragmentMain(FullscreenVaryings input)
 {
-    float2 uv = input.UV;
+    float2 uv = input.uv;
     uv.y = 1.0 - uv.y;
-    return pc.sceneColor.Sample(pc.samplerState, uv);
+
+    Targets targets;
+    targets.output = pass.input.Sample(pass.linearSampler, uv);
+    return targets;
 }

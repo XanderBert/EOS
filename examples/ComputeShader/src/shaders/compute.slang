@@ -1,4 +1,5 @@
 import eos.core;
+import eos.pass;
 
 [CppExport]
 public struct ComputePayload
@@ -9,24 +10,21 @@ public struct ComputePayload
     public uint pad;
 };
 
-[CppExport]
-public struct ComputePushConstants
+// Multiplies the payload's two numbers. It only has a buffer, so it says how many threads it dispatches.
+[Pass]
+[DispatchThreads(1, 1, 1)]
+struct ComputeValidation
 {
-    public ComputePayload* payload;
+    [InOut] ComputePayload* payload;
 };
 
-[[vk::push_constant]] ComputePushConstants pc;
+[[vk::push_constant]] ComputeValidation pass;
 
 [numthreads(1, 1, 1)]
 [shader("compute")]
 void computeMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    if (dispatchThreadID.x != 0 || dispatchThreadID.y != 0 || dispatchThreadID.z != 0)
-    {
-        return;
-    }
-
-    ComputePayload payload = *pc.payload;
+    ComputePayload payload = *pass.payload;
     payload.result = payload.lhs * payload.rhs;
-    *pc.payload = payload;
+    *pass.payload = payload;
 }

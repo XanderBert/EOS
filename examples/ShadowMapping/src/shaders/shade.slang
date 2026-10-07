@@ -1,58 +1,67 @@
+// Shades the scene with the sun, shadowed by the shadow map (3x3 PCF), and a constant ambient term.
+import eos.core;
 import eos.math;
 import eos.material;
 import eos.lighting;
-import shadowCommon;
+import eos.pass;
+import eos.scene;
+import eos.view;
 
-struct VSInput
+[Pass]
+[DrawScene]
+[Cull(CullMode.Back)]
+struct Shade
 {
-    uint vertexID   : SV_VertexID;
-    float3 Pos      : POSITION;
-    float3 Normal   : NORMAL;
-    float2 UV       : TEXCOORD0;
-    float4 Tangent  : TANGENT;
+    [Input] Scene* scene;
+    [Input] View* view;
+    [Input] View* lightView;                        // the View the shadow map was rendered with
+    [Input] DirectionalLight* sun;
+    [Input] DescriptorHandle<Texture2D> shadowMap;
+    [Sampler(Filter.Linear, Address.ClampToBorder)] DescriptorHandle<SamplerState> shadowSampler;
+    [Output] [Format("Z_F32")] DepthTarget depth;
+
+    [Range(0.0, 1.0)] float ambient = 0.3;          // radiance of the uniform environment that stands in for image-based lighting
 };
+
+[[vk::push_constant]] Shade pass;
 
 struct VSOutput
 {
-    float4 Pos         : SV_Position;
-    float3 WorldPos    : TEXCOORD1;
-    float3 Normal      : TEXCOORD2;
-    float4 Tangent     : TANGENT;
-    float2 UV          : TEXCOORD0;
-    uint   DrawIndex   : TEXCOORD3;
-    float4 ShadowCoord : TEXCOORD4;
+    float4 position                 : SV_Position;
+    float3 worldPosition            : TEXCOORD1;
+    float3 normal                   : TEXCOORD2;
+    float4 tangent                  : TANGENT;
+    float2 uv                       : TEXCOORD0;
+    nointerpolation uint instance   : TEXCOORD3;
+    float4 shadowCoord              : TEXCOORD4;
 };
 
-// Must match the shadow depth texture created in main.cpp.
-static const float kShadowMapSize = 4096.0;
-
-static const float3 kSunRadiance = float3(3.0);
-static const float3 kAmbientRadiance = float3(0.3);
-
-[[vk::push_constant]] FramePointers pc;
+struct Targets
+{
+    [Output] [Clear(0.36, 0.4, 1.0, 0.28)] float4 color : SV_Target0;
+};
 
 [shader("vertex")]
-VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
+VSOutput vertexMain(uint vertexID : SV_VulkanVertexID, uint instanceID : SV_VulkanInstanceID)
 {
-    const PerFrameData frameData = *pc.perFrame;
-    const float4x4 transform = pc.draws[drawIndex].transform;
-
-    const float4 localTransformed = mul(float4(input.Pos, 1.0), transform);
-    const float3x3 normalMatrix   = float3x3(mul(transform, frameData.model));
+    const MeshVertex vertex = pass.scene.vertices[vertexID];
+    const float4x4 transform = pass.scene.instances[instanceID].transform;
+    const float4 worldPosition = mul(float4(vertex.position, 1.0), transform);
+    const float3x3 normalMatrix = float3x3(transform);
 
     VSOutput output;
-    output.Pos          = mul(localTransformed, frameData.mvp);
-    output.WorldPos     = mul(localTransformed, frameData.model).xyz;
-    output.Normal       = mul(input.Normal, normalMatrix);
-    output.Tangent      = float4(mul(input.Tangent.xyz, normalMatrix), input.Tangent.w);
-    output.UV           = input.UV;
-    output.DrawIndex    = drawIndex;
-    output.ShadowCoord  = mul(localTransformed, frameData.depthMVP);
+    output.position      = mul(worldPosition, pass.view.viewProjection);
+    output.worldPosition = worldPosition.xyz;
+    output.normal        = mul(vertex.normal, normalMatrix);
+    output.tangent       = float4(mul(vertex.tangent.xyz, normalMatrix), vertex.tangent.w);
+    output.uv            = vertex.uv;
+    output.instance      = instanceID;
+    output.shadowCoord   = mul(worldPosition, pass.lightView.viewProjection);
     return output;
 }
 
 // Fraction of the light that reaches the point: 1 lit, 0 fully shadowed. 3x3 PCF.
-float SampleShadowVisibility(PerFrameData frameData, float4 shadowCoord, float3 geometricNormal, float3 lightDirection)
+float SampleShadowVisibility(float4 shadowCoord, float3 geometricNormal, float3 lightDirection)
 {
     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
 
@@ -68,14 +77,17 @@ float SampleShadowVisibility(PerFrameData frameData, float4 shadowCoord, float3 
     // Slope bias from the geometric normal; normal-map detail shouldn't move the depth comparison.
     const float ndotl = saturate(dot(geometricNormal, -lightDirection));
     const float bias = max(0.0005 * (1.0 - ndotl), 0.00005);
-    const float2 texelSize = 1.0 / float2(kShadowMapSize, kShadowMapSize);
+
+    uint2 shadowMapSize;
+    pass.shadowMap.GetDimensions(shadowMapSize.x, shadowMapSize.y);
+    const float2 texelSize = 1.0 / float2(shadowMapSize);
 
     float visibility = 0.0;
     for (int x = -1; x <= 1; ++x)
     {
         for (int y = -1; y <= 1; ++y)
         {
-            const float occluderDepth = frameData.shadowMap.Sample(frameData.shadowSampler, projCoords.xy + float2(x, y) * texelSize).r;
+            const float occluderDepth = pass.shadowMap.Sample(pass.shadowSampler, projCoords.xy + float2(x, y) * texelSize).r;
             visibility += projCoords.z - bias > occluderDepth ? 0.0 : 1.0;
         }
     }
@@ -84,22 +96,21 @@ float SampleShadowVisibility(PerFrameData frameData, float4 shadowCoord, float3 
 }
 
 [shader("fragment")]
-float4 fragmentMain(VSOutput input) : SV_Target
+Targets fragmentMain(VSOutput input)
 {
-    const PerFrameData frameData = *pc.perFrame;
-    const SurfaceData surface = SurfaceData.FromVertex(input.WorldPos, input.Normal, input.Tangent, input.UV, frameData.cameraPos);
-    const StandardMaterial material = StandardMaterial(pc.draws[input.DrawIndex].material);
+    const SurfaceData surface = SurfaceData.FromVertex(input.worldPosition, input.normal, input.tangent, input.uv, pass.view.position);
+    const StandardMaterial material = StandardMaterial(pass.scene.GetMaterial(input.instance));
     let point = material.Evaluate(surface, ImplicitLodSampler());
     if (!material.PassesAlphaTest(point.opacity)) discard;
 
-    // The shadow map uses an orthographic projection, so the light is directional.
-    DirectionalLight sun;
-    sun.direction = SafeNormalize(frameData.lightDir.xyz, float3(0.0, -1.0, 0.0));
-    sun.radiance = kSunRadiance;
+    DirectionalLight sun = *pass.sun;
+    sun.direction = SafeNormalize(sun.direction, float3(0.0, -1.0, 0.0));
 
-    const float visibility = SampleShadowVisibility(frameData, input.ShadowCoord, surface.geometricNormal, sun.direction);
-    const float3 color = EvaluateDirectionalLight(point.bsdf, point.frame, surface.viewDirection, sun) * visibility
-                       + EvaluateConstantAmbient(point.bsdf, point.frame, surface.viewDirection, kAmbientRadiance, point.occlusion)
-                       + point.emission;
-    return float4(color, 1.0);
+    const float visibility = SampleShadowVisibility(input.shadowCoord, surface.geometricNormal, sun.direction);
+
+    Targets targets;
+    targets.color = float4(EvaluateDirectionalLight(point.bsdf, point.frame, surface.viewDirection, sun) * visibility
+                         + EvaluateConstantAmbient(point.bsdf, point.frame, surface.viewDirection, pass.ambient.xxx, point.occlusion)
+                         + point.emission, 1.0);
+    return targets;
 }

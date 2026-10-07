@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "window.h"
@@ -710,6 +711,11 @@ namespace EOS
         [[nodiscard]] virtual uint32_t GetMaxPushConstantSize() const = 0;
 
         /**
+         * @brief Whether the device builds acceleration structures (CreateAccelerationStructure).
+         */
+        [[nodiscard]] virtual bool SupportsAccelerationStructures() const = 0;
+
+        /**
         * @brief Creates a RenderPipeline and returns a handle to it.
         * @param renderPipelineDescription The description about what type of pipeline we want to create and what it exists of.
         * @return A Holder Handle to a Render Pipeline.
@@ -910,7 +916,7 @@ namespace EOS
         /**
          * @brief Gets the native image (VkImage, cast through void*) backing a texture, e.g. for
          *        a third-party renderer to sample an engine texture directly. EOS keeps ownership;
-         *        sampled textures are in SHADER_READ_ONLY_OPTIMAL layout. See GetNativeGraphicsHandles.
+         *        sampled textures are in READ_ONLY_OPTIMAL layout. See GetNativeGraphicsHandles.
          * @param handle The texture to get the native image of.
          */
         [[nodiscard]] virtual void* GetNativeImage(TextureHandle handle) const = 0;
@@ -1211,12 +1217,14 @@ void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const void* data
 
 /**
  * @brief Templated helper function to bind push constants.
- * @tparam Struct The structure we would like to bind as push constants.
+ * @tparam Struct The structure we would like to bind as push constants. Not a pointer: cmdPushConstants(cmd, bytes,
+ *         size) must reach the overload above, not push the pointer itself with size taken as the offset.
  * @param commandBuffer The commandbuffer we want to record to, to bind our push constants.
  * @param data The data structure we want to bind as pushconstants
  * @param offset At what offset we would like to start to bind the data from.
  */
 template<typename Struct>
+    requires (!std::is_pointer_v<Struct> && std::is_trivially_copyable_v<Struct>)
 void cmdPushConstants(const EOS::ICommandBuffer& commandBuffer, const Struct& data, size_t offset = 0)
 {
     cmdPushConstants(commandBuffer, &data, sizeof(Struct), offset);

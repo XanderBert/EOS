@@ -338,6 +338,40 @@ namespace
             std::printf("\n");
         }
 
+        if (program.Pass.IsPass)
+        {
+            static constexpr const char* kKinds[] = {"texture", "storage texture", "buffer", "scene", "depth target", "color target", "sampler", "bool", "int", "uint", "float", "float2", "float3", "float4", "enum"};
+            static constexpr const char* kDirections[] = {"property", "input", "output", "in-out"};
+            std::printf("  render graph pass");
+            if (program.Pass.DispatchThreads[0] != 0) std::printf(", dispatches %ux%ux%u threads", program.Pass.DispatchThreads[0], program.Pass.DispatchThreads[1], program.Pass.DispatchThreads[2]);
+            if (!program.Pass.DispatchSizeOf.empty()) std::printf(", dispatch sized like %s", program.Pass.DispatchSizeOf.c_str());
+            if (program.Pass.DrawScene) std::printf(", draws the scene");
+            if (program.Pass.Cull != 0) std::printf(", culls %s faces", program.Pass.Cull == 1 ? "front" : "back");
+            if (program.Pass.DepthClamp) std::printf(", clamps depth");
+            for (const EOS::ShaderPassFragment& fragment : program.Pass.Fragments) std::printf(", fragment %s (materials 0x%x)", fragment.EntryPoint.c_str(), fragment.Materials);
+            std::printf(":\n");
+            for (const EOS::ShaderPassField& field : program.Pass.Fields)
+            {
+                const char* role = field.Kind == EOS::ShaderPassFieldKind::Sampler ? "engine-filled" : kDirections[static_cast<int>(field.Direction)];
+                std::printf("    %s %s %s", role, kKinds[static_cast<int>(field.Kind)], field.Name.c_str());
+                if (field.Kind == EOS::ShaderPassFieldKind::ColorTarget) std::printf(", location %u", field.Offset);
+                else std::printf(", offset %u", field.Offset);
+                if (field.Direction == EOS::ShaderPassDirection::Output && field.Kind != EOS::ShaderPassFieldKind::Buffer) std::printf(", format %s", field.Format.empty() ? "swapchain" : field.Format.c_str());
+                if (field.Scale != 1.0f) std::printf(", scale %g", field.Scale);
+                if (field.Width != 0) std::printf(", size %ux%u", field.Width, field.Height);
+                if (field.Layers != 1) std::printf(", %u layers", field.Layers);
+                if (field.DepthCompare >= 0) std::printf(", depth test %d", field.DepthCompare);
+                if (!field.SizeOf.empty()) std::printf(", sized like %s", field.SizeOf.c_str());
+                if (!field.Bypass.empty()) std::printf(", bypass %s", field.Bypass.c_str());
+                if (!field.BufferType.empty()) std::printf(", points to %s", field.BufferType.c_str());
+                if (field.BufferSize) std::printf(", %u bytes", field.BufferSize);
+                if (field.Minimum < field.Maximum) std::printf(", range %g..%g", field.Minimum, field.Maximum);
+                for (size_t i = 0; i < field.EnumNames.size(); ++i) std::printf("%s%s=%lld", i == 0 ? ", cases " : " ", field.EnumNames[i].c_str(), static_cast<long long>(field.EnumValues[i]));
+                if (field.Direction == EOS::ShaderPassDirection::None && field.Kind != EOS::ShaderPassFieldKind::Sampler) std::printf(", default %g", field.Default);
+                std::printf("\n");
+            }
+        }
+
         for (const EOS::ShaderSourceDependency& dependency : program.Dependencies)
         {
             std::printf("  source %s\n", dependency.Path.string().c_str());

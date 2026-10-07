@@ -1,66 +1,45 @@
 #pragma once
-#include "ModelLoader.h"
-#include "ExampleHelpers.h"
-#include "Camera.h"
+#include <concepts>
+#include <filesystem>
+#include <initializer_list>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include "EOS.h"
+#include "flyCamera.h"
 #include "renderGraph.h"
 #include "renderGraphFile.h"
+#include "scene.h"
+#include "sun.h"
 #include "UI/UI.h"
-#include "glm/gtc/type_ptr.hpp"
-
-struct InputState final
-{
-    bool forward{};
-    bool backward{};
-    bool left{};
-    bool right{};
-    bool up{};
-    bool down{};
-    bool rightMouse{};
-    bool space{};
-};
 
 struct ExampleAppDescription final
 {
-    EOS::ContextCreationDescription contextDescription;
-    CameraDescription cameraDescription;
+    const char* Name = "EOS";                               // the window's title, unless contextDescription has one
+    EOS::ContextCreationDescription contextDescription{};
 };
 
+// What the examples share: the window, the context, the render graph, the pass types graph files can use (the engine's
+// nodes and Slang passes, and what an example registers itself) and the UI. An example is its graph files and their
+// Slang passes: main.cpp runs them with Run().
 class ExampleApp final
 {
 public:
-    explicit ExampleApp(ExampleAppDescription& appDescription)
-    :   MainCamera(appDescription.cameraDescription)
-    ,   Window(appDescription.contextDescription)
-    ,   Context(EOS::CreateContextWithSwapChain(appDescription.contextDescription))
-    ,   StartingCameraPosition(appDescription.cameraDescription.origin)
-    ,   StartingCameraRotation(appDescription.cameraDescription.rotation)
+    explicit ExampleApp(ExampleAppDescription appDescription)
+    :   ExampleApp(Named(appDescription), Prepared{})
     {
-        //Create Default Sampler
-        constexpr EOS::SamplerDescription samplerDescription
-        {
-            .mipMap = EOS::SamplerMip::Linear,
-            .mipLodMax = EOS_MAX_MIP_LEVELS,
-            .maxAnisotropic = 0,
-            .debugName = "Linear Sampler",
-        };
-        DefaultSampler = Context->CreateSampler(samplerDescription);
-        SetupInputCallbacks();
-
-        Graph = std::make_unique<EOS::RenderGraph>(Context.get());
-
-
-        UIRenderer = std::make_unique<EOS::UI::Renderer>(Context.get(), Window);
     }
 
     DELETE_COPY_MOVE(ExampleApp)
 
-    // A graph file whose pass types are registered in Passes, from its generated header
-    // (#include ".generated/graphs/depthOfField.h", then LoadGraphFile(DepthOfFieldGraph)). The '-' key reloads it, with
-    // the shaders, in builds with EOS_GRAPH_TOOLS.
-    EOS::GraphFile& LoadGraphFile(const EOS::GraphFileDescription& file)
+    // The example's graph file src/graphs/<name>.yaml, whose pass types are registered in Passes:
+    // LoadGraphFile("depthOfField"). The '-' key reloads it, with the shaders.
+    EOS::GraphFile& LoadGraphFile(std::string_view name)
     {
-        return *GraphFiles.emplace_back(std::make_unique<EOS::GraphFile>(Passes, file));
+        const std::filesystem::path path = std::filesystem::path(EOS_PROJECT_GRAPH_PATH) / (std::string(name) + ".yaml");
+        return *GraphFiles.emplace_back(std::make_unique<EOS::GraphFile>(Passes, path));
     }
 
     // Shaders and graph files whose sources changed since they were last loaded.
@@ -86,59 +65,71 @@ public:
         return pass;
     }
 
-    Camera MainCamera;
-    EOS::Window Window;
-    std::unique_ptr<EOS::IContext> Context;
-    std::unique_ptr<EOS::RenderGraph> Graph;        // destroyed before the context, which its textures belong to
-    EOS::PassRegistry Passes;                       // the pass types graph files can use
-    std::unique_ptr<EOS::UI::Renderer> UIRenderer;
-    EOS::Holder<EOS::SamplerHandle> DefaultSampler;
-    InputState Input;
-    float DeltaTime{};
-
-    // Return true when the cursor (GLFW window coordinates) is over UI, so a click there goes to
-    // the UI instead of starting mouse-look. Defaults to the UI's own answer, which is false in a build
-    // without a UI.
-    std::function<bool(double xpos, double ypos)> WantCaptureMouse = [](double, double)
+    /**
+     * @brief Renders the example's graph file src/graphs/<name>.yaml every frame until the window closes: its passes
+     *        draw into the swapchain, under a panel with its passes, their properties and a preview of any texture they
+     *        write. The scene, the camera and the passes all come from the file and its Slang passes.
+     */
+    void Run(std::string_view graphName)
     {
-        return EOS::UI::WantCaptureMouse();
-    };
+        Run({graphName});
+    }
 
-    // Return true while UI wants keyboard input (e.g. a focused text box), so key presses don't
-    // drive the camera. Defaults to the UI's own answer.
-    std::function<bool()> WantCaptureKeyboard = []()
+    // As Run(graphName), with a choice of graph files in the panel; the first one is shown first.
+    void Run(std::initializer_list<std::string_view> graphNames)
     {
-        return EOS::UI::WantCaptureKeyboard();
-    };
+        struct ShownFile final
+        {
+            std::string Name;
+            EOS::GraphFile* File = nullptr;
+            std::unique_ptr<EOS::UI::GraphFilePanel> Panel;
+        };
 
-    template <typename Function>
-    void Run(Function&& renderLoop)
-    {
-        lastTime = glfwGetTime();
+        std::vector<ShownFile> files;
+        std::vector<std::string> labels;
+        for (const std::string_view name : graphNames)
+        {
+            EOS::GraphFile& file = LoadGraphFile(name);
+            files.push_back({.Name = std::string(name), .File = &file, .Panel = std::make_unique<EOS::UI::GraphFilePanel>(Context.get(), file)});
+            labels.push_back("graphs/" + std::string(name) + ".yaml");
+        }
+        std::vector<const char*> labelPointers;
+        for (const std::string& label : labels) labelPointers.push_back(label.c_str());
 
+        int shown = 0;
         while (!Window.ShouldClose() && !ShouldExit)
         {
             Window.Poll();
 
-            // Mouse look holds on to the cursor; give it back when the user switches away.
-            if (!Window.IsFocused() && Input.rightMouse) SetMouseLookMode(false);
+            ShownFile& file = files[shown];
+            EOS::RenderGraph& graph = *Graph;
+            const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
+            file.File->AddTo(graph, {{"swapchain", backbuffer}});
 
-            //Update time
-            const double currentTime = glfwGetTime();
-            DeltaTime = static_cast<float>(currentTime - lastTime);
-            lastTime = currentTime;
-
-            //Update Camera
-            if (Input.space)
+            const EOS::GraphTexture preview = file.Panel->AddPreviewPass(graph);
+            EOS::PassBuilder uiPass = AddUIPass(backbuffer, [&]
             {
-                MainCamera.SetPosition(StartingCameraPosition);
-                MainCamera.SetRotation(StartingCameraRotation);
-            }
-            glm::vec3 direction{Input.right - Input.left, Input.up - Input.down, Input.forward - Input.backward};
-            MainCamera.Update(direction, DeltaTime);
+                EOS::UI::SetNextWindowSize(420, 640);
+                EOS::UI::Begin(Name);
+                if (files.size() > 1) EOS::UI::Combo("Graph", &shown, labelPointers.data(), static_cast<int>(labelPointers.size()));
+                else EOS::UI::Text("%s", labelPointers[0]);
+                file.Panel->Declare();
+                EOS::UI::End();
+            });
+            if (preview.Valid()) uiPass.Sample(preview);
 
+            graph.Execute();
+        }
+    }
 
-            //Render
+    // Calls renderLoop every frame until the window closes, for examples that build their frame in C++.
+    template <typename Function>
+        requires std::invocable<Function&>
+    void Run(Function&& renderLoop)
+    {
+        while (!Window.ShouldClose() && !ShouldExit)
+        {
+            Window.Poll();
             std::forward<Function>(renderLoop)();
         }
     }
@@ -147,112 +138,45 @@ public:
     {
         ShouldExit = true;
     }
+
+    EOS::Window Window;
+    std::unique_ptr<EOS::IContext> Context;
+    std::unique_ptr<EOS::RenderGraph> Graph;        // destroyed before the context, which its textures belong to
+    EOS::PassRegistry Passes{Context.get()};        // the pass types graph files can use; loads the Slang ones
+    std::unique_ptr<EOS::UI::Renderer> UIRenderer;
+
 private:
+    struct Prepared final {};
 
-    void SetMouseLookMode(bool enabled)
+    [[nodiscard]] static ExampleAppDescription& Named(ExampleAppDescription& appDescription)
     {
-        Input.rightMouse = enabled;
-        FirstMouseSample = true;
-
-        // While the application owns the cursor for mouse look, the UI should not react to it.
-        EOS::UI::SetMouseInputEnabled(!enabled);
-
-        // Keyboard navigation makes a focused UI window capture WASD, and unlike a left click
-        // the right click that starts mouse look doesn't unfocus it, so drop focus explicitly.
-        if (enabled) EOS::UI::ClearFocus();
-
-        glfwSetInputMode(Window.GlfwWindow, GLFW_CURSOR, enabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-        if (glfwRawMouseMotionSupported())
-        {
-            glfwSetInputMode(Window.GlfwWindow, GLFW_RAW_MOUSE_MOTION, enabled ? GLFW_TRUE : GLFW_FALSE);
-        }
+        if (!appDescription.contextDescription.ApplicationName) appDescription.contextDescription.ApplicationName = appDescription.Name;
+        return appDescription;
     }
 
-    void SetupInputCallbacks()
+    ExampleApp(ExampleAppDescription& appDescription, Prepared)
+    :   Window(appDescription.contextDescription)
+    ,   Context(EOS::CreateContextWithSwapChain(appDescription.contextDescription))
+    ,   Name(appDescription.contextDescription.ApplicationName)
     {
+        // '-' reloads the shaders and graph files whose sources changed.
         Window.OnKey([this](int key, int, int action, int)
         {
-            const bool pressed = action != GLFW_RELEASE;
-
-            // Releases always go through so a key held before UI took focus doesn't get stuck.
-            if (pressed && WantCaptureKeyboard && WantCaptureKeyboard()) return;
-
-            switch (key)
-            {
-                case GLFW_KEY_W:     Input.forward = pressed; break;
-                case GLFW_KEY_S:     Input.backward = pressed; break;
-                case GLFW_KEY_A:     Input.left = pressed; break;
-                case GLFW_KEY_D:     Input.right = pressed; break;
-                case GLFW_KEY_Q:     Input.up = pressed; break;
-                case GLFW_KEY_E:     Input.down = pressed; break;
-                case GLFW_KEY_SPACE: Input.space = pressed; break;
-                default: break;
-            }
-
-            if (key == GLFW_KEY_MINUS && action == GLFW_PRESS)
-            {
-                Reload();
-            }
+            if (key == GLFW_KEY_MINUS && action == GLFW_PRESS) Reload();
         });
 
-        Window.OnMouseButton([this](int button, int action, int)
-        {
-            if (button != GLFW_MOUSE_BUTTON_RIGHT) return;
+        Graph = std::make_unique<EOS::RenderGraph>(Context.get());
 
-            if (action == GLFW_PRESS)
-            {
-                if (WantCaptureMouse)
-                {
-                    double xpos, ypos;
-                    glfwGetCursorPos(Window.GlfwWindow, &xpos, &ypos);
-                    if (WantCaptureMouse(xpos, ypos)) return;
-                }
-                SetMouseLookMode(true);
-            }
-            else if (action == GLFW_RELEASE && Input.rightMouse)
-            {
-                SetMouseLookMode(false);
-            }
-        });
+        // Graph files can load glTF scenes (paths relative to the repository's data folder), fly a camera and light
+        // the scene with a sun.
+        EOS::RegisterGltfScenePass(Passes, Context.get(), EOS_DATA_PATH);
+        EOS::RegisterFlyCameraPass(Passes, Window);
+        EOS::RegisterSunPass(Passes);
 
-        Window.OnCursorMoved([this](double xpos, double ypos)
-        {
-            if (!Input.rightMouse) return;
-
-            if (FirstMouseSample)
-            {
-                LastMouseX = xpos;
-                LastMouseY = ypos;
-                FirstMouseSample = false;
-                return;
-            }
-
-            float xoffset = static_cast<float>(xpos - LastMouseX);
-            float yoffset = static_cast<float>(LastMouseY - ypos); // reversed since y-coords go down
-            LastMouseX = xpos;
-            LastMouseY = ypos;
-
-            constexpr float mouseSensitivity = 0.1f;
-            xoffset *= mouseSensitivity;
-            yoffset *= mouseSensitivity;
-
-            MainCamera.Yaw   += xoffset;
-            MainCamera.Pitch += yoffset;
-
-            // clamp pitch so we don't flip upside down
-            if (MainCamera.Pitch > 89.0f)  MainCamera.Pitch = 89.0f;
-            if (MainCamera.Pitch < -89.0f) MainCamera.Pitch = -89.0f;
-        });
+        UIRenderer = std::make_unique<EOS::UI::Renderer>(Context.get(), Window);
     }
 
-    double lastTime{};
-    bool FirstMouseSample = true;
-    double LastMouseX = 0.0;
-    double LastMouseY = 0.0;
-
-    glm::vec3 StartingCameraPosition;
-    glm::vec2 StartingCameraRotation;
-
+    const char* Name;
     bool ShouldExit = false;
     std::vector<std::unique_ptr<EOS::GraphFile>> GraphFiles;    // after Passes, which they use
 };

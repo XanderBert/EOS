@@ -58,7 +58,6 @@ function(EOS_PRINT_CONFIGURATION_SUMMARY)
         EOS_USE_TRACY
         EOS_BUILD_EXAMPLES
         EOS_SHADER_TOOLS
-        EOS_GRAPH_TOOLS
         EOS_BUILD_TEXTURE_TOOLS
         EOS_SHADER_OUTPUT_PATH
     )
@@ -203,43 +202,6 @@ function(ADD_SHADER_LIBRARY_TARGET TARGET_NAME SHADER_PATH OUTPUT_PATH CPP_INCLU
     add_dependencies(${TARGET_NAME} ${SHADER_COMPILE_TARGET})
 endfunction()
 
-# Generates CPP_INCLUDE_ROOT/.generated/graphs/<file>.h from every render graph file in GRAPH_PATH, included as
-# ".generated/graphs/<file>.h": the file as constants, which builds without EOS_GRAPH_TOOLS use instead of the YAML.
-# A header is regenerated when its file changes. Like the [CppExport] headers they are not committed, so a build
-# without the tools needs them from an earlier build of the same checkout with the tools on.
-function(ADD_GRAPH_COMPILATION TARGET_NAME GRAPH_PATH CPP_INCLUDE_ROOT)
-    file(GLOB graph_files CONFIGURE_DEPENDS "${GRAPH_PATH}/*.yaml")
-    if(NOT graph_files)
-        return()
-    endif()
-
-    set(headers)
-    foreach(graph_file IN LISTS graph_files)
-        get_filename_component(graph_name "${graph_file}" NAME_WE)
-        set(header "${CPP_INCLUDE_ROOT}/.generated/graphs/${graph_name}.h")
-
-        if(TARGET EOSGraphTool)
-            add_custom_command(
-                OUTPUT "${header}"
-                COMMAND $<TARGET_FILE:EOSGraphTool> "${graph_file}" "${header}"
-                DEPENDS "${graph_file}" EOSGraphTool
-                COMMENT "Generating the header of render graph ${graph_name}.yaml"
-                VERBATIM
-            )
-            list(APPEND headers "${header}")
-        elseif(NOT EXISTS "${header}")
-            message(FATAL_ERROR "${TARGET_NAME} uses render graph ${graph_name}.yaml through ${header}, which only builds with "
-                                "EOS_GRAPH_TOOLS=ON write. Build this checkout once with EOS_GRAPH_TOOLS=ON.")
-        endif()
-    endforeach()
-
-    if(headers)
-        add_custom_target(CompileGraphs_${TARGET_NAME} DEPENDS ${headers})
-        set_property(TARGET CompileGraphs_${TARGET_NAME} PROPERTY FOLDER "Internal/Graphs")
-        add_dependencies(${TARGET_NAME} CompileGraphs_${TARGET_NAME})
-    endif()
-endfunction()
-
 macro(SET_SHADER_PATHS TARGET_NAME PROJECT_SHADER_PATH_VALUE SHADER_OUTPUT_PATH_VALUE)
     target_compile_definitions(${TARGET_NAME} PRIVATE EOS_PROJECT_SHADER_PATH="${PROJECT_SHADER_PATH_VALUE}")
     target_compile_definitions(${TARGET_NAME} PRIVATE EOS_SHADER_OUTPUT_PATH="${SHADER_OUTPUT_PATH_VALUE}")
@@ -281,7 +243,10 @@ macro(CREATE_EXAMPLE name)
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
 
-    ADD_GRAPH_COMPILATION(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/graphs" "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    # Render graph files are read from the sources, so editing one and reloading ('-') changes the running example.
+    # Paths in them (gltfScene) are relative to the repository's data folder.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_PROJECT_GRAPH_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/graphs")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EOS_DATA_PATH="${CMAKE_SOURCE_DIR}/data")
 endmacro()
 
 macro(DEFINE_PLATFORM)

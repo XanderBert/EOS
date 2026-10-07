@@ -1,39 +1,49 @@
+// The shadow map: a layer per cascade, all rendered in one pass. The geometry shader sends every triangle to each
+// cascade's layer, projected with that cascade's matrix. Depth is clamped rather than clipped, so casters between the
+// light and a cascade's near plane still shadow it.
+import eos.core;
 import eos.material;
+import eos.pass;
+import eos.scene;
 import shadowCommon;
 
-struct VSInput
+[Pass]
+[DrawScene]
+[Cull(CullMode.Back)]
+[DepthClamp]
+struct ShadowDepth
 {
-    uint vertexID   : SV_VertexID;
-    float3 Pos      : POSITION;
-    float2 UV       : TEXCOORD0;
+    [Input] Scene* scene;
+    [Input] CascadeData* cascades;
+    [Output] [Format("Z_F32")] [Size(kShadowMapSize, kShadowMapSize)] [Layers(kCascadeCount)] DepthTarget shadowMap;
 };
+
+[[vk::push_constant]] ShadowDepth pass;
 
 struct VSOutput
 {
-    float4 WorldPos  : TEXCOORD0;
-    float2 UV        : TEXCOORD1;
-    uint   DrawIndex : TEXCOORD2;
+    float4 worldPosition            : TEXCOORD0;
+    float2 uv                       : TEXCOORD1;
+    nointerpolation uint instance   : TEXCOORD2;
 };
 
 struct GSOutput
 {
-    float4 Pos       : SV_Position;
-    uint   Layer     : SV_RenderTargetArrayIndex;
-    float2 UV        : TEXCOORD1;
-    uint   DrawIndex : TEXCOORD2;
+    float4 position                 : SV_Position;
+    uint layer                      : SV_RenderTargetArrayIndex;
+    float2 uv                       : TEXCOORD1;
+    nointerpolation uint instance   : TEXCOORD2;
 };
 
-[[vk::push_constant]] FramePointers pc;
-
 [shader("vertex")]
-VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
+VSOutput vertexMain(uint vertexID : SV_VulkanVertexID, uint instanceID : SV_VulkanInstanceID)
 {
-    const float4 localTransformed = mul(float4(input.Pos, 1.0), pc.draws[drawIndex].transform);
+    const MeshVertex vertex = pass.scene.vertices[vertexID];
 
     VSOutput output;
-    output.WorldPos = mul(localTransformed, pc.perFrame->model);
-    output.UV = input.UV;
-    output.DrawIndex = drawIndex;
+    output.worldPosition = mul(float4(vertex.position, 1.0), pass.scene.instances[instanceID].transform);
+    output.uv = vertex.uv;
+    output.instance = instanceID;
     return output;
 }
 
@@ -41,19 +51,19 @@ VSOutput vertexMain(VSInput input, uint drawIndex : SV_DrawIndex)
 [shader("geometry")]
 void geometryMain(triangle VSOutput input[3], inout TriangleStream<GSOutput> triangleStream)
 {
-    const PerFrameData frameData = *pc.perFrame;
+    const CascadeData cascades = *pass.cascades;
 
     [unroll]
-    for (uint cascadeID = 0; cascadeID < 4; ++cascadeID)
+    for (uint cascade = 0; cascade < kCascadeCount; ++cascade)
     {
         [unroll]
         for (uint i = 0; i < 3; ++i)
         {
             GSOutput output;
-            output.Pos = mul(input[i].WorldPos, frameData.cascadeViewProj[cascadeID]);
-            output.Layer = cascadeID;
-            output.UV = input[i].UV;
-            output.DrawIndex = input[i].DrawIndex;
+            output.position = mul(input[i].worldPosition, cascades.viewProjection[cascade]);
+            output.layer = cascade;
+            output.uv = input[i].uv;
+            output.instance = input[i].instance;
             triangleStream.Append(output);
         }
 
@@ -61,16 +71,19 @@ void geometryMain(triangle VSOutput input[3], inout TriangleStream<GSOutput> tri
     }
 }
 
-// Opaque draws: no discard, so the GPU keeps its early depth test and fast depth-only path.
+// Opaque instances: no discard, so the GPU keeps its early depth test and fast depth-only path.
 [shader("fragment")]
+[Materials(AlphaMode.Opaque)]
+[Materials(AlphaMode.Blend)]
 void fragmentOpaque()
 {
 }
 
-// Alpha-tested draws only cast shadows where they are not cut away.
+// Alpha-tested instances only cast shadows where they are not cut away.
 [shader("fragment")]
+[Materials(AlphaMode.Mask)]
 void fragmentMasked(GSOutput input)
 {
-    const StandardMaterial material = StandardMaterial(pc.draws[input.DrawIndex].material);
-    if (!material.PassesAlphaTest(material.EvaluateOpacity(SurfaceData.FromUV(input.UV), ImplicitLodSampler()))) discard;
+    const StandardMaterial material = StandardMaterial(pass.scene.GetMaterial(input.instance));
+    if (!material.PassesAlphaTest(material.EvaluateOpacity(SurfaceData.FromUV(input.uv), ImplicitLodSampler()))) discard;
 }

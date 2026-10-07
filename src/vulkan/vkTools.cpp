@@ -1786,14 +1786,16 @@ namespace VkSynchronization
         if (state & EOS::ResourceState::DepthWrite)
             return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+        // One layout for every read: a depth target a pass only tests against can be sampled by the same pass, through
+        // the same bindless descriptor as any sampled texture.
         if (state & EOS::DepthRead)
-            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            return VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
 
         if (state & (EOS::ResourceState::UnorderedAccess | EOS::UnorderedAccessPixel))
             return VK_IMAGE_LAYOUT_GENERAL;
 
         if (state & EOS::ResourceState::ShaderResource)
-            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            return VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
 
         if (state & EOS::ResourceState::Present)
             return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;

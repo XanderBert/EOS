@@ -275,6 +275,9 @@ namespace EOS
 
         // The size a texture of this frame has (known as soon as it is declared).
         [[nodiscard]] Dimensions GetSize(GraphTexture texture) const;
+        // How a texture of this frame was described. Of imported textures, only the format and size are known.
+        [[nodiscard]] const GraphTextureDescription& GetDescription(GraphTexture texture) const;
+        [[nodiscard]] bool IsSwapchain(GraphTexture texture) const;
         [[nodiscard]] Dimensions GetSwapchainSize() const;
         [[nodiscard]] Format GetSwapchainFormat() const;
 

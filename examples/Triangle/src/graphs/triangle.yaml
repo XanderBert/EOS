@@ -1,0 +1,6 @@
+# The frame of the triangle example: one pass, written in Slang (../shaders/triangle.slang), drawn into the swapchain.
+passes:
+  Triangle: { type: triangle, scale: 1.0 }
+
+edges:
+  - Triangle.color -> swapchain

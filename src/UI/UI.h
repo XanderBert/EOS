@@ -4,6 +4,7 @@
 
 #include "defines.h"
 #include "EOS.h"
+#include "renderGraph.h"
 
 namespace EOS
 {
@@ -95,6 +96,30 @@ namespace EOS
         // Every pass of a graph file with an enable checkbox and a widget per property, sliders where the property
         // has a range. Edits last until the file is reloaded.
         void GraphFileProperties(GraphFile& file);
+
+        /**
+         * @brief The passes of a graph file with their properties (GraphFileProperties), and a preview of any texture a
+         *        pass writes, picked from a list: every frame the graph draws it into an image of the panel's own, one
+         *        layer of it, with its values remapped to a range (depth in grey).
+         */
+        class GraphFilePanel final
+        {
+        public:
+            GraphFilePanel(IContext* context, GraphFile& file);
+            ~GraphFilePanel();
+            DELETE_COPY_MOVE(GraphFilePanel)
+
+            // After file.AddTo(graph): adds the pass that draws the previewed texture. Returns the panel's image, which
+            // the pass that draws the UI has to .Sample(); invalid when nothing is previewed.
+            [[nodiscard]] GraphTexture AddPreviewPass(RenderGraph& graph);
+
+            // The panel's widgets, in the current window.
+            void Declare();
+
+        private:
+            struct Implementation;
+            std::unique_ptr<Implementation> Impl;
+        };
 
         [[nodiscard]] bool WantCaptureMouse();
         [[nodiscard]] bool WantCaptureKeyboard();

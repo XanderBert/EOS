@@ -1,3 +1,1 @@
 CREATE_EXAMPLE(ComputeShader)
-eos_require_fastgltf(ComputeShader)
-eos_require_glm(ComputeShader)

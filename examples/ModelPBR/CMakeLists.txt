@@ -1,3 +1,1 @@
 CREATE_EXAMPLE(ModelPBR)
-eos_require_fastgltf(ModelPBR)
-eos_require_glm(ModelPBR)

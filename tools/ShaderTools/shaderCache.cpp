@@ -11,7 +11,7 @@ namespace EOS::ShaderCache
     namespace
     {
         constexpr uint32_t kMagic = 0x50534F45;     // "EOSP"
-        constexpr uint32_t kFormatVersion = 4;      // bump whenever the layout or the meaning of what is written below changes
+        constexpr uint32_t kFormatVersion = 7;      // bump whenever the layout or the meaning of what is written below changes
 
         constexpr uint32_t kDerivedMagic = 0x44534F45;  // "EOSD"
         constexpr uint32_t kDerivedFormatVersion = 1;
@@ -205,6 +205,51 @@ namespace EOS::ShaderCache
                 writer.Write(static_cast<uint32_t>(entryPoint.Spirv.size()));
                 writer.Buffer.append(reinterpret_cast<const char*>(entryPoint.Spirv.data()), entryPoint.Spirv.size() * sizeof(uint32_t));
             }
+
+            const ShaderPassReflection& pass = program.Pass;
+            writer.Write(pass.IsPass);
+            writer.Write(pass.DispatchThreads);
+            writer.WriteString(pass.DispatchSizeOf);
+            writer.Write(pass.DrawScene);
+            writer.Write(pass.Cull);
+            writer.Write(pass.DepthClamp);
+            writer.Write(static_cast<uint32_t>(pass.Fragments.size()));
+            for (const ShaderPassFragment& fragment : pass.Fragments)
+            {
+                writer.WriteString(fragment.EntryPoint);
+                writer.Write(fragment.Materials);
+            }
+            writer.Write(static_cast<uint32_t>(pass.Fields.size()));
+            for (const ShaderPassField& field : pass.Fields)
+            {
+                writer.WriteString(field.Name);
+                writer.Write(field.Kind);
+                writer.Write(field.Direction);
+                writer.Write(field.Offset);
+                writer.Write(field.Optional);
+                writer.WriteString(field.Format);
+                writer.Write(field.Scale);
+                writer.Write(field.Width);
+                writer.Write(field.Height);
+                writer.Write(field.Layers);
+                writer.WriteString(field.SizeOf);
+                writer.WriteString(field.Bypass);
+                writer.Write(field.Clear);
+                writer.Write(field.BufferSize);
+                writer.WriteString(field.BufferType);
+                writer.Write(field.DepthCompare);
+                writer.Write(field.SamplerFilter);
+                writer.Write(field.SamplerAddress);
+                writer.Write(field.Minimum);
+                writer.Write(field.Maximum);
+                writer.Write(field.Default);
+                writer.Write(static_cast<uint32_t>(field.EnumNames.size()));
+                for (size_t i = 0; i < field.EnumNames.size(); ++i)
+                {
+                    writer.WriteString(field.EnumNames[i]);
+                    writer.Write(field.EnumValues[i]);
+                }
+            }
         }
 
         [[nodiscard]] bool ReadProgram(BinaryReader& reader, CompiledShaderProgram& outProgram)
@@ -300,6 +345,57 @@ namespace EOS::ShaderCache
                 if (!reader.ReadCount(count, sizeof(uint32_t))) return false;
                 entryPoint.Spirv.resize(count);
                 if (!reader.ReadBytes(entryPoint.Spirv.data(), entryPoint.Spirv.size() * sizeof(uint32_t))) return false;
+            }
+
+            ShaderPassReflection& pass = outProgram.Pass;
+            if (!reader.Read(pass.IsPass) || !reader.Read(pass.DispatchThreads) || !reader.ReadString(pass.DispatchSizeOf)
+                || !reader.Read(pass.DrawScene) || !reader.Read(pass.Cull) || !reader.Read(pass.DepthClamp)
+                || !reader.ReadCount(count, sizeof(uint32_t) + sizeof(uint8_t)))
+            {
+                return false;
+            }
+            pass.Fragments.resize(count);
+            for (ShaderPassFragment& fragment : pass.Fragments)
+            {
+                if (!reader.ReadString(fragment.EntryPoint) || !reader.Read(fragment.Materials)) return false;
+            }
+
+            if (!reader.ReadCount(count, 4 * sizeof(uint32_t))) return false;
+            pass.Fields.resize(count);
+            for (ShaderPassField& field : pass.Fields)
+            {
+                if (!reader.ReadString(field.Name)
+                    || !reader.Read(field.Kind)
+                    || !reader.Read(field.Direction)
+                    || !reader.Read(field.Offset)
+                    || !reader.Read(field.Optional)
+                    || !reader.ReadString(field.Format)
+                    || !reader.Read(field.Scale)
+                    || !reader.Read(field.Width)
+                    || !reader.Read(field.Height)
+                    || !reader.Read(field.Layers)
+                    || !reader.ReadString(field.SizeOf)
+                    || !reader.ReadString(field.Bypass)
+                    || !reader.Read(field.Clear)
+                    || !reader.Read(field.BufferSize)
+                    || !reader.ReadString(field.BufferType)
+                    || !reader.Read(field.DepthCompare)
+                    || !reader.Read(field.SamplerFilter)
+                    || !reader.Read(field.SamplerAddress)
+                    || !reader.Read(field.Minimum)
+                    || !reader.Read(field.Maximum)
+                    || !reader.Read(field.Default)
+                    || !reader.ReadCount(count, sizeof(uint32_t) + sizeof(int64_t)))
+                {
+                    return false;
+                }
+
+                field.EnumNames.resize(count);
+                field.EnumValues.resize(count);
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    if (!reader.ReadString(field.EnumNames[i]) || !reader.Read(field.EnumValues[i])) return false;
+                }
             }
 
             return true;

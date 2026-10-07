@@ -1,0 +1,18 @@
+# Shadows from ray queries: every pixel traces a ray towards the sun through the scene's TLAS, which the gltfScene node
+# builds. No shadow map. Pick another technique with the panel's graph list.
+passes:
+  Camera:  { type: flyCamera, origin: [0, 1, 0], speed: 100 }
+  Sponza:  { type: gltfScene, path: sponza/Sponza.gltf }
+  Sun:     { type: sun, rotation: [-73, -90], intensity: 3 }
+  Early-Z: { type: earlyZ }
+  Shade:   { type: shade, shadows: RayQuery }
+
+edges:
+  - Sponza.scene  -> Early-Z.scene
+  - Camera.view   -> Early-Z.view
+
+  - Sponza.scene  -> Shade.scene
+  - Camera.view   -> Shade.view
+  - Sun.light     -> Shade.sun
+  - Early-Z.depth -> Shade.depth
+  - Shade.color   -> swapchain

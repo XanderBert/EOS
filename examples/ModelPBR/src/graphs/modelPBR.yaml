@@ -1,0 +1,18 @@
+# The frame of the model example. The helmet turns on a turntable: a pass type written in C++ (main.cpp) that uploads
+# the model's transform every frame. ../shaders/model.slang draws the model with it.
+passes:
+  Camera:    { type: flyCamera, origin: [0, 0, -3.5], rotation: [0, 90] }
+  Helmet:    { type: gltfScene, path: damaged_helmet/DamagedHelmet.gltf }
+  Turntable: { type: turntable, speed: -1.0 }
+  Model:
+    type: model
+    lightDirection: [-1.0, -1.0, -1.0]
+    lightIntensity: 3.0
+    lightColor: [1.0, 1.0, 1.0]
+    ambient: 0.3
+
+edges:
+  - Helmet.scene        -> Model.scene
+  - Camera.view         -> Model.view
+  - Turntable.transform -> Model.object
+  - Model.color         -> swapchain

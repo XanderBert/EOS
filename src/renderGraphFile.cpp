@@ -4,6 +4,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <ranges>
@@ -11,39 +12,15 @@
 #include <string>
 #include <system_error>
 
+#include "formatNames.h"
+#include "graphFileParser.h"
 #include "logger.h"
-
-#if defined(EOS_GRAPH_TOOLS)
-#include "GraphTools/graphFileParser.h"
-#endif
 
 namespace EOS
 {
     namespace
     {
         constexpr uint32_t kNone = 0xFFFFFFFF;
-
-        struct FormatName final
-        {
-            std::string_view Name;
-            Format Value;
-        };
-
-        // The formats a graph file can give an output, by their EOS::Format names.
-        constexpr FormatName kFormatNames[] =
-        {
-            {"swapchain", Format::Invalid},
-            {"R_UN8", Format::R_UN8}, {"R_UI16", Format::R_UI16}, {"R_UI32", Format::R_UI32}, {"R_UN16", Format::R_UN16}, {"R_F16", Format::R_F16}, {"R_F32", Format::R_F32},
-            {"RG_UN8", Format::RG_UN8}, {"RG_UI16", Format::RG_UI16}, {"RG_UI32", Format::RG_UI32}, {"RG_UN16", Format::RG_UN16}, {"RG_F16", Format::RG_F16}, {"RG_F32", Format::RG_F32},
-            {"RGBA_UN8", Format::RGBA_UN8}, {"RGBA_UI32", Format::RGBA_UI32}, {"RGBA_F16", Format::RGBA_F16}, {"RGBA_F32", Format::RGBA_F32},
-            {"RGBA_SRGB8", Format::RGBA_SRGB8}, {"BGRA_UN8", Format::BGRA_UN8}, {"BGRA_SRGB8", Format::BGRA_SRGB8},
-            {"Z_UN16", Format::Z_UN16}, {"Z_UN24", Format::Z_UN24}, {"Z_F32", Format::Z_F32}, {"Z_UN24_S_UI8", Format::Z_UN24_S_UI8}, {"Z_F32_S_UI8", Format::Z_F32_S_UI8},
-        };
-
-        [[nodiscard]] constexpr bool IsDepthFormat(Format format)
-        {
-            return format == Format::Z_UN16 || format == Format::Z_UN24 || format == Format::Z_F32 || format == Format::Z_UN24_S_UI8 || format == Format::Z_F32_S_UI8;
-        }
 
         [[nodiscard]] constexpr bool IsInput(PinDirection direction) { return direction != PinDirection::Output; }
         [[nodiscard]] constexpr bool IsOutput(PinDirection direction) { return direction != PinDirection::Input; }
@@ -58,6 +35,7 @@ namespace EOS
                 case PropertyType::Float2: return "a float2";
                 case PropertyType::Float3: return "a float3";
                 case PropertyType::Float4: return "a float4";
+                case PropertyType::String: return "a string";
                 case PropertyType::Choice: return "a choice";
             }
             return "?";
@@ -107,6 +85,9 @@ namespace EOS
             std::array<float, 4> ClearColor{};
             float ClearDepth = 1.0f;
             uint8_t LayerCount = 1;
+            uint32_t Width = 0;                     // a fixed size; 0 when it follows the window or SizeOf
+            uint32_t Height = 0;
+            const char* BufferType = "";
         };
 
         struct Property final
@@ -129,6 +110,7 @@ namespace EOS
             uint32_t FirstProperty = 0;
             uint32_t PropertyCount = 0;
             PassTypeFunction Execute;
+            PassSetupFunction Setup;
         };
 
         std::deque<std::string> Strings;            // every name; a deque keeps them in place as it grows
@@ -174,6 +156,59 @@ namespace EOS
         {
             return {Choices.data() + property.FirstChoice, property.ChoiceCount};
         }
+
+        // A pass written in Slang (eos.pass), with what recording it needs.
+        struct ShaderPass final
+        {
+            std::string Module;
+            uint32_t Type = kNone;                  // kNone while its current version cannot be registered
+            ShaderProgramHolder Program;
+            std::shared_ptr<const CompiledShaderProgram> Reflection;    // the version its type was registered from
+            bool Compute = false;
+            bool ReportedMissingScene = false;
+            bool OwnVertexShader = false;
+            bool GeometryShader = false;
+            ComputePipelineHolder ComputePipeline;
+
+            // Raster passes: one pipeline per fragment entry point and set of target formats it has been used with.
+            struct RasterPipeline final
+            {
+                std::array<Format, EOS_MAX_COLOR_ATTACHMENTS> Formats{};
+                Format DepthFormat = Format::Invalid;
+                uint32_t Fragment = 0;              // into ShaderPassReflection::Fragments
+                RenderPipelineHolder Pipeline;
+            };
+            std::vector<RasterPipeline> RasterPipelines;
+        };
+
+        // A sampler of a [Sampler] description, shared by every Slang pass that asks for it.
+        struct CachedSampler final
+        {
+            uint8_t Filter = 1;
+            uint8_t Address = 0;
+            SamplerHolder Sampler;
+        };
+
+        IContext* Context = nullptr;
+        std::vector<std::unique_ptr<ShaderPass>> ShaderPasses;     // in place, for the pass functions that refer to them
+        std::vector<CachedSampler> Samplers;
+        ShaderProgramHolder FullscreenProgram;      // eos.fullscreen's vertex shader, for raster passes without one
+        uint64_t Generation = 0;                    // changes when a Slang pass changes its pins or properties
+
+        // Registers description; returns why not otherwise.
+        [[nodiscard]] std::string Add(PassTypeDescription& description, uint32_t& outType);
+
+        // A registered type, or the Slang pass of that module name, loaded now.
+        [[nodiscard]] uint32_t FindOrLoadType(std::string_view name);
+        [[nodiscard]] uint32_t LoadShaderPass(std::string_view module);
+        [[nodiscard]] uint32_t RegisterShaderPass(ShaderPass& pass, const CompiledShaderProgram& program);
+
+        // Registers again the Slang passes whose pins or properties a hot reload changed.
+        void Refresh();
+
+        void ExecuteShaderPass(ShaderPass& pass, PassContext& context, const PassData& data);
+        [[nodiscard]] RenderPipelineHandle GetRasterPipeline(ShaderPass& pass, const std::array<Format, EOS_MAX_COLOR_ATTACHMENTS>& formats, uint32_t targetCount, Format depthFormat, uint32_t fragment);
+        [[nodiscard]] SamplerHandle GetSampler(uint8_t filter, uint8_t address);
 
         // "a, b, c", for error messages that list what exists.
         [[nodiscard]] std::string ListPins(const Type& type, bool inputs, bool outputs) const
@@ -245,23 +280,28 @@ namespace EOS
         {
             GraphTexture Texture{};
             GraphBuffer Buffer{};
+            const SceneDrawData* Scene = nullptr;   // a scene buffer: how to draw it
+            const void* Host = nullptr;             // what a C++ pass type uploaded into the buffer this frame
+            size_t HostSize = 0;
             uint32_t DisabledBy = kNone;            // when missing: the disabled pass that would have written it
 
             [[nodiscard]] bool Valid() const { return Texture.Valid() || Buffer.Valid(); }
         };
 
-        GraphFileData(const PassRegistryData& registry, const GraphFileDescription& compiled) : Registry(registry), Compiled(compiled) {}
+        GraphFileData(PassRegistryData& registry, std::filesystem::path path) : Registry(registry), Path(std::move(path)) {}
 
-        const PassRegistryData& Registry;
-        GraphFileDescription Compiled;              // the version built into the application
-#if defined(EOS_GRAPH_TOOLS)
+        PassRegistryData& Registry;
+        std::filesystem::path Path;
+        uint64_t ResolvedGeneration = 0;            // of the registry, when the version in use was resolved
         std::filesystem::file_time_type LastWriteTime{};
-#endif
+        bool LastLoadFailed = false;                // the file read last had errors, maybe in a pass it uses
+        std::unique_ptr<ParsedGraphFile> Parsed;    // the YAML of the version in use, to resolve again
         std::unique_ptr<Version> Current;
         std::unique_ptr<Version> Pending;           // loaded by Reload(); replaces Current at the next AddTo
 
         // This frame.
         std::vector<Resource> SlotResources;
+        std::vector<std::unique_ptr<std::byte[]>> HostCopies;   // of PassSetup::Upload
         std::vector<Resource> ApplicationResources;
         std::vector<uint32_t> SkippedBecauseOf;     // per pass: the disabled pass it needs output from
 
@@ -271,16 +311,15 @@ namespace EOS
         void ReportOnce(std::string message, bool error = true)
         {
             if (!Reported.insert(message).second) return;
-            if (error) Logger->error("Render graph file {}: {}", Compiled.Path, message);
-            else Logger->warn("Render graph file {}: {}", Compiled.Path, message);
+            if (error) Logger->error("Render graph file {}: {}", Path.generic_string(), message);
+            else Logger->warn("Render graph file {}: {}", Path.generic_string(), message);
         }
 
         // Puts description, resolved against the pass types, into Pending. Returns false (and reports why) on errors.
         bool Resolve(const GraphFileDescription& description);
-#if defined(EOS_GRAPH_TOOLS)
-        // Parses the YAML file the build's version came from, then resolves it.
+
+        // Parses the YAML file, then resolves it.
         bool LoadFromDisk();
-#endif
         void AddTo(RenderGraph& graph, std::initializer_list<GraphResource> resources);
         [[nodiscard]] uint32_t FindSlot(std::string_view pin) const;
     };
@@ -288,21 +327,23 @@ namespace EOS
     // -------------------------------------------------------------------------------------------------------------------
     // PassRegistry
 
-    PassRegistry::PassRegistry()
+    PassRegistry::PassRegistry(IContext* context)
     : Types(std::make_unique<PassRegistryData>())
     {
+        Types->Context = context;
     }
 
     PassRegistry::~PassRegistry() = default;
 
-    void PassRegistry::Register(PassTypeDescription description)
+    std::string PassRegistryData::Add(PassTypeDescription& description, uint32_t& outType)
     {
-        PassRegistryData& registry = *Types;
+        PassRegistryData& registry = *this;
+        outType = kNone;
         const std::string_view name = description.Name;
 
-        CHECK_RETURN(!name.empty() && name.find('.') == std::string_view::npos, "Pass type '{}': names are not empty and have no '.'", name);
-        CHECK_RETURN(registry.FindType(name) == kNone, "Pass type '{}' is registered twice", name);
-        CHECK_RETURN(static_cast<bool>(description.Execute), "Pass type '{}' has no Execute function", name);
+        if (!(!name.empty() && name.find('.') == std::string_view::npos)) return fmt::format("Pass type '{}': names are not empty and have no '.'", name);
+        if (!(registry.FindType(name) == kNone)) return fmt::format("Pass type '{}' is registered twice", name);
+        if (!(static_cast<bool>(description.Execute) || static_cast<bool>(description.Setup))) return fmt::format("Pass type '{}' has neither an Execute nor a Setup function", name);
 
         const auto findPin = [&description](std::string_view pin) -> uint32_t
         {
@@ -321,12 +362,13 @@ namespace EOS
             const bool texture = !IsBufferUsage(pin.Usage);
             const bool target = pin.Usage == PinUsage::ColorTarget || pin.Usage == PinUsage::DepthTarget || pin.Usage == PinUsage::DepthTest;
 
-            CHECK_RETURN(!pinName.empty() && pinName.find('.') == std::string_view::npos, "Pass type '{}': pin names are not empty and have no '.'", name);
-            CHECK_RETURN(findPin(pinName) == i, "Pass type '{}' has two pins named '{}'", name, pinName);
-            CHECK_RETURN(std::ranges::none_of(description.Properties, [pinName](const PropertyDescription& property) { return pinName == property.Name; }),
-                         "Pass type '{}': '{}' is both a pin and a property", name, pinName);
-            CHECK_RETURN(!target || description.Kind == PassKind::Raster, "Pass type '{}': only raster passes have targets (pin '{}')", name, pinName);
-            CHECK_RETURN(description.Kind != PassKind::Transfer || pin.Usage == PinUsage::TransferBuffer, "Pass type '{}': transfer passes only have transfer buffers (pin '{}')", name, pinName);
+            if (!(!pinName.empty() && pinName.find('.') == std::string_view::npos)) return fmt::format("Pass type '{}': pin names are not empty and have no '.'", name);
+            if (!(findPin(pinName) == i)) return fmt::format("Pass type '{}' has two pins named '{}'", name, pinName);
+            if (!(std::ranges::none_of(description.Properties, [pinName](const PropertyDescription& property) { return pinName == property.Name; }))) return fmt::format("Pass type '{}': '{}' is both a pin and a property", name, pinName);
+            // A type with only Setup records nothing, so how its pins would be used in a pass does not matter.
+            const bool records = static_cast<bool>(description.Execute);
+            if (!(!records || !target || description.Kind == PassKind::Raster)) return fmt::format("Pass type '{}': only raster passes have targets (pin '{}')", name, pinName);
+            if (!(!records || description.Kind != PassKind::Transfer || pin.Usage == PinUsage::TransferBuffer)) return fmt::format("Pass type '{}': transfer passes only have transfer buffers (pin '{}')", name, pinName);
 
             switch (pin.Usage)
             {
@@ -334,7 +376,7 @@ namespace EOS
                 case PinUsage::DepthTest:
                 case PinUsage::ReadBuffer:
                 case PinUsage::IndirectBuffer:
-                    CHECK_RETURN(pin.Direction == PinDirection::Input, "Pass type '{}': pin '{}' only reads, so it is an input", name, pinName);
+                    if (!(pin.Direction == PinDirection::Input)) return fmt::format("Pass type '{}': pin '{}' only reads, so it is an input", name, pinName);
                     break;
                 default:
                     break;
@@ -344,29 +386,29 @@ namespace EOS
             {
                 if (texture)
                 {
-                    CHECK_RETURN(pin.Usage != PinUsage::DepthTarget || IsDepthFormat(pin.TextureFormat), "Pass type '{}': depth output '{}' needs a depth format", name, pinName);
-                    CHECK_RETURN(pin.Usage == PinUsage::DepthTarget || !IsDepthFormat(pin.TextureFormat), "Pass type '{}': output '{}' is not a depth target but has a depth format", name, pinName);
-                    CHECK_RETURN(pin.Output.Scale > 0.0f, "Pass type '{}': output '{}' needs a positive scale", name, pinName);
+                    if (!(pin.Usage != PinUsage::DepthTarget || IsDepthFormat(pin.TextureFormat))) return fmt::format("Pass type '{}': depth output '{}' needs a depth format", name, pinName);
+                    if (!(pin.Usage == PinUsage::DepthTarget || !IsDepthFormat(pin.TextureFormat))) return fmt::format("Pass type '{}': output '{}' is not a depth target but has a depth format", name, pinName);
+                    if (!(pin.Output.Scale > 0.0f)) return fmt::format("Pass type '{}': output '{}' needs a positive scale", name, pinName);
+                    if (!((pin.Output.Width == 0) == (pin.Output.Height == 0))) return fmt::format("Pass type '{}': output '{}' has a fixed width and height or neither", name, pinName);
                 }
                 else
                 {
-                    CHECK_RETURN(pin.BufferSize > 0, "Pass type '{}': buffer output '{}' needs a size", name, pinName);
+                    // Setup can hand out buffers of its own instead.
+                    if (!(pin.BufferSize > 0 || description.Setup)) return fmt::format("Pass type '{}': buffer output '{}' needs a size", name, pinName);
                 }
 
                 const std::string_view sizeOf = pin.Output.SizeOf;
                 if (!sizeOf.empty())
                 {
                     const uint32_t source = findPin(sizeOf);
-                    CHECK_RETURN(texture && source != kNone && IsInput(description.Pins[source].Direction) && !IsBufferUsage(description.Pins[source].Usage),
-                                 "Pass type '{}': output '{}' is sized like '{}', which is not a texture input", name, pinName, sizeOf);
+                    if (!(texture && source != kNone && IsInput(description.Pins[source].Direction) && !IsBufferUsage(description.Pins[source].Usage))) return fmt::format("Pass type '{}': output '{}' is sized like '{}', which is not a texture input", name, pinName, sizeOf);
                 }
 
                 const std::string_view bypass = pin.Output.BypassFrom;
                 if (!bypass.empty())
                 {
                     const uint32_t source = findPin(bypass);
-                    CHECK_RETURN(source != kNone && IsInput(description.Pins[source].Direction) && IsBufferUsage(description.Pins[source].Usage) == !texture,
-                                 "Pass type '{}': output '{}' bypasses to '{}', which is not an input of the same kind", name, pinName, bypass);
+                    if (!(source != kNone && IsInput(description.Pins[source].Direction) && IsBufferUsage(description.Pins[source].Usage) == !texture)) return fmt::format("Pass type '{}': output '{}' bypasses to '{}', which is not an input of the same kind", name, pinName, bypass);
                 }
             }
         }
@@ -376,12 +418,9 @@ namespace EOS
             const PropertyDescription& property = description.Properties[i];
             const std::string_view propertyName = property.Name;
 
-            CHECK_RETURN(IsIdentifier(propertyName) && propertyName != "type" && propertyName != "enabled",
-                         "Pass type '{}': property '{}' needs a name of letters, digits and '_' other than 'type' and 'enabled'", name, propertyName);
-            CHECK_RETURN(std::ranges::count_if(description.Properties, [propertyName](const PropertyDescription& other) { return propertyName == other.Name; }) == 1,
-                         "Pass type '{}' has two properties named '{}'", name, propertyName);
-            CHECK_RETURN(property.Type != PropertyType::Choice || (!property.Choices.empty() && property.Default.Int >= 0 && property.Default.Int < static_cast<int32_t>(property.Choices.size())),
-                         "Pass type '{}': choice '{}' needs choices and a default among them", name, propertyName);
+            if (!(IsIdentifier(propertyName) && propertyName != "type" && propertyName != "enabled")) return fmt::format("Pass type '{}': property '{}' needs a name of letters, digits and '_' other than 'type' and 'enabled'", name, propertyName);
+            if (!(std::ranges::count_if(description.Properties, [propertyName](const PropertyDescription& other) { return propertyName == other.Name; }) == 1)) return fmt::format("Pass type '{}' has two properties named '{}'", name, propertyName);
+            if (!(property.Type != PropertyType::Choice || (!property.Choices.empty() && property.Default.Int >= 0 && property.Default.Int < static_cast<int32_t>(property.Choices.size())))) return fmt::format("Pass type '{}': choice '{}' needs choices and a default among them", name, propertyName);
         }
 
         PassRegistryData::Type type
@@ -393,6 +432,7 @@ namespace EOS
             .FirstProperty = static_cast<uint32_t>(registry.Properties.size()),
             .PropertyCount = static_cast<uint32_t>(description.Properties.size()),
             .Execute = std::move(description.Execute),
+            .Setup = std::move(description.Setup),
         };
 
         for (const PinDescription& pin : description.Pins)
@@ -411,6 +451,9 @@ namespace EOS
                 .ClearColor = pin.Output.ClearColor,
                 .ClearDepth = pin.Output.ClearDepth,
                 .LayerCount = std::max<uint8_t>(pin.Output.LayerCount, 1),
+                .Width = pin.Output.Width,
+                .Height = pin.Output.Height,
+                .BufferType = registry.Intern(pin.BufferType),
             });
         }
 
@@ -430,7 +473,443 @@ namespace EOS
             for (const char* choice : property.Choices) registry.Choices.push_back(registry.Intern(choice));
         }
 
+        outType = static_cast<uint32_t>(registry.Types.size());
         registry.Types.push_back(std::move(type));
+        return {};
+    }
+
+    void PassRegistry::Register(PassTypeDescription description)
+    {
+        uint32_t type = kNone;
+        const std::string error = Types->Add(description, type);
+        CHECK(error.empty(), "{}", error);
+    }
+
+    // -------------------------------------------------------------------------------------------------------------------
+    // Passes written in Slang
+
+    uint32_t PassRegistryData::FindOrLoadType(std::string_view name)
+    {
+        if (const uint32_t type = FindType(name); type != kNone) return type;
+
+        // A Slang pass whose current version could not be registered was reported when it changed; do not load it twice.
+        const auto known = std::ranges::find_if(ShaderPasses, [name](const std::unique_ptr<ShaderPass>& pass) { return pass->Module == name; });
+        if (known != ShaderPasses.end()) return (*known)->Type;
+
+        return LoadShaderPass(name);
+    }
+
+    uint32_t PassRegistryData::LoadShaderPass(std::string_view module)
+    {
+        if (!Context || !IsIdentifier(module)) return kNone;
+
+        ShaderProgramHolder program = Context->CreateShaderProgram({.Module = std::string(module)});
+        if (program.Empty()) return kNone;      // CreateShaderProgram reported why
+
+        const std::shared_ptr<const CompiledShaderProgram> reflection = Context->GetShaderProgram(program);
+        if (!reflection || !reflection->Pass.IsPass)
+        {
+            Logger->error("Shader module '{}' is not a render graph pass: its push constants are not a struct marked [Pass] (eos.pass)", module);
+            return kNone;
+        }
+
+        auto pass = std::make_unique<ShaderPass>();
+        pass->Module = module;
+        pass->Program = std::move(program);
+        pass->Reflection = reflection;
+        pass->Type = RegisterShaderPass(*pass, *reflection);
+        if (pass->Type == kNone) return kNone;
+
+        if (pass->Compute)
+        {
+            pass->ComputePipeline = Context->CreateComputePipeline({.ComputeShader = {pass->Program}, .DebugName = pass->Module.c_str()});
+        }
+
+        const uint32_t type = pass->Type;
+        ShaderPasses.push_back(std::move(pass));
+        return type;
+    }
+
+    // Turns the pass a Slang module declares into a pass type: its fields into pins and properties, and recording into
+    // ExecuteShaderPass.
+    uint32_t PassRegistryData::RegisterShaderPass(ShaderPass& pass, const CompiledShaderProgram& program)
+    {
+        const auto hasStage = [&program](ShaderStage stage) { return std::ranges::any_of(program.EntryPoints, [stage](const ShaderEntryPoint& entryPoint) { return entryPoint.Stage == stage; }); };
+        pass.Compute = hasStage(ShaderStage::Compute);
+        pass.OwnVertexShader = hasStage(ShaderStage::Vertex);
+        pass.GeometryShader = hasStage(ShaderStage::Geometry);
+
+        PassTypeDescription description
+        {
+            .Name = pass.Module.c_str(),
+            .Kind = pass.Compute ? PassKind::Compute : PassKind::Raster,
+            .Execute = [this, &pass](PassContext& context, const PassData& data) { ExecuteShaderPass(pass, context, data); },
+        };
+
+        const auto formatOf = [](const ShaderPassField& field) { return field.Format.empty() ? EOS::Pin::SwapchainFormat : FindFormat(field.Format)->Value; };
+        const auto outputOf = [](const ShaderPassField& field) -> OutputOptions
+        {
+            return
+            {
+                .Scale = field.Scale,
+                .SizeOf = field.SizeOf.c_str(),
+                .Width = field.Width,
+                .Height = field.Height,
+                .ClearColor = field.Clear,
+                .LayerCount = static_cast<uint8_t>(field.Layers),
+                .BypassFrom = field.Bypass.c_str(),
+            };
+        };
+        const auto optional = [](const ShaderPassField& field, PinDescription pin) { return field.Optional ? EOS::Pin::Optional(pin) : pin; };
+        std::vector<std::vector<const char*>> choices;
+        choices.reserve(program.Pass.Fields.size());
+
+        // Color targets are attached in pin order, so they go in by location.
+        std::vector<const ShaderPassField*> targets;
+        for (const ShaderPassField& field : program.Pass.Fields)
+        {
+            if (field.Kind == ShaderPassFieldKind::ColorTarget) targets.push_back(&field);
+        }
+        std::ranges::sort(targets, {}, &ShaderPassField::Offset);
+        for (const ShaderPassField* target : targets)
+        {
+            description.Pins.push_back(target->Direction == ShaderPassDirection::InOut
+                                       ? EOS::Pin::ColorInOut(target->Name.c_str())
+                                       : EOS::Pin::ColorOutput(target->Name.c_str(), formatOf(*target), outputOf(*target)));
+        }
+
+        for (const ShaderPassField& field : program.Pass.Fields)
+        {
+            const char* name = field.Name.c_str();
+            const float defaultValue = static_cast<float>(field.Default);
+
+            switch (field.Kind)
+            {
+                case ShaderPassFieldKind::Texture:
+                    // A texture marked [DepthTest] is also the read-only depth target.
+                    description.Pins.push_back(optional(field, field.DepthCompare >= 0 ? EOS::Pin::DepthTest(name) : EOS::Pin::Sampled(name)));
+                    break;
+                case ShaderPassFieldKind::StorageTexture:
+                    description.Pins.push_back(field.Direction == ShaderPassDirection::InOut ? EOS::Pin::StorageInOut(name) : EOS::Pin::StorageOutput(name, formatOf(field), outputOf(field)));
+                    break;
+                case ShaderPassFieldKind::Buffer:
+                case ShaderPassFieldKind::Scene:
+                {
+                    const char* type = field.BufferType.c_str();
+                    if (field.Direction == ShaderPassDirection::Input) description.Pins.push_back(optional(field, EOS::Pin::Typed(EOS::Pin::ReadBuffer(name), type)));
+                    else if (field.Direction == ShaderPassDirection::InOut) description.Pins.push_back(EOS::Pin::Typed(EOS::Pin::BufferInOut(name), type));
+                    else description.Pins.push_back(EOS::Pin::Typed(EOS::Pin::BufferOutput(name, field.BufferSize, {.BypassFrom = field.Bypass.c_str()}), type));
+                    break;
+                }
+                case ShaderPassFieldKind::DepthTarget:
+                    if (field.Direction == ShaderPassDirection::Input) description.Pins.push_back(optional(field, EOS::Pin::DepthTest(name)));
+                    else if (field.Direction == ShaderPassDirection::InOut) description.Pins.push_back(EOS::Pin::DepthInOut(name));
+                    else description.Pins.push_back(EOS::Pin::DepthOutput(name, formatOf(field), outputOf(field)));
+                    break;
+                case ShaderPassFieldKind::ColorTarget:
+                    break;
+                case ShaderPassFieldKind::Sampler:
+                    // Created now rather than when the pass is recorded: a descriptor created while a frame records
+                    // is not in the bindless set that frame uses.
+                    static_cast<void>(GetSampler(field.SamplerFilter, field.SamplerAddress));
+                    break;
+                case ShaderPassFieldKind::Bool:
+                    description.Properties.push_back(EOS::Property::Bool(name, field.Default != 0.0));
+                    break;
+                case ShaderPassFieldKind::Int:
+                case ShaderPassFieldKind::UInt:
+                    description.Properties.push_back(EOS::Property::Int(name, static_cast<int32_t>(field.Default), static_cast<int32_t>(field.Minimum), static_cast<int32_t>(field.Maximum)));
+                    break;
+                case ShaderPassFieldKind::Float:
+                    description.Properties.push_back(EOS::Property::Float(name, defaultValue, field.Minimum, field.Maximum));
+                    break;
+                case ShaderPassFieldKind::Float2:
+                    description.Properties.push_back(EOS::Property::Float2(name, glm::vec2(0.0f), field.Minimum, field.Maximum));
+                    break;
+                case ShaderPassFieldKind::Float3:
+                    description.Properties.push_back(EOS::Property::Float3(name, glm::vec3(0.0f), field.Minimum, field.Maximum));
+                    break;
+                case ShaderPassFieldKind::Float4:
+                    description.Properties.push_back(EOS::Property::Float4(name, glm::vec4(0.0f), field.Minimum, field.Maximum));
+                    break;
+                case ShaderPassFieldKind::Enum:
+                {
+                    std::vector<const char*>& names = choices.emplace_back();
+                    for (const std::string& enumName : field.EnumNames) names.push_back(enumName.c_str());
+                    const auto defaultCase = std::ranges::find(field.EnumValues, static_cast<int64_t>(field.Default));
+                    const int32_t defaultIndex = defaultCase == field.EnumValues.end() ? 0 : static_cast<int32_t>(defaultCase - field.EnumValues.begin());
+                    description.Properties.push_back(EOS::Property::Choice(name, names, defaultIndex));
+                    break;
+                }
+            }
+        }
+
+        uint32_t type = kNone;
+        const std::string error = Add(description, type);
+        if (!error.empty()) Logger->error("Render graph pass '{}' cannot be used: {}", pass.Module, error);
+        return type;
+    }
+
+    void PassRegistryData::Refresh()
+    {
+        if (!Context) return;
+
+        for (const std::unique_ptr<ShaderPass>& pass : ShaderPasses)
+        {
+            const std::shared_ptr<const CompiledShaderProgram> current = Context->GetShaderProgram(pass->Program);
+            if (!current || current == pass->Reflection) continue;
+
+            // Recompiled with the same pins and properties: its pipelines were rebuilt, the type stays as it is.
+            const bool samePass = current->Pass == pass->Reflection->Pass;
+            pass->Reflection = current;
+            if (samePass) continue;
+
+            // Otherwise the type is registered again under its name, and graph files resolve against the new one.
+            if (pass->Type != kNone) Types[pass->Type].Name = "";
+            pass->RasterPipelines.clear();
+            pass->Type = current->Pass.IsPass ? RegisterShaderPass(*pass, *current) : kNone;
+            if (!current->Pass.IsPass) Logger->error("Shader module '{}' is no longer a render graph pass: its push constants are not a struct marked [Pass]", pass->Module);
+            else if (pass->Type != kNone) Logger->info("Render graph pass '{}' changed its pins or properties; the graph files using it are resolved again", pass->Module);
+            ++Generation;
+        }
+    }
+
+    RenderPipelineHandle PassRegistryData::GetRasterPipeline(ShaderPass& pass, const std::array<Format, EOS_MAX_COLOR_ATTACHMENTS>& formats, uint32_t targetCount, Format depthFormat, uint32_t fragment)
+    {
+        for (const ShaderPass::RasterPipeline& pipeline : pass.RasterPipelines)
+        {
+            if (pipeline.Formats == formats && pipeline.DepthFormat == depthFormat && pipeline.Fragment == fragment) return pipeline.Pipeline;
+        }
+
+        const ShaderPassReflection& reflection = pass.Reflection->Pass;
+        RenderPipelineDescription description{};
+        if (pass.OwnVertexShader)
+        {
+            description.VertexShader = {pass.Program};
+        }
+        else
+        {
+            if (FullscreenProgram.Empty()) FullscreenProgram = Context->CreateShaderProgram({.Module = "eos.fullscreen"});
+            description.VertexShader = {FullscreenProgram};
+        }
+        if (pass.GeometryShader) description.GeometryShader = {pass.Program};
+        description.FragmentShader = {pass.Program, reflection.Fragments[fragment].EntryPoint.c_str()};
+        for (uint32_t i = 0; i < targetCount; ++i) description.ColorAttachments[i].ColorFormat = formats[i];
+        description.DepthFormat = depthFormat;
+        description.PipelineCullMode = static_cast<CullMode>(reflection.Cull);
+        description.DepthClamping = reflection.DepthClamp;
+        description.DebugName = pass.Module.c_str();
+
+        ShaderPass::RasterPipeline& pipeline = pass.RasterPipelines.emplace_back();
+        pipeline.Formats = formats;
+        pipeline.DepthFormat = depthFormat;
+        pipeline.Fragment = fragment;
+        pipeline.Pipeline = Context->CreateRenderPipeline(description);
+        return pipeline.Pipeline;
+    }
+
+    SamplerHandle PassRegistryData::GetSampler(uint8_t filter, uint8_t address)
+    {
+        for (const CachedSampler& sampler : Samplers)
+        {
+            if (sampler.Filter == filter && sampler.Address == address) return sampler.Sampler;
+        }
+
+        const bool linear = filter != 0;
+        const SamplerWrap wrap = static_cast<SamplerWrap>(address);
+        CachedSampler& sampler = Samplers.emplace_back(CachedSampler{.Filter = filter, .Address = address});
+        sampler.Sampler = Context->CreateSampler(
+        {
+            .minFilter = linear ? LinearFilter : NearestFilter,
+            .magFilter = linear ? LinearFilter : NearestFilter,
+            .mipMap = linear ? SamplerMip::Linear : SamplerMip::Nearest,
+            .wrapU = wrap,
+            .wrapV = wrap,
+            .wrapW = wrap,
+            .mipLodMax = EOS_MAX_MIP_LEVELS,
+            .maxAnisotropic = 0,
+            .debugName = "Render Graph Sampler",
+        });
+        return sampler.Sampler;
+    }
+
+    // Fills the push constants from the pass's pins and properties, by the offsets of its reflection, and records it: a
+    // dispatch over its first storage texture output, or draws into its targets (a fullscreen triangle, 3 vertices of
+    // its own vertex shader, or the scene).
+    void PassRegistryData::ExecuteShaderPass(ShaderPass& pass, PassContext& context, const PassData& data)
+    {
+        const CompiledShaderProgram& program = *pass.Reflection;
+        const ShaderPassReflection& reflection = program.Pass;
+        std::array<std::byte, 256> constants{};
+        CHECK_RETURN(program.PushConstantSize <= constants.size(), "Render graph pass '{}': {} bytes of push constants", pass.Module, program.PushConstantSize);
+
+        const auto write = [&constants](uint32_t offset, const void* value, size_t size)
+        {
+            if (offset + size <= constants.size()) std::memcpy(constants.data() + offset, value, size);
+        };
+
+        Dimensions dispatchSize{0, 0, 0};
+        std::array<Format, EOS_MAX_COLOR_ATTACHMENTS> targetFormats{};
+        uint32_t targetCount = 0;
+        Format depthFormat = Format::Invalid;
+        DepthState depthState{};
+        const SceneDrawData* scene = nullptr;
+
+        for (const ShaderPassField& field : reflection.Fields)
+        {
+            switch (field.Kind)
+            {
+                case ShaderPassFieldKind::Texture:
+                case ShaderPassFieldKind::StorageTexture:
+                {
+                    const GraphTexture texture = data.Texture(field.Name);
+                    const DescriptorHandle handle = texture.Valid() ? context.Descriptor(texture) : DescriptorHandle{};
+                    write(field.Offset, &handle, sizeof(handle));
+                    if (field.Kind == ShaderPassFieldKind::StorageTexture && field.Direction != ShaderPassDirection::Input && dispatchSize.Width == 0 && texture.Valid())
+                    {
+                        dispatchSize = context.Size(texture);
+                    }
+                    if (field.DepthCompare >= 0 && texture.Valid())
+                    {
+                        depthFormat = Context->GetFormat(context.Texture(texture));
+                        depthState = {.CompareOpState = static_cast<CompareOp>(field.DepthCompare), .IsDepthWriteEnabled = false};
+                    }
+                    break;
+                }
+                case ShaderPassFieldKind::Buffer:
+                case ShaderPassFieldKind::Scene:
+                {
+                    const GraphBuffer buffer = data.Buffer(field.Name);
+                    const uint64_t address = buffer.Valid() ? context.Address(buffer) : 0;
+                    write(field.Offset, &address, sizeof(address));
+                    if (field.Kind == ShaderPassFieldKind::Scene) scene = data.Scene(field.Name);
+                    break;
+                }
+                case ShaderPassFieldKind::DepthTarget:
+                {
+                    const GraphTexture texture = data.Texture(field.Name);
+                    if (!texture.Valid()) break;
+
+                    // Outputs and input-outputs write depth; an input is only tested against.
+                    const bool input = field.Direction == ShaderPassDirection::Input;
+                    const CompareOp compare = field.DepthCompare >= 0 ? static_cast<CompareOp>(field.DepthCompare) : input ? CompareOp::LessEqual : CompareOp::Less;
+                    depthFormat = Context->GetFormat(context.Texture(texture));
+                    depthState = {.CompareOpState = compare, .IsDepthWriteEnabled = !input};
+                    break;
+                }
+                case ShaderPassFieldKind::ColorTarget:
+                {
+                    const GraphTexture texture = data.Texture(field.Name);
+                    if (texture.Valid() && field.Offset < targetFormats.size())
+                    {
+                        targetFormats[field.Offset] = Context->GetFormat(context.Texture(texture));
+                        targetCount = std::max(targetCount, field.Offset + 1);
+                    }
+                    break;
+                }
+                case ShaderPassFieldKind::Sampler:
+                {
+                    const DescriptorHandle handle(GetSampler(field.SamplerFilter, field.SamplerAddress));
+                    write(field.Offset, &handle, sizeof(handle));
+                    break;
+                }
+                case ShaderPassFieldKind::Bool:
+                {
+                    const uint32_t value = data.Bool(field.Name) ? 1u : 0u;
+                    write(field.Offset, &value, sizeof(value));
+                    break;
+                }
+                case ShaderPassFieldKind::Int:
+                case ShaderPassFieldKind::UInt:
+                {
+                    const int32_t value = data.Int(field.Name);
+                    write(field.Offset, &value, sizeof(value));
+                    break;
+                }
+                case ShaderPassFieldKind::Float:
+                {
+                    const float value = data.Float(field.Name);
+                    write(field.Offset, &value, sizeof(value));
+                    break;
+                }
+                case ShaderPassFieldKind::Float2:
+                case ShaderPassFieldKind::Float3:
+                case ShaderPassFieldKind::Float4:
+                {
+                    const glm::vec4 value = field.Kind == ShaderPassFieldKind::Float2 ? glm::vec4(data.Float2(field.Name), 0.0f, 0.0f)
+                                          : field.Kind == ShaderPassFieldKind::Float3 ? glm::vec4(data.Float3(field.Name), 0.0f)
+                                          : data.Float4(field.Name);
+                    const size_t components = field.Kind == ShaderPassFieldKind::Float2 ? 2 : field.Kind == ShaderPassFieldKind::Float3 ? 3 : 4;
+                    write(field.Offset, &value.x, components * sizeof(float));
+                    break;
+                }
+                case ShaderPassFieldKind::Enum:
+                {
+                    const size_t index = std::min<size_t>(static_cast<size_t>(std::max(data.Int(field.Name), 0)), field.EnumValues.size() - 1);
+                    const int32_t value = static_cast<int32_t>(field.EnumValues[index]);
+                    write(field.Offset, &value, sizeof(value));
+                    break;
+                }
+            }
+        }
+
+        if (pass.Compute)
+        {
+            if (reflection.DispatchThreads[0] != 0)
+            {
+                dispatchSize = {reflection.DispatchThreads[0], reflection.DispatchThreads[1], reflection.DispatchThreads[2]};
+            }
+            else if (!reflection.DispatchSizeOf.empty())
+            {
+                const GraphTexture texture = data.Texture(reflection.DispatchSizeOf);
+                dispatchSize = texture.Valid() ? context.Size(texture) : Dimensions{0, 0, 0};
+            }
+            if (dispatchSize.Width == 0 || dispatchSize.Height == 0 || dispatchSize.Depth == 0) return;
+
+            cmdBindComputePipeline(context.Cmd, pass.ComputePipeline);
+            cmdPushConstants(context.Cmd, constants.data(), program.PushConstantSize);
+            cmdDispatchThreads(context.Cmd, dispatchSize);
+            return;
+        }
+
+        if (reflection.DrawScene && !scene)
+        {
+            if (!pass.ReportedMissingScene) Logger->error("Render graph pass '{}' ({}) draws the scene, but what is connected to its scene pin is not one", data.Name(), pass.Module);
+            pass.ReportedMissingScene = true;
+            return;
+        }
+
+        if (depthFormat != Format::Invalid) cmdSetDepthState(context.Cmd, depthState);
+        if (scene) cmdBindIndexBuffer(context.Cmd, scene->IndexBuffer, IndexFormat::UI32);
+
+        for (uint32_t fragment = 0; fragment < reflection.Fragments.size(); ++fragment)
+        {
+            cmdBindRenderPipeline(context.Cmd, GetRasterPipeline(pass, targetFormats, targetCount, depthFormat, fragment));
+            if (program.PushConstantSize > 0) cmdPushConstants(context.Cmd, constants.data(), program.PushConstantSize);
+
+            if (!reflection.DrawScene)
+            {
+                cmdDraw(context.Cmd, 3);
+                continue;
+            }
+
+            // One indirect draw per run of instances whose alpha mode the fragment shader draws: instances are sorted
+            // by alpha mode, and each draw's firstInstance is its instance's index.
+            const uint8_t materials = reflection.Fragments[fragment].Materials;
+            for (uint32_t mode = 0; mode < 3;)
+            {
+                if (!(materials & (1u << mode)))
+                {
+                    ++mode;
+                    continue;
+                }
+
+                const uint32_t first = scene->FirstInstance[mode];
+                uint32_t count = 0;
+                for (; mode < 3 && (materials & (1u << mode)); ++mode) count += scene->InstanceCount[mode];
+                if (count > 0) cmdDrawIndexedIndirect(context.Cmd, scene->IndirectBuffer, first * sizeof(DrawIndexedIndirectCommand), count);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------------------------------------------------
@@ -443,7 +922,7 @@ namespace EOS
         class Resolver final
         {
         public:
-            Resolver(const PassRegistryData& registry, const GraphFileDescription& file, GraphFileData::Version& out)
+            Resolver(PassRegistryData& registry, const GraphFileDescription& file, GraphFileData::Version& out)
             : Registry(registry), File(file), Out(out)
             {
             }
@@ -471,7 +950,7 @@ namespace EOS
                 bool Valid = false;
             };
 
-            const PassRegistryData& Registry;
+            PassRegistryData& Registry;
             const GraphFileDescription& File;
             GraphFileData::Version& Out;
 
@@ -574,12 +1053,16 @@ namespace EOS
                     return;
                 }
 
-                const uint32_t typeIndex = Registry.FindType(typeName);
+                const uint32_t typeIndex = Registry.FindOrLoadType(typeName);
                 if (typeIndex == kNone)
                 {
                     std::string known;
-                    for (const PassRegistryData::Type& type : Registry.Types) known += fmt::format("{}{}", known.empty() ? "" : ", ", type.Name);
-                    Error(typeSetting->Location, fmt::format("unknown pass type '{}' (registered: {})", typeName, known.empty() ? "none" : known));
+                    for (const PassRegistryData::Type& type : Registry.Types)
+                    {
+                        if (*type.Name) known += fmt::format("{}{}", known.empty() ? "" : ", ", type.Name);
+                    }
+                    Error(typeSetting->Location, fmt::format("unknown pass type '{}': no pass type of that name is registered ({}) and no Slang pass module of that name loads",
+                                                             typeName, known.empty() ? "none" : known));
                     FailedPasses.push_back(name);
                     return;
                 }
@@ -692,6 +1175,12 @@ namespace EOS
                             }
                         }
                         Error(setting.Location, fmt::format("'{}' is one of: {}; not '{}'", property.Name, fmt::join(choices, ", "), text));
+                        return;
+                    }
+                    case PropertyType::String:
+                    {
+                        std::string_view text;
+                        if (ReadSingle(setting, text)) value.String = Out.Intern(text);
                         return;
                     }
                 }
@@ -856,6 +1345,13 @@ namespace EOS
                                                     Describe(destination), IsBufferUsage(input.Usage) ? "buffer" : "texture"));
                         return;
                     }
+                    const std::string_view outputType = output.BufferType;
+                    const std::string_view inputType = input.BufferType;
+                    if (!outputType.empty() && !inputType.empty() && outputType != inputType)
+                    {
+                        Error(location, fmt::format("'{}' is a {} and '{}' takes a {}", Describe(source), outputType, Describe(destination), inputType));
+                        return;
+                    }
                     if (source.Pass == destination.Pass)
                     {
                         Error(location, "a pass cannot read its own output");
@@ -988,6 +1484,9 @@ namespace EOS
 
     bool GraphFileData::Resolve(const GraphFileDescription& description)
     {
+        // A reload of shaders and graph files together: the file has to see the passes as they are now.
+        Registry.Refresh();
+        ResolvedGeneration = Registry.Generation;
         auto version = std::make_unique<Version>();
         Resolver resolver(Registry, description, *version);
         resolver.Resolve();
@@ -1003,24 +1502,40 @@ namespace EOS
         return true;
     }
 
-#if defined(EOS_GRAPH_TOOLS)
     bool GraphFileData::LoadFromDisk()
     {
-        const ParsedGraphFile file = ParseGraphFile(Compiled.Path);
-        if (!file.Errors.empty())
+        LastLoadFailed = true;
+        auto file = std::make_unique<ParsedGraphFile>(ParseGraphFile(Path));
+        if (!file->Errors.empty())
         {
-            Logger->error("Render graph file {} has errors{}:\n{}", Compiled.Path, Current ? "; the previous version stays in use" : "", fmt::join(file.Errors, "\n"));
+            Logger->error("Render graph file {} has errors{}:\n{}", file->Path, Current ? "; the previous version stays in use" : "", fmt::join(file->Errors, "\n"));
             return false;
         }
-        return Resolve(file.Description());
+        if (!Resolve(file->Description())) return false;
+
+        Parsed = std::move(file);
+        LastLoadFailed = false;
+        return true;
     }
-#endif
 
     // -------------------------------------------------------------------------------------------------------------------
     // Adding a file's passes to a frame
 
     void GraphFileData::AddTo(RenderGraph& graph, std::initializer_list<GraphResource> resources)
     {
+        // A hot reload changed the pins or properties of a Slang pass: the version in use refers to its old type.
+        Registry.Refresh();
+        if (Registry.Generation != ResolvedGeneration && (Current || Pending))
+        {
+            ResolvedGeneration = Registry.Generation;
+            Pending.reset();
+            if (!Resolve(Parsed->Description()))
+            {
+                Current.reset();
+                Logger->error("Render graph file {}: its passes do not run until it or the passes are fixed", Path.generic_string());
+            }
+        }
+
         // A reload takes effect here, between frames: passes recorded earlier in this frame refer to the version in use.
         if (Pending)
         {
@@ -1044,6 +1559,7 @@ namespace EOS
 
         SlotResources.assign(version.Slots.size(), {});
         SkippedBecauseOf.assign(version.Passes.size(), kNone);
+        HostCopies.clear();
 
         // The application resource on a pin, or an invalid one (reported) when it is of the wrong kind.
         const auto applicationResource = [this, &version](uint32_t resource, const PassRegistryData::Pin& pin, const char* pinName) -> Resource
@@ -1104,7 +1620,14 @@ namespace EOS
                 continue;
             }
 
-            // Outputs.
+            // Outputs: what the type's Setup hands out, an application resource, or one the graph creates.
+            if (type.Setup)
+            {
+                const PassData data(*this, passIndex);
+                PassSetup setup(graph, data, *this, passIndex);
+                type.Setup(setup);
+            }
+
             for (uint32_t pin = 0; pin < type.PinCount; ++pin)
             {
                 const PassRegistryData::Pin& description = Registry.Pins[type.FirstPin + pin];
@@ -1112,6 +1635,7 @@ namespace EOS
                 if (description.Direction != PinDirection::Output) continue;
 
                 Resource& resource = SlotResources[pass.FirstSlot + pin];
+                if (resource.Valid()) continue;
                 if (slot.TargetResource != kNone)
                 {
                     resource = applicationResource(slot.TargetResource, description, slot.DebugName);
@@ -1120,7 +1644,8 @@ namespace EOS
 
                 if (IsBufferUsage(description.Usage))
                 {
-                    resource.Buffer = graph.CreateBuffer({.Size = description.BufferSize, .DebugName = slot.DebugName});
+                    if (description.BufferSize > 0) resource.Buffer = graph.CreateBuffer({.Size = description.BufferSize, .DebugName = slot.DebugName});
+                    else ReportOnce(fmt::format("'{}' has no buffer: its pass type's Setup gave it none", slot.DebugName));
                     continue;
                 }
 
@@ -1137,7 +1662,11 @@ namespace EOS
                     texture.NumberOfLayers = description.LayerCount;
                 }
 
-                if (description.SizeOf != kNone)
+                if (description.Width > 0)
+                {
+                    texture.Size = {.Width = description.Width, .Height = description.Height, .Depth = 1};
+                }
+                else if (description.SizeOf != kNone)
                 {
                     const Dimensions size = graph.GetSize(SlotResources[pass.FirstSlot + description.SizeOf].Texture);
                     texture.Size =
@@ -1150,6 +1679,9 @@ namespace EOS
 
                 resource.Texture = graph.CreateTexture(texture);
             }
+
+            // A type with only Setup records nothing itself.
+            if (!type.Execute) continue;
 
             // Every pin becomes an access; targets are attached in pin order.
             PassBuilder builder = graph.AddPass(pass.Name, type.Kind);
@@ -1273,49 +1805,90 @@ namespace EOS
         return slot == kNone ? GraphBuffer{} : File.SlotResources[slot].Buffer;
     }
 
+    const SceneDrawData* PassData::Scene(std::string_view pin) const
+    {
+        const uint32_t slot = FindPin(pin);
+        return slot == kNone ? nullptr : File.SlotResources[slot].Scene;
+    }
+
+    const void* PassData::HostData(std::string_view pin, size_t size) const
+    {
+        const uint32_t slot = FindPin(pin);
+        if (slot == kNone) return nullptr;
+
+        const GraphFileData::Resource& resource = File.SlotResources[slot];
+        return resource.HostSize == size ? resource.Host : nullptr;
+    }
+
     bool PassData::Bool(std::string_view property) const { return FindProperty(property, PropertyType::Bool).Bool; }
     int32_t PassData::Int(std::string_view property) const { return FindProperty(property, PropertyType::Int).Int; }
     float PassData::Float(std::string_view property) const { return FindProperty(property, PropertyType::Float).Float.x; }
     glm::vec2 PassData::Float2(std::string_view property) const { return glm::vec2(FindProperty(property, PropertyType::Float2).Float); }
     glm::vec3 PassData::Float3(std::string_view property) const { return glm::vec3(FindProperty(property, PropertyType::Float3).Float); }
     glm::vec4 PassData::Float4(std::string_view property) const { return FindProperty(property, PropertyType::Float4).Float; }
+    const char* PassData::String(std::string_view property) const { return FindProperty(property, PropertyType::String).String; }
+
+    // -------------------------------------------------------------------------------------------------------------------
+    // PassSetup
+
+    void PassSetup::Output(std::string_view pin, GraphTexture texture)
+    {
+        const uint32_t slot = Data.FindPin(pin);
+        if (slot == kNone) return;
+
+        const GraphFileData::Pass& pass = File.Current->Passes[Pass];
+        const PassRegistryData::Pin& description = File.Registry.Pins[File.Registry.Types[pass.Type].FirstPin + (slot - pass.FirstSlot)];
+        CHECK_RETURN(description.Direction == PinDirection::Output && !IsBufferUsage(description.Usage), "Pin '{}' of pass type '{}' is not a texture output", pin, File.Registry.Types[pass.Type].Name);
+        File.SlotResources[slot] = {.Texture = texture};
+    }
+
+    void PassSetup::Output(std::string_view pin, GraphBuffer buffer, const SceneDrawData* scene)
+    {
+        const uint32_t slot = Data.FindPin(pin);
+        if (slot == kNone) return;
+
+        const GraphFileData::Pass& pass = File.Current->Passes[Pass];
+        const PassRegistryData::Pin& description = File.Registry.Pins[File.Registry.Types[pass.Type].FirstPin + (slot - pass.FirstSlot)];
+        CHECK_RETURN(description.Direction == PinDirection::Output && IsBufferUsage(description.Usage), "Pin '{}' of pass type '{}' is not a buffer output", pin, File.Registry.Types[pass.Type].Name);
+        File.SlotResources[slot] = {.Buffer = buffer, .Scene = scene};
+    }
+
+    void PassSetup::Output(std::string_view pin, GraphBuffer buffer, const void* host, size_t size)
+    {
+        Output(pin, buffer);
+        const uint32_t slot = Data.FindPin(pin);
+        if (slot == kNone) return;
+
+        std::byte* copy = File.HostCopies.emplace_back(std::make_unique<std::byte[]>(size)).get();
+        std::memcpy(copy, host, size);
+        File.SlotResources[slot].Host = copy;
+        File.SlotResources[slot].HostSize = size;
+    }
 
     // -------------------------------------------------------------------------------------------------------------------
     // GraphFile
 
-    GraphFile::GraphFile(const PassRegistry& registry, const GraphFileDescription& file)
-    : File(std::make_unique<GraphFileData>(*registry.Types, file))
+    GraphFile::GraphFile(PassRegistry& registry, std::filesystem::path path)
+    : File(std::make_unique<GraphFileData>(*registry.Types, std::move(path)))
     {
-#if defined(EOS_GRAPH_TOOLS)
-        // The YAML is what is being edited, so it wins; the build's version is the fallback when it has errors.
+        // A file with errors is reported; its passes run once a Reload() finds it fixed.
         std::error_code error;
-        File->LastWriteTime = std::filesystem::last_write_time(file.Path, error);
-        if (!File->LoadFromDisk())
-        {
-            Logger->warn("Render graph file {}: using the version built into the application", file.Path);
-            File->Resolve(file);
-        }
-#else
-        File->Resolve(file);
-#endif
-        if (File->Pending) File->Current = std::move(File->Pending);
+        File->LastWriteTime = std::filesystem::last_write_time(File->Path, error);
+        if (File->LoadFromDisk()) File->Current = std::move(File->Pending);
     }
 
     GraphFile::~GraphFile() = default;
 
     bool GraphFile::Reload()
     {
-#if defined(EOS_GRAPH_TOOLS)
         // An editor that saves by replacing the file leaves a moment where it does not exist; the next call sees it.
+        // A file that had errors is read again even unchanged: they may have been in a Slang pass fixed since.
         std::error_code error;
-        const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(File->Compiled.Path, error);
-        if (error || writeTime == File->LastWriteTime) return false;
+        const std::filesystem::file_time_type writeTime = std::filesystem::last_write_time(File->Path, error);
+        if (error || (writeTime == File->LastWriteTime && !File->LastLoadFailed)) return false;
 
         File->LastWriteTime = writeTime;
         return File->LoadFromDisk();
-#else
-        return false;
-#endif
     }
 
     void GraphFile::AddTo(RenderGraph& graph, std::initializer_list<GraphResource> resources)
@@ -1340,52 +1913,69 @@ namespace EOS
         return slot < File->SlotResources.size() ? File->SlotResources[slot].Buffer : GraphBuffer{};
     }
 
-    bool GraphFile::SetEnabled(std::string_view pass, bool enabled)
-    {
-        const uint32_t index = File->Current ? File->Current->FindPass(pass) : kNone;
-        if (index == kNone) return false;
-
-        File->Current->Passes[index].Enabled = enabled;
-        return true;
-    }
-
     namespace
     {
-        [[nodiscard]] PropertyValue* FindValue(GraphFileData& file, std::string_view passName, std::string_view propertyName, PropertyType type)
+        // The version in use and a reloaded one waiting for the next AddTo: changes made now apply to both, so a reload
+        // does not undo them for a frame.
+        template<typename Function>
+        bool ForEachVersion(GraphFileData& file, Function&& function)
         {
-            const uint32_t passIndex = file.Current ? file.Current->FindPass(passName) : kNone;
+            bool found = false;
+            if (file.Current) found |= function(*file.Current);
+            if (file.Pending) found |= function(*file.Pending);
+            return found;
+        }
+
+        [[nodiscard]] PropertyValue* FindValue(const PassRegistryData& registry, GraphFileData::Version& version, std::string_view passName, std::string_view propertyName, PropertyType type)
+        {
+            const uint32_t passIndex = version.FindPass(passName);
             if (passIndex == kNone) return nullptr;
 
-            const GraphFileData::Pass& pass = file.Current->Passes[passIndex];
-            const PassRegistryData::Type& passType = file.Registry.Types[pass.Type];
-            const uint32_t property = file.Registry.FindProperty(passType, propertyName);
+            const GraphFileData::Pass& pass = version.Passes[passIndex];
+            const PassRegistryData::Type& passType = registry.Types[pass.Type];
+            const uint32_t property = registry.FindProperty(passType, propertyName);
             if (property == kNone) return nullptr;
 
-            const PropertyType actual = file.Registry.Properties[passType.FirstProperty + property].Type;
+            const PropertyType actual = registry.Properties[passType.FirstProperty + property].Type;
             if (actual != type && !(type == PropertyType::Int && actual == PropertyType::Choice)) return nullptr;
-            return &file.Current->Values[pass.FirstValue + property];
+            return &version.Values[pass.FirstValue + property];
         }
+
+        template<typename Assign>
+        bool SetValue(GraphFileData& file, std::string_view pass, std::string_view property, PropertyType type, Assign&& assign)
+        {
+            return ForEachVersion(file, [&](GraphFileData::Version& version)
+            {
+                PropertyValue* stored = FindValue(file.Registry, version, pass, property, type);
+                if (stored) assign(*stored);
+                return stored != nullptr;
+            });
+        }
+    }
+
+    bool GraphFile::SetEnabled(std::string_view pass, bool enabled)
+    {
+        return ForEachVersion(*File, [pass, enabled](GraphFileData::Version& version)
+        {
+            const uint32_t index = version.FindPass(pass);
+            if (index != kNone) version.Passes[index].Enabled = enabled;
+            return index != kNone;
+        });
     }
 
     bool GraphFile::SetProperty(std::string_view pass, std::string_view property, bool value)
     {
-        PropertyValue* stored = FindValue(*File, pass, property, PropertyType::Bool);
-        if (stored) stored->Bool = value;
-        return stored != nullptr;
+        return SetValue(*File, pass, property, PropertyType::Bool, [value](PropertyValue& stored) { stored.Bool = value; });
     }
 
     bool GraphFile::SetProperty(std::string_view pass, std::string_view property, int32_t value)
     {
-        PropertyValue* stored = FindValue(*File, pass, property, PropertyType::Int);
-        if (stored) stored->Int = value;
-        return stored != nullptr;
+        return SetValue(*File, pass, property, PropertyType::Int, [value](PropertyValue& stored) { stored.Int = value; });
     }
 
     bool GraphFile::SetProperty(std::string_view pass, std::string_view property, float value)
     {
-        PropertyValue* stored = FindValue(*File, pass, property, PropertyType::Float);
-        if (stored) stored->Float.x = value;
-        return stored != nullptr;
+        return SetValue(*File, pass, property, PropertyType::Float, [value](PropertyValue& stored) { stored.Float.x = value; });
     }
 
     uint32_t GraphFile::GetPassCount() const
@@ -1398,7 +1988,18 @@ namespace EOS
         CHECK(pass < GetPassCount(), "No pass {} in the graph file", pass);
         GraphFileData::Pass& entry = File->Current->Passes[pass];
         const PassRegistryData::Type& type = File->Registry.Types[entry.Type];
-        return {.Name = entry.Name, .Type = type.Name, .Enabled = &entry.Enabled, .PropertyCount = type.PropertyCount};
+        return {.Name = entry.Name, .Type = type.Name, .Enabled = &entry.Enabled, .PinCount = type.PinCount, .PropertyCount = type.PropertyCount};
+    }
+
+    GraphFilePin GraphFile::GetPin(uint32_t pass, uint32_t pin) const
+    {
+        CHECK(pass < GetPassCount(), "No pass {} in the graph file", pass);
+        const GraphFileData::Pass& entry = File->Current->Passes[pass];
+        const PassRegistryData::Type& type = File->Registry.Types[entry.Type];
+        CHECK(pin < type.PinCount, "Pass '{}' has no pin {}", entry.Name, pin);
+
+        const PassRegistryData::Pin& description = File->Registry.Pins[type.FirstPin + pin];
+        return {.Name = description.Name, .Direction = description.Direction, .Usage = description.Usage};
     }
 
     GraphFileProperty GraphFile::GetProperty(uint32_t pass, uint32_t property)

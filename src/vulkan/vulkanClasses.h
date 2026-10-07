@@ -499,6 +499,7 @@ public:
     [[nodiscard]] EOS::Holder<EOS::ShaderProgramHandle> CreateShaderProgram(const EOS::ShaderProgramDescription& description) override;
     [[nodiscard]] std::shared_ptr<const EOS::CompiledShaderProgram> GetShaderProgram(EOS::ShaderProgramHandle handle) const override;
     [[nodiscard]] uint32_t GetMaxPushConstantSize() const override { return PushConstantRangeSize; }
+    [[nodiscard]] bool SupportsAccelerationStructures() const override { return HasAccelerationStructure; }
     [[nodiscard]] EOS::Holder<EOS::RenderPipelineHandle> CreateRenderPipeline(const EOS::RenderPipelineDescription& renderPipelineDescription) override;
     [[nodiscard]] EOS::Holder<EOS::ComputePipelineHandle> CreateComputePipeline(const EOS::ComputePipelineDescription& description) override;
     [[nodiscard]] uint32_t ReloadShaders() override;
@@ -653,6 +654,7 @@ private:
     uint32_t PushConstantRangeSize                  = 0;
     bool ShouldDescriptorSetBeUpdated               = false;
     EOS::Holder<EOS::TextureHandle> DummyTexture    = {};
+    EOS::Holder<EOS::SamplerHandle> DummySampler    = {};
 
     inline static bool HasAccelerationStructure                   = false;
     inline static bool HasRaytracingPipeline                      = false;

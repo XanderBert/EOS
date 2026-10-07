@@ -25,15 +25,13 @@ Eos aims to be:
 - [spdlog](https://github.com/gabime/spdlog)
 - [KTX-Software](https://github.com/KhronosGroup/KTX-Software)
 - [GLM](https://github.com/g-truc/glm) 
+- [rapidyaml](https://github.com/biojppm/rapidyaml)
+- [fastGLTF](https://github.com/spnda/fastgltf)
 ### Optional EOS dependencies
 - [Slang](https://github.com/shader-slang/slang) when `EOS_SHADER_TOOLS=ON`
-- [rapidyaml](https://github.com/biojppm/rapidyaml) when `EOS_GRAPH_TOOLS=ON`
 - [stb](https://github.com/nothings/stb) when `EOS_BUILD_TEXTURE_TOOLS=ON`
 - [Dear ImGui](https://github.com/ocornut/imgui) when `EOS_USE_IMGUI=ON`
 - [Tracy](https://github.com/wolfpld/tracy) when `EOS_USE_TRACY=ON`
-
-### Example-only dependencies
-- [fastGLTF](https://github.com/spnda/fastgltf)
 
 ### System dependencies
 - Vulkan SDK (required)
@@ -48,7 +46,6 @@ option(EOS_USE_IMGUI "Enable ImGui integration" ON)
 option(EOS_USE_TRACY "Enable Tracy profiler" ON)
 option(EOS_BUILD_EXAMPLES "Build example applications" ON)
 option(EOS_SHADER_TOOLS "Enable shader tools (hot reload, shader compiler, prebuild shader compile step)" ON)
-option(EOS_GRAPH_TOOLS "Enable render graph file tools (read the YAML at runtime with hot reload, generate the headers builds without the tools use)" ON)
 option(EOS_BUILD_TEXTURE_TOOLS "Build the texture compressor tool" ON)
 ```
 
@@ -151,8 +148,9 @@ a path tracer uses `Sample` and `EvalPdf` from the same BSDF.
 Alpha-tested (glTF `MASK`) materials are cut with `PassesAlphaTest(EvaluateOpacity(...))`, which also has to run in
 depth-only passes, otherwise the cut-away parts still write depth and cast shadows. A fragment shader that can `discard`
 turns off early depth testing for the whole draw, so depth-only passes draw the opaque meshes with a fragment shader
-that never discards and only the alpha-tested ones with one that does. `PartitionMeshesByAlphaTest` in the example
-helpers orders the meshes so that is two indirect draws (see the shadow-mapping examples).
+that never discards and only the alpha-tested ones with one that does. A scene's instances are sorted by alpha mode,
+so a `[DrawScene]` pass with a fragment shader per alpha mode (`[Materials]`) makes that two indirect draws (see the
+shadow-mapping examples).
 
 # Render graph
 Frames are described with `EOS::RenderGraph` (`src/renderGraph.h`), rebuilt every frame like Frostbite's FrameGraph
@@ -214,27 +212,22 @@ In the examples, `App.AddUIPass(target, [&] { ... })` declares the frame's UI an
 A graph file (YAML, `src/renderGraphFile.h`) lists a frame's passes, their settings and how their pins connect, in
 the style of Falcor's render graphs. It is what a node editor would save: passes are nodes, edges are wires.
 
-Graph files are authored in the editor and built into the application, like shaders:
-
-- **Build**: `EOSGraphTool` turns every `src/graphs/<file>.yaml` of an example into `src/.generated/graphs/<file>.h`,
-  the file as constants (`GraphFileDescription`, `src/graphFileDescription.h`). The application loads it from there:
-  `EOS::GraphFile file{registry, DepthOfFieldGraph}`. A file with mistakes in its shape fails the build like a
-  compiler error.
-- **Editor (`EOS_GRAPH_TOOLS=ON`)**: `GraphFile` reads the YAML itself, and `graphFile.Reload()` loads it again when it
-  changed on disk, so passes can be added, rewired or tuned while the application runs; the examples call it on the
-  same key as shader reloading (`-`).
-- **Shipping build (`EOS_GRAPH_TOOLS=OFF`)**: the generated constants are used as they are. No YAML is read or parsed,
-  and neither rapidyaml nor the tool is built. The generated headers are not committed (`.generated/`), so like the
-  `[CppExport]` headers they come from an earlier build of the same checkout with the tools on.
+`EOS::GraphFile file{registry, "graphs/depthOfField.yaml"}` reads the YAML at runtime, and `graphFile.Reload()` loads
+it again when it changed on disk, so passes can be added, rewired or tuned while the application runs; the examples
+call it on the same key as shader reloading (`-`). Examples read their graph files from their sources
+(`examples/<name>/src/graphs`, `EOS_PROJECT_GRAPH_PATH`), so edits change the running example.
 
 ```yaml
 passes:
-  Geometry:      { type: GBuffer }
-  Lighting:      { type: DeferredLighting, debugView: Normals }
-  DOF Composite: { type: DofComposite, enabled: false, output: { format: RGBA_F16 } }
-  Present:       { type: Present }
+  Camera:        { type: flyCamera, origin: [0, 1, 0], speed: 100 }
+  Sponza:        { type: gltfScene, path: sponza/Sponza.gltf }
+  Geometry:      { type: gbuffer }
+  Lighting:      { type: deferredLightCompute, debugView: Normals }
+  DOF Composite: { type: dofComposite, enabled: false, output: { format: RGBA_F16 } }
+  Present:       { type: present }
 edges:
-  - perFrame             -> Geometry.perFrame
+  - Sponza.scene         -> Geometry.scene
+  - Camera.view          -> Geometry.view
   - Geometry.albedo      -> Lighting.albedo
   - Lighting.output      -> DOF Composite.color
   - DOF Composite.output -> Present.input
@@ -242,8 +235,24 @@ edges:
 ```
 
 - **Pass types** are registered in a `PassRegistry`: their pins (the textures and buffers they read and write, with how
-  they use them), their properties (bool, int, float, float2-4, a choice of names) and the function that records them.
-  The function reads its pins and properties by name through `PassData`.
+  they use them), their properties (bool, int, float, float2-4, a choice of names, a string) and the function that
+  records them. The function reads its pins and properties by name through `PassData`. Most pass types are Slang files
+  (below); C++ ones are for what a shader cannot do.
+- **C++ nodes**: a C++ pass type can have a `Setup` function, called while the file's passes are added to the frame,
+  each after the passes it reads from. A pass that owns resources hands them out on its outputs there
+  (`setup.Output(pin, buffer)`), and one that computes data on the CPU uploads it (`setup.Upload(pin, value)`). What a
+  C++ pass type uploads travels along the pin with a CPU copy, so C++ pass types downstream read it on the CPU
+  (`setup.Data.Host<EOS::View>("view")`) while Slang passes read the buffer. Such a type needs no `Execute`. The
+  examples' C++ is pass types like these: a turntable (model), a light's View (shadow mapping), the CPU cascade fit.
+- **Scene, camera and sun nodes** come with the engine. `gltfScene` (`src/scene.h`) loads a glTF file (`path`, relative
+  to the data folder in the examples) once and hands out the scene on its `scene` pin: every mesh in one vertex and
+  index buffer, the instances sorted opaque, alpha-tested, blended, the materials, indirect draws and a TLAS on devices
+  that build acceleration structures. `flyCamera` (`src/flyCamera.h`) is flown with WASD/QE and the right mouse button
+  and uploads its `View` (`eos.view`) every frame; changing its `origin` or `rotation` moves it there. `sun`
+  (`src/sun.h`) uploads a `DirectionalLight` (`eos.lighting`) from a rotation, color and intensity, for every pass that
+  shares it.
+- **Typed buffers**: a buffer pin can say what it holds (`Scene`, `View`; Slang passes take it from what their pointer
+  points to), and only pins of the same type connect, so `Camera.view -> Geometry.scene` is an error in the file.
 - **A pass** has a `type`, may set `enabled`, sets property values by name, and can override an output's `format` and
   `scale`.
 - **Edges** connect an output to an input: `Pass.pin -> Pass.pin`. A name without a dot is a resource of the
@@ -255,13 +264,72 @@ edges:
 - **Mistakes** are reported like compiler errors (`file:line:column: message`) and the last version without errors
   keeps running, so a typo while editing never takes the frame down.
 - **UI:** `EOS::UI::GraphFileProperties(graphFile)` shows every pass with an enable checkbox and its properties. Changes
-  last until the file is reloaded.
-- **In the examples**, `App.Passes` holds the pass types and `App.LoadGraphFile(DepthOfFieldGraph)` loads a file that
-  `-` reloads.
+  last until the file is reloaded. `EOS::UI::GraphFilePanel` adds a preview of any texture a pass writes, picked from a
+  list: one layer of it, with its values remapped to a range (depth in grey).
+- **In the examples**, `App.Run("depthOfField")` runs `src/graphs/depthOfField.yaml` as the whole frame, with the panel
+  on top; `-` reloads it with the shaders. `App.Run({"csmCompute", "csmCpu", "csmRayQuery"})` offers several files in
+  the panel, one shown at a time (the cascaded shadow mapping example has a file per shadow technique). `App.Passes`
+  holds the pass types, where an example registers its C++ ones.
 
-The depth of field example is built this way (`examples/DepthOfField/src/graphs/depthOfField.yaml`). Pass types are
-registered in C++ for now; next, fullscreen and compute passes will declare their pins and properties in Slang, so they
-need no C++ at all.
+Every example is built this way: its frame is graph files and their Slang passes, and `main.cpp` runs them, after
+registering the few C++ pass types it has. Only the compute example has a loop of its own, since it reads its result
+back and checks it.
+
+## Passes written in Slang
+A pass type can be a Slang file instead of C++: a shader whose push constants are a struct marked `[Pass]` (from
+`eos.pass`). Graph files use it by its module name (`type: dofComposite`); the registry loads it the first time a file
+names it, creates its pipeline, fills its push constants and records it. One pass per file.
+
+```slang
+import eos.pass;
+
+[Pass]
+struct DofComposite
+{
+    [Input] DescriptorHandle<Texture2D> color;                  // a pin: what another pass wrote
+    [Input] DescriptorHandle<Texture2D> blurred;
+    [Output] [Bypass("color")] DescriptorHandle<RWTexture2D<float4>> output;   // created by the graph
+    DescriptorHandle<SamplerState> linearSampler;                // filled with the engine's linear sampler
+    [Range(0.1, 25.0)] float focusDistance = 6.0;                // a property
+    BlurShape shape;                                             // an enum: a choice by case name
+};
+[[vk::push_constant]] DofComposite pass;
+
+[shader("compute")] [numthreads(8, 8, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID) { ... }
+```
+
+- **Pins** come from the field types. `DescriptorHandle<Texture*>` fields are inputs. `DescriptorHandle<RWTexture*>`
+  fields and pointers (`T*`, buffers) say `[Input]`, `[Output]` or `[InOut]`. An output is created by the graph and
+  shaped with `[Format("RGBA_F16")]` (the swapchain's format by default), `[Scale(0.5)]`, `[SizeOf("color")]`,
+  `[Size(4096, 4096)]`, `[Layers(4)]` and `[Bypass("color")]`; a pointer output is a buffer the size of what it points
+  to. `[Optional]` inputs may stay unconnected.
+- **Depth**: a `DepthTarget` field is the depth attachment and takes no push-constant space. `[Output]` clears and
+  writes it, `[InOut]` loads and writes it, `[Input]` only tests against it; `[DepthTest(CompareOp.Equal)]` sets the
+  comparison. A `DescriptorHandle<Texture2D>` input marked `[DepthTest]` is attached read-only and can be sampled by the
+  same pass; a pass that only samples depth (SSAO) takes a plain texture input.
+- **Samplers**: `DescriptorHandle<SamplerState>` fields get a sampler of `[Sampler(Filter.Nearest, Address.ClampToBorder)]`,
+  linear and repeating without it.
+- **Properties** are the `bool`, `int`, `uint`, `float`, `float2`-`float4` and enum fields. Graph files set them by name
+  (an enum by case name), `[Range(min, max)]` gives the UI a slider, and a scalar field's default is the value until a
+  file sets one.
+- **Compute or raster**: a `compute` entry point dispatches one thread per pixel of the pass's first storage texture
+  output. A `fragment` entry point renders into color targets: the fields of the shader's output struct, `[Output]`
+  (cleared, `[Clear(r, g, b, a)]`) or `[InOut]` (loaded). It draws a fullscreen triangle with `eos.fullscreen`'s vertex
+  shader, or 3 vertices with a `vertex` entry point of its own. `[Cull(CullMode.Back)]` and `[DepthClamp]` on the
+  `[Pass]` struct set the rasterizer.
+- **Drawing the scene**: a `[DrawScene]` pass (`eos.scene`) has a `Scene*` pin and draws every instance of the scene
+  connected to it, with one indirect draw per range of instances. Its vertex shader pulls the vertices itself:
+  `pass.scene.vertices[vertexID]` and `pass.scene.instances[instanceID]`, with `SV_VulkanVertexID` and
+  `SV_VulkanInstanceID`, so there is no vertex input layout anywhere. A pass with several fragment shaders tags each
+  with the materials it draws, `[Materials(AlphaMode.Opaque)]` and `[Materials(AlphaMode.Mask)]`, so a depth pass
+  keeps early depth testing for opaque instances and pays for the alpha test only on the others.
+- **Checks**: the shader tool reflects every pass when it compiles it and reports a field it cannot use, an unknown
+  format, a `[SizeOf]`/`[Bypass]` that names no fitting pin or fragment shaders that draw the same materials.
+  `--reflect <module>` prints a pass's pins and properties.
+- **Hot reload**: `-` recompiles a changed pass; when its pins or properties changed, the registry registers it again and
+  graph files that use it are resolved again, so a new property can be set in the file on the same reload. A graph
+  file that failed to load is read again on the next `-` even when unchanged, so fixing a pass it uses brings it back.
 
 # Building
 This project is built using CMake and Ninja.

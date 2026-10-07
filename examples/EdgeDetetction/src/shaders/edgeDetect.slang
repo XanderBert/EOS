@@ -1,48 +1,43 @@
+// Darkens the lit scene along edges, which a Sobel filter finds in the G-buffer normals.
 import eos.core;
 import eos.math;
 import eos.bindless;
 import eos.fullscreen;
+import eos.pass;
 
-[CppExport]
-public struct EdgeDetectPC
+[Pass]
+struct EdgeDetect
 {
-    public DescriptorHandle<Texture2D>    sceneColor;
-    public DescriptorHandle<Texture2D>    sceneNormal;
-    public DescriptorHandle<SamplerState> samplerState;
-    public float  threshold;
-    public uint   showEdgesOnly;
-    public float  texelW;
-    public float  texelH;
+    [Input] DescriptorHandle<Texture2D> color;
+    [Input] DescriptorHandle<Texture2D> normal;
+    DescriptorHandle<SamplerState>      linearSampler;
+
+    [Range(2.0, 8.0)] float threshold = 4.0;
+    bool edgesOnly = false;
 };
 
-[[vk::push_constant]] EdgeDetectPC pc;
+[[vk::push_constant]] EdgeDetect pass;
 
-struct VSOutput
+struct Targets
 {
-    float4 Pos : SV_Position;
-    float2 UV  : TEXCOORD0;
+    [Output] float4 output : SV_Target0;
 };
-
-[shader("vertex")]
-VSOutput vertexMain(uint id : SV_VertexID)
-{
-    VSOutput o;
-    FullscreenTriangle(id, o.UV, o.Pos);
-    return o;
-}
 
 float3 SampleNormal(float2 uv)
 {
-    return UnpackNormalUnorm(pc.sceneNormal.Sample(pc.samplerState, uv).rgb);
+    return UnpackNormalUnorm(pass.normal.Sample(pass.linearSampler, uv).rgb);
 }
 
 [shader("fragment")]
-float4 fragmentMain(VSOutput input) : SV_Target
+Targets fragmentMain(FullscreenVaryings input)
 {
-    float2 uv = input.UV;
+    float2 uv = input.uv;
     uv.y = 1 - uv.y;
 
-    const float2 ts = float2(pc.texelW, pc.texelH);
+    uint2 colorSize;
+    pass.color.GetDimensions(colorSize.x, colorSize.y);
+    const float2 ts = 1.0 / float2(colorSize);
+
     const float3 tl = SampleNormal(uv + float2(-1.0,  1.0) * ts);
     const float3 tm = SampleNormal(uv + float2( 0.0,  1.0) * ts);
     const float3 tr = SampleNormal(uv + float2( 1.0,  1.0) * ts);
@@ -56,14 +51,17 @@ float4 fragmentMain(VSOutput input) : SV_Target
     const float3 gy =  tl + 2.0 * tm + tr - bl - 2.0 * bm - br;
     const float edge = sqrt(dot(gx, gx) + dot(gy, gy));
 
-    if (pc.showEdgesOnly != 0)
+    Targets targets;
+    if (pass.edgesOnly)
     {
-        const float e = step(pc.threshold, edge);
-        return float4(e, e, e, 1.0);
+        const float e = step(pass.threshold, edge);
+        targets.output = float4(e, e, e, 1.0);
+        return targets;
     }
 
     uv.y = 1 - uv.y;
-    const float4 litScene = pc.sceneColor.Sample(pc.samplerState, uv);
-    const float edgeMask = 1.0 - saturate((edge - pc.threshold) * 10.0);
-    return float4(litScene.rgb * edgeMask, 1.0);
+    const float4 litScene = pass.color.Sample(pass.linearSampler, uv);
+    const float edgeMask = 1.0 - saturate((edge - pass.threshold) * 10.0);
+    targets.output = float4(litScene.rgb * edgeMask, 1.0);
+    return targets;
 }
