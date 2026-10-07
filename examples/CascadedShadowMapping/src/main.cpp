@@ -84,7 +84,6 @@ constexpr EOS::VertexInputData VertexInputDataShadowDepth
 #pragma region Handles
 struct Resources final
 {
-    EOS::TextureHolder DepthTexture;
     EOS::TextureHolder ShadowDepthTexture;
 
     EOS::BufferHolder VertexBuffer;
@@ -92,7 +91,6 @@ struct Resources final
     EOS::BufferHolder IndirectBuffer;
     EOS::BufferHolder PerDrawBuffer;
     EOS::BufferHolder PerFrameBuffer;
-    EOS::BufferHolder DepthReductionBuffer;
     EOS::BufferHolder AccelVertexBuffer;
     EOS::BufferHolder AccelIndexBuffer;
     EOS::BufferHolder AccelTransformBuffer;
@@ -241,24 +239,6 @@ void CalculateCascades(const Camera& camera, float aspectRatio, const glm::vec3&
         lastSplitDist = cascadeSplits[i];
     }
 }
-#pragma region RenderPasses
-constexpr EOS::RenderPass EarlyZRenderPass
-{
-    .Depth{ .LoadOpState = EOS::LoadOp::Clear }
-};
-
-constexpr EOS::RenderPass ShadowDepthRenderPass
-{
-    .Depth{.LoadOpState = EOS::LoadOp::Clear, .Layer = 0, .LayerCount = CASCADES}
-};
-
-constexpr EOS::RenderPass ShadeRenderPass
-{
-    .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
-    .Depth{ .LoadOpState = EOS::LoadOp::Load}
-};
-
-
 // Depth-only passes draw the opaque meshes with a fragment shader that never discards, which keeps the fast depth-only
 // path, and only the alpha-tested meshes with the one that does. Draw indices restart at 0 in the second indirect draw,
 // so its push constants point the draw data at the first alpha-tested mesh.
@@ -287,156 +267,156 @@ void DrawDepthSplitByAlphaTest(EOS::ICommandBuffer& cmdBuffer, EOS::RenderPipeli
     }
 }
 
-void PassEarlyZ(EOS::ICommandBuffer& cmdBuffer)
+void AddEarlyZPass(EOS::RenderGraph& graph, EOS::GraphTexture depth, EOS::GraphBuffer perFrame)
 {
-    EOS::Framebuffer framebufferEarlyZ
+    graph.AddRasterPass("Early-Z").Depth(EOS::ClearDepth(depth)).Read(perFrame).Execute([](EOS::PassContext& pass)
     {
-        .DepthStencil = { .Texture = Handles.DepthTexture },
-        .DebugName = "Early-Z framebuffer",
-    };
-
-    cmdPushMarker(cmdBuffer, "Early-Z Pass", 0xff00ffff);
-    cmdBeginRendering(cmdBuffer, EarlyZRenderPass, framebufferEarlyZ);
-    {
-        cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
-        cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-        cmdSetDepthState(cmdBuffer, DepthStateWrite);
-        DrawDepthSplitByAlphaTest(cmdBuffer, Handles.RenderPipelineEarlyZ, Handles.RenderPipelineEarlyZAlphaTested);
-    }
-    cmdEndRendering(cmdBuffer);
-    cmdPopMarker(cmdBuffer);
+        cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
+        cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+        cmdSetDepthState(pass.Cmd, DepthStateWrite);
+        DrawDepthSplitByAlphaTest(pass.Cmd, Handles.RenderPipelineEarlyZ, Handles.RenderPipelineEarlyZAlphaTested);
+    });
 }
 
-void PassShadowDepth(EOS::ICommandBuffer& cmdBuffer)
+// Fits the cascades to the depth range the early-Z pass left behind, on the GPU: a reduction finds the visible depth
+// range, and a single thread turns it into the cascade matrices in PerFrameData.
+void AddComputeCascadePasses(EOS::RenderGraph& graph, EOS::GraphTexture depth, EOS::GraphBuffer perFrame, CascadeSetupPushConstants cascadeSetup)
 {
-    EOS::Framebuffer framebufferShadow
+    const EOS::GraphBuffer depthRange = graph.CreateBuffer({.Size = sizeof(DepthReductionData), .DebugName = "Depth Range"});
+
+    graph.AddTransferPass("Reset Depth Range").CopyTo(depthRange).Execute([depthRange](EOS::PassContext& pass)
     {
-        .DepthStencil = { .Texture = Handles.ShadowDepthTexture },
-        .DebugName = "ShadowMap framebuffer"
-    };
+        // Identity values for the atomic min/max: min starts at the far plane, max at the near plane.
+        constexpr DepthReductionData sentinel{.minDepth = 1.0f, .maxDepth = 0.0f};
+        cmdUpdateBuffer(pass.Cmd, pass.Buffer(depthRange), sentinel);
+    });
 
-    cmdPushMarker(cmdBuffer, "Shadow Pass", 0xff0000ff);
-    cmdBeginRendering(cmdBuffer, ShadowDepthRenderPass, framebufferShadow);
+    graph.AddComputePass("Depth Reduction").Sample(depth).Write(depthRange).Execute([depth, depthRange](EOS::PassContext& pass)
     {
-        cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
-        cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-        cmdSetDepthState(cmdBuffer, DepthStateWrite);
-        DrawDepthSplitByAlphaTest(cmdBuffer, Handles.RenderPipelineShadow, Handles.RenderPipelineShadowAlphaTested);
-    }
-    cmdEndRendering(cmdBuffer);
-    cmdPopMarker(cmdBuffer);
-}
-
-void PassShade(EOS::ICommandBuffer& cmdBuffer, const EOS::TextureHandle& swapChainTexture)
-{
-    EOS::Framebuffer framebufferShade
-    {
-        .Color = {{.Texture = swapChainTexture}},
-        .DepthStencil = { .Texture = Handles.DepthTexture },
-        .DebugName = "Basic Color Depth Framebuffer",
-    };
-
-    cmdPushMarker(cmdBuffer, "Shade Pass", 0xff00f0ff);
-    cmdBeginRendering(cmdBuffer, ShadeRenderPass, framebufferShade);
-    {
-        cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShade);
-        cmdPushConstants(cmdBuffer, FramePointersData);
-        cmdSetDepthState(cmdBuffer, DepthStateRead);
-        cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nMeshes);
-    }
-    cmdEndRendering(cmdBuffer);
-    cmdPopMarker(cmdBuffer);
-}
-
-void PassDepthReductionCompute(EOS::ICommandBuffer& cmdBuffer, const DepthReductionPushConstants& pc)
-{
-    const uint32_t gy = (pc.height + 15) / 16;
-
-    cmdPushMarker(cmdBuffer, "Depth Reduction Compute", 0xff22aa66);
-    cmdBindComputePipeline(cmdBuffer, Handles.ComputePipelineDepthReduction);
-    cmdPushConstants(cmdBuffer, pc);
-    cmdDispatchThreadGroups(cmdBuffer, {pc.numGroupsX, gy, 1});
-    cmdPopMarker(cmdBuffer);
-}
-
-void PassCascadeSetupCompute(EOS::ICommandBuffer& cmdBuffer, const CascadeSetupPushConstants& pushConstants)
-{
-    cmdPushMarker(cmdBuffer, "Cascade Setup Compute", 0xff5599ff);
-    cmdBindComputePipeline(cmdBuffer, Handles.ComputePipelineCascadeSetup);
-    cmdPushConstants(cmdBuffer, pushConstants);
-    cmdDispatchThreadGroups(cmdBuffer, {1, 1, 1});
-    cmdPopMarker(cmdBuffer);
-}
-
-void PassUI(EOS::ICommandBuffer& cmdBuffer, EOS::UI::Renderer* UIRenderer)
-{
-    //Render UI
-    UIRenderer->BeginFrame(cmdBuffer);
-    {
-        UIRenderer->SetScale(1.5f);
-        EOS::UI::SetNextWindowSize(450, 520);
-        EOS::UI::Begin("Light Settings");
-
-        EOS::UI::DragFloat2("Light Rotation", glm::value_ptr(g_LightRotation));
-        static const char* shadowDebugModeItems[] =
+        const EOS::Dimensions size = pass.Size(depth);
+        const DepthReductionPushConstants pushConstants
         {
-            "Normal Shading",
-            "Cascade Index Color",
-            "Shadow UV",
-            "Receiver Depth",
-            "Shadow Map Depth",
-            "Depth Delta Heatmap",
-            "Validity Mask",
-        };
-        static const char* shadowTechniqueItems[] =
-        {
-            "CPU Cascade",
-            "Compute Cascade",
-            "RayQuery",
+            .depthRange   = pass.Address(depthRange),
+            .depthTexture = pass.Descriptor(depth),
+            .width        = size.Width,
+            .height       = size.Height,
+            .numGroupsX   = (size.Width + 15) / 16,
         };
 
-        EOS::UI::Combo("Shadow Technique", &g_ShadowTechnique, shadowTechniqueItems);
-        const ShadowTechnique technique = static_cast<ShadowTechnique>(g_ShadowTechnique);
-        const bool isCascadeTechnique = technique == ShadowTechnique::CpuCascade || technique == ShadowTechnique::ComputeCascade;
-        const bool isComputeCascadeTechnique = technique == ShadowTechnique::ComputeCascade;
+        cmdBindComputePipeline(pass.Cmd, Handles.ComputePipelineDepthReduction);
+        cmdPushConstants(pass.Cmd, pushConstants);
+        cmdDispatchThreadGroups(pass.Cmd, {pushConstants.numGroupsX, (size.Height + 15) / 16, 1});
+    });
 
-        if (isCascadeTechnique)
+    graph.AddComputePass("Cascade Setup").Read(depthRange).Write(perFrame).Execute([depthRange, perFrame, cascadeSetup](EOS::PassContext& pass) mutable
+    {
+        cascadeSetup.perFrame = pass.Address(perFrame);
+        cascadeSetup.depthRange = pass.Address(depthRange);
+
+        cmdBindComputePipeline(pass.Cmd, Handles.ComputePipelineCascadeSetup);
+        cmdPushConstants(pass.Cmd, cascadeSetup);
+        cmdDispatchThreadGroups(pass.Cmd, {1, 1, 1});
+    });
+}
+
+void AddShadowPass(EOS::RenderGraph& graph, EOS::GraphTexture shadowMap, EOS::GraphBuffer perFrame)
+{
+    // Every cascade is a layer of the shadow map; the geometry shader routes each triangle to its layers.
+    graph.AddRasterPass("Shadow")
+        .Depth({.Texture = shadowMap, .Load = EOS::LoadOp::Clear, .LayerCount = CASCADES})
+        .Read(perFrame)
+        .Execute([](EOS::PassContext& pass)
+    {
+        cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
+        cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+        cmdSetDepthState(pass.Cmd, DepthStateWrite);
+        DrawDepthSplitByAlphaTest(pass.Cmd, Handles.RenderPipelineShadow, Handles.RenderPipelineShadowAlphaTested);
+    });
+}
+
+// Shades exactly the surfaces the early-Z pass kept (depth test Equal, no depth writes). shadowMap is invalid when ray
+// queries make the shadows.
+void AddShadePass(EOS::RenderGraph& graph, EOS::GraphTexture backbuffer, EOS::GraphTexture depth, EOS::GraphTexture shadowMap, EOS::GraphBuffer perFrame)
+{
+    EOS::PassBuilder pass = graph.AddRasterPass("Shade")
+        .Color(EOS::Clear(backbuffer, {0.36f, 0.4f, 1.0f, 0.28f}))
+        .Depth(EOS::LoadDepth(depth, true))
+        .Read(perFrame);
+    if (shadowMap.Valid()) pass.Sample(shadowMap);
+
+    pass.Execute([](EOS::PassContext& context)
+    {
+        cmdBindRenderPipeline(context.Cmd, Handles.RenderPipelineShade);
+        cmdPushConstants(context.Cmd, FramePointersData);
+        cmdSetDepthState(context.Cmd, DepthStateRead);
+        cmdDrawIndexedIndirect(context.Cmd, Handles.IndirectBuffer, 0, nMeshes);
+    });
+}
+
+void DeclareUI(ExampleApp& App)
+{
+    App.UIRenderer->SetScale(1.5f);
+    EOS::UI::SetNextWindowSize(450, 520);
+    EOS::UI::Begin("Light Settings");
+
+    EOS::UI::DragFloat2("Light Rotation", glm::value_ptr(g_LightRotation));
+    static const char* shadowDebugModeItems[] =
+    {
+        "Normal Shading",
+        "Cascade Index Color",
+        "Shadow UV",
+        "Receiver Depth",
+        "Shadow Map Depth",
+        "Depth Delta Heatmap",
+        "Validity Mask",
+    };
+    static const char* shadowTechniqueItems[] =
+    {
+        "CPU Cascade",
+        "Compute Cascade",
+        "RayQuery",
+    };
+
+    EOS::UI::Combo("Shadow Technique", &g_ShadowTechnique, shadowTechniqueItems);
+    const ShadowTechnique technique = static_cast<ShadowTechnique>(g_ShadowTechnique);
+    const bool isCascadeTechnique = technique == ShadowTechnique::CpuCascade || technique == ShadowTechnique::ComputeCascade;
+    const bool isComputeCascadeTechnique = technique == ShadowTechnique::ComputeCascade;
+
+    if (isCascadeTechnique)
+    {
+        EOS::UI::Separator();
+        EOS::UI::Text("Cascade Controls");
+        EOS::UI::Combo("Shadow Debug Mode", &g_ShadowDebugMode, shadowDebugModeItems);
+        EOS::UI::SliderInt("Force Cascade", &g_ForceShadowCascade, -1, CASCADES - 1);
+        if (g_ForceShadowCascade < 0)
+        {
+            EOS::UI::Text("Force Cascade: Auto");
+        }
+
+        const uint64_t shadowArrayLayerTextureID = EOS::UI::MakeTextureID(Handles.ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::UI::TextureView::Texture2DArray);
+        EOS::UI::Image(shadowArrayLayerTextureID, 400,400);
+        EOS::UI::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
+
+        if (isComputeCascadeTechnique)
         {
             EOS::UI::Separator();
-            EOS::UI::Text("Cascade Controls");
-            EOS::UI::Combo("Shadow Debug Mode", &g_ShadowDebugMode, shadowDebugModeItems);
-            EOS::UI::SliderInt("Force Cascade", &g_ForceShadowCascade, -1, CASCADES - 1);
-            if (g_ForceShadowCascade < 0)
-            {
-                EOS::UI::Text("Force Cascade: Auto");
-            }
-
-            const uint64_t shadowArrayLayerTextureID = EOS::UI::MakeTextureID(Handles.ShadowDepthTexture, static_cast<uint32_t>(g_ShadowDebugCascadeLayer), EOS::UI::TextureView::Texture2DArray);
-            EOS::UI::Image(shadowArrayLayerTextureID, 400,400);
-            EOS::UI::SliderInt("CascadeID", &g_ShadowDebugCascadeLayer, 0, CASCADES - 1);
-
-            if (isComputeCascadeTechnique)
-            {
-                EOS::UI::Separator();
-                EOS::UI::Text("Compute Options");
-                EOS::UI::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
-                EOS::UI::Text("Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction" : "Camera Planes");
-            }
-            else
-            {
-                EOS::UI::Separator();
-                EOS::UI::Text("CPU Cascade path active");
-            }
+            EOS::UI::Text("Compute Options");
+            EOS::UI::Checkbox("Use Depth Reduction Range", &g_UseDepthReductionForCascades);
+            EOS::UI::Text("Range Source: %s", g_UseDepthReductionForCascades ? "Depth Reduction" : "Camera Planes");
         }
         else
         {
             EOS::UI::Separator();
-            EOS::UI::Text("RayQuery mode active");
-            EOS::UI::Text("Cascade debug/image controls are hidden in this mode.");
+            EOS::UI::Text("CPU Cascade path active");
         }
-        EOS::UI::End();
     }
-    UIRenderer->EndFrame(cmdBuffer);
+    else
+    {
+        EOS::UI::Separator();
+        EOS::UI::Text("RayQuery mode active");
+        EOS::UI::Text("Cascade debug/image controls are hidden in this mode.");
+    }
+    EOS::UI::End();
 }
 
 
@@ -471,15 +451,6 @@ int main()
     Handles.ShadowShader = App.Context->CreateShaderProgram({.Module = "shadowDepth"});
     Handles.DepthReductionShader = App.Context->CreateShaderProgram({.Module = "depthReduction"});
     Handles.CascadeSetupShader = App.Context->CreateShaderProgram({.Module = "cascadeSetup"});
-
-    Handles.DepthTexture = App.Context->CreateTexture(
-    {
-        .Type                   = EOS::ImageType::Image_2D,
-        .TextureFormat          = EOS::Format::Z_F32,
-        .TextureDimensions      = {static_cast<uint32_t>(App.Window.Width), static_cast<uint32_t>(App.Window.Height)},
-        .Usage                  = EOS::TextureUsageFlags::Attachment | EOS::TextureUsageFlags::Sampled,
-        .DebugName              = "Depth Buffer - CascadedShadowMapping",
-    });
 
     constexpr EOS::Dimensions shadowMapSize{SHADOW_SIZE, SHADOW_SIZE};
     constexpr EOS::TextureDescription shadowMapDescription
@@ -673,20 +644,6 @@ int main()
         .DebugName = "PerFrameBuffer",
     });
 
-    constexpr DepthReductionData initialDepthReductionData
-    {
-        .minDepth = 1.0f,
-        .maxDepth = 0.0f,
-    };
-
-    Handles.DepthReductionBuffer = App.Context->CreateBuffer({
-        .Usage     = EOS::BufferUsageFlags::StorageFlag,
-        .Storage   = EOS::StorageType::Device,
-        .Size      = sizeof(DepthReductionData),
-        .Data      = &initialDepthReductionData,
-        .DebugName = "DepthReductionBuffer",
-    });
-
     std::vector<EOS::DrawIndexedIndirectCommand> indirectCmds = BuildIndirectCommands(scene);
 
     Handles.IndirectBuffer = App.Context->CreateBuffer({
@@ -703,7 +660,7 @@ int main()
         .VertexShader = {Handles.ShadeShader, "vertexMain"},
         .FragmentShader = {Handles.ShadeShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
+        .DepthFormat = EOS::Format::Z_F32,
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
@@ -714,7 +671,7 @@ int main()
         .VertexInput = VertexInputDataShadowDepth,
         .VertexShader = {Handles.EarlyZShader, "vertexMain"},
         .FragmentShader = {Handles.EarlyZShader, "fragmentOpaque"},
-        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
+        .DepthFormat = EOS::Format::Z_F32,
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "EarlyZ Render Pipeline",
     };
@@ -816,106 +773,33 @@ int main()
             );
         }
 
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
-        const EOS::TextureHandle swapChainTexture = App.Context->GetSwapChainTexture();
-        App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
+        EOS::RenderGraph& graph = *App.Graph;
+        const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
+        const EOS::GraphTexture depth = graph.CreateTexture({.TextureFormat = EOS::Format::Z_F32, .DebugName = "Depth"});
+        const EOS::GraphBuffer perFrame = graph.ImportBuffer(Handles.PerFrameBuffer, "PerFrameBuffer");
+        // Owned by the example rather than the graph: PerFrameData and the UI refer to it before the graph executes.
+        const EOS::GraphTexture shadowMap = isCascadeTechnique ? graph.ImportTexture(Handles.ShadowDepthTexture, "Shadow Map") : EOS::GraphTexture{};
 
-        // Reset min and max depth values
-        if (useComputeCascades)
-        {
-            // Identity values for the atomic min/max: min starts at the far plane, max at the near plane.
-            constexpr DepthReductionData sentinel{ .minDepth = 1.0f, .maxDepth = 0.0f };
-            App.Context->Upload(Handles.DepthReductionBuffer, &sentinel, sizeof(DepthReductionData), 0);
-        }
-
-
-        cmdPipelineBarrier(cmdBuffer, {},
-{
-                { swapChainTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
-                { Handles.ShadowDepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
-            });
-
-
-        PassEarlyZ(cmdBuffer);
+        graph.AddUpload("Upload Frame Data", perFrame, perFrameData);
+        AddEarlyZPass(graph, depth, perFrame);
 
         if (useComputeCascades)
         {
-            const uint32_t gx = (static_cast<uint32_t>(App.Window.Width) + 15) / 16;
-            const DepthReductionPushConstants depthReductionPC
+            AddComputeCascadePasses(graph, depth, perFrame,
             {
-                .depthRange     = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
-                .depthTexture   = Handles.DepthTexture,
-                .width          = static_cast<uint32_t>(App.Window.Width),
-                .height         = static_cast<uint32_t>(App.Window.Height),
-                .numGroupsX     = gx,
-            };
-
-            const CascadeSetupPushConstants cascadeSetupPC
-            {
-                .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer),
-                .depthRange = App.Context->GetGPUAddress(Handles.DepthReductionBuffer),
                 .invViewProjection = glm::inverse(viewProjection),
                 .lightForwardNear = glm::vec4(lightForward, 0.0f),
                 .cameraPlanes = glm::vec4(App.MainCamera.GetNearPlane(), App.MainCamera.GetFarPlane(), g_UseDepthReductionForCascades ? 1.0f : 0.0f, static_cast<float>(SHADOW_SIZE)),
-            };
-
-            cmdPipelineBarrier(cmdBuffer,
-            {
-                { Handles.DepthReductionBuffer, EOS::ResourceState::Undefined, EOS::ResourceState::UnorderedAccess },
-            },
-            {
-                { Handles.DepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },
-            });
-
-            PassDepthReductionCompute(cmdBuffer, depthReductionPC);
-
-            cmdPipelineBarrier(cmdBuffer,
-            {
-                { Handles.DepthReductionBuffer, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
-                { Handles.PerFrameBuffer, EOS::ResourceState::Undefined, EOS::ResourceState::UnorderedAccess },
-            },
-            {});
-
-            PassCascadeSetupCompute(cmdBuffer, cascadeSetupPC);
-
-            cmdPipelineBarrier(cmdBuffer,
-            {
-                { Handles.PerFrameBuffer, EOS::ResourceState::UnorderedAccess, EOS::ResourceState::ShaderResource },
-            },
-            {
-                { Handles.DepthTexture, EOS::ResourceState::ShaderResource, EOS::ResourceState::DepthRead },
-            });
-        }
-        else
-        {
-            cmdPipelineBarrier(cmdBuffer, {},
-            {
-                { Handles.DepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::DepthRead },
             });
         }
 
-        if (isCascadeTechnique)
-        {
-            PassShadowDepth(cmdBuffer);
+        if (isCascadeTechnique) AddShadowPass(graph, shadowMap, perFrame);
+        AddShadePass(graph, backbuffer, depth, shadowMap, perFrame);
 
-            cmdPipelineBarrier(cmdBuffer, {},
-            {
-           { Handles.ShadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },
-           { Handles.DepthTexture, EOS::ResourceState::DepthRead, EOS::ResourceState::DepthWrite },
-            });
-        }else
-        {
-            cmdPipelineBarrier(cmdBuffer, {},{{ Handles.DepthTexture, EOS::ResourceState::DepthRead, EOS::ResourceState::DepthWrite },});
-        }
+        EOS::PassBuilder uiPass = App.AddUIPass(backbuffer, [&] { DeclareUI(App); });
+        if (isCascadeTechnique) uiPass.Sample(shadowMap);
 
-
-        PassShade(cmdBuffer, swapChainTexture);
-        PassUI(cmdBuffer, App.UIRenderer.get());
-
-        cmdPipelineBarrier(cmdBuffer, {}, {{swapChainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-
-        App.Context->Submit(cmdBuffer, swapChainTexture);
+        graph.Execute();
     });
 
     scene.Cleanup();

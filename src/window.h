@@ -34,9 +34,21 @@ namespace EOS
         ~Window();
         DELETE_COPY_MOVE(Window)
 
+        /**
+         * @brief Processes window events, and paces the render loop by what can be seen of the window: while it is
+         *        minimized this waits until it is restored (or closed); while it is in the background (not focused)
+         *        it returns at a low rate, BackgroundFrameInterval. Any event, such as a click, focus or a resize, ends
+         *        the wait early.
+         * @note  An unfocused window keeps rendering, slowly: it can still be in view, and on Wayland a window only
+         *        appears once it presented a frame, so a loop that waited for focus would never show it.
+         */
         void Poll();
-        [[nodiscard] ]bool ShouldClose() const;
-        [[nodiscard] ]bool IsFocused() const;
+        [[nodiscard]] bool ShouldClose() const;
+        [[nodiscard]] bool IsFocused() const;
+        // Minimized, or without a framebuffer to render to.
+        [[nodiscard]] bool IsMinimized() const;
+
+        static constexpr double BackgroundFrameInterval = 0.1;     // seconds between frames while not focused
 
         CallbackSubscription OnKey(KeyCallback callback);
         CallbackSubscription OnMouseButton(MouseButtonCallback callback);
@@ -56,6 +68,8 @@ namespace EOS
         int Width{};
         int Height{};
     private:
+        // Reads the framebuffer size and tells the resize subscribers when it changed.
+        void UpdateFramebufferSize();
 
         struct KeySubscription final
         {

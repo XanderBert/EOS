@@ -1,5 +1,6 @@
 #include "vulkanClasses.h"
 
+#include <algorithm>
 #include <complex>
 #include <cstring>
 #include <ranges>
@@ -145,7 +146,7 @@ void cmdBindComputePipeline(EOS::ICommandBuffer& commandBuffer, EOS::ComputePipe
     }
 }
 
-void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount, const EOS::Dependencies& dependencies)
+void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount)
 {
     CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
     CHECK(!vulkanCommandBuffer->IsRendering, "Make sure you call cmdEndRendering before calling cmdDispatchThreadGroups");
@@ -155,7 +156,7 @@ void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dime
     vkCmdDispatch(vulkanCommandBuffer->CommandBufferImpl->VulkanCommandBuffer, threadGroupCount.Width, threadGroupCount.Height, threadGroupCount.Depth);
 }
 
-void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadCount, const EOS::Dependencies& dependencies)
+void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadCount)
 {
     const CommandBuffer* vulkanCommandBuffer = dynamic_cast<const CommandBuffer*>(&commandBuffer);
     CHECK(!vulkanCommandBuffer->CurrentComputePipeline.Empty(), "cmdDispatchThreads needs a bound compute pipeline");
@@ -172,12 +173,11 @@ void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimension
         .Depth = groupsFor(threadCount.Depth, cps->ThreadGroupSize[2]),
     };
 
-    cmdDispatchThreadGroups(commandBuffer, threadGroupCount, dependencies);
+    cmdDispatchThreadGroups(commandBuffer, threadGroupCount);
 }
 
-void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description, const EOS::Dependencies &dependencies)
+void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass &renderPass, EOS::Framebuffer &description)
 {
-    //TODO: Implement dependencies
     CommandBuffer* vulkanCommandBuffer = dynamic_cast<CommandBuffer*>(&commandBuffer);
 
     CHECK(!vulkanCommandBuffer->IsRendering, "Make sure you call cmdEndRendering before calling cmdBeginRendering again");
@@ -278,7 +278,7 @@ void cmdBeginRendering(EOS::ICommandBuffer &commandBuffer, const EOS::RenderPass
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
             .imageView = depthTexture.GetImageViewForFramebuffer(vulkanCommandBuffer->VkContext->GetDevice(), descDepth.Level, descDepth.Layer, descDepth.LayerCount),
-            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .imageLayout = descDepth.ReadOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -1013,6 +1013,16 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
 
     const bool isCompositeAlphaSupported = (supportDetails.capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) != 0;
 
+    // Most platforms dictate the size (currentExtent). Where the surface takes its size from the swapchain instead
+    // (Wayland), the requested size is used, within what the surface allows.
+    const VkSurfaceCapabilitiesKHR& capabilities = supportDetails.capabilities;
+    VkExtent2D extent = capabilities.currentExtent;
+    if (extent.width == UINT32_MAX)
+    {
+        extent.width = std::clamp(vulkanSwapChainDescription.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+        extent.height = std::clamp(vulkanSwapChainDescription.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+    }
+
     //Create SwapChain
     const VkSwapchainCreateInfoKHR createInfo
     {
@@ -1021,7 +1031,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
         .minImageCount = supportDetails.capabilities.minImageCount,
         .imageFormat = SurfaceFormat.format,
         .imageColorSpace = SurfaceFormat.colorSpace,
-        .imageExtent = {.width = vulkanSwapChainDescription.width, .height = vulkanSwapChainDescription.height},
+        .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = usageFlags,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -1058,7 +1068,7 @@ VulkanSwapChain::VulkanSwapChain(const VulkanSwapChainCreationDescription& vulka
     {
         .Image = {},
         .UsageFlags = usageFlags,
-        .Extent = VkExtent3D{.width = vulkanSwapChainDescription.width, .height = vulkanSwapChainDescription.height, .depth = 1},
+        .Extent = VkExtent3D{.width = extent.width, .height = extent.height, .depth = 1},
         .ImageType = EOS::ImageType::SwapChain,
         .ImageFormat = SurfaceFormat.format,
         .Device = VkContext->VulkanDevice,
@@ -1122,6 +1132,7 @@ void VulkanSwapChain::Present(VkSemaphore waitSemaphore)
 
     const VkResult result = vkQueuePresentKHR(GraphicsQueue, &presentInfo);
     CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR, "Couldn't present the SwapChain image");
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) NeedsRecreation = true;
 
     GetNextImage = true;
     ++CurrentFrame;
@@ -1152,12 +1163,13 @@ const VkSurfaceFormatKHR& VulkanSwapChain::GetFormat() const
 EOS::TextureHandle VulkanSwapChain::GetCurrentTexture()
 {
     EOS_PROFILER_FUNCTION();
-    GetAndWaitOnNextImage();
+    if (!AcquireNextImage()) return {};
+
     CHECK(CurrentImageIndex < NumberOfSwapChainImages, "The Current Image Index is bigger then the amount of SwapChain images we have");
     return Textures[CurrentImageIndex];
 }
 
-void VulkanSwapChain::GetAndWaitOnNextImage()
+bool VulkanSwapChain::AcquireNextImage()
 {
     EOS_PROFILER_FUNCTION();
     //Get The Next SwapChain Image
@@ -1179,12 +1191,29 @@ void VulkanSwapChain::GetAndWaitOnNextImage()
         VkSemaphore& acquireSemaphore = AcquireSemaphores[CurrentImageIndex];
 
         // when timeout is set to UINT64_MAX, we wait until the next image has been acquired
+        const uint32_t slot = CurrentImageIndex;
         const VkResult result = vkAcquireNextImageKHR(VkContext->VulkanDevice, SwapChain, UINT64_MAX, acquireSemaphore, acquireFence, &CurrentImageIndex);
-        CHECK(result != VK_ERROR_OUT_OF_DATE_KHR && result != VK_SUBOPTIMAL_KHR, "vkAcquireNextImageKHR Failed");
+        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            // Nothing was acquired, so the fence was never signaled: replace it with a signaled one, as a successful
+            // frame would have left it.
+            CurrentImageIndex = slot;
+            vkDestroyFence(VkContext->VulkanDevice, AcquireFences[slot], nullptr);
+            AcquireFences[slot] = VkSynchronization::CreateFence(VkContext->VulkanDevice, "SwapChain Acquire Fence", true);
+            NeedsRecreation = true;
+            return false;
+        }
+
+        CHECK(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR, "vkAcquireNextImageKHR Failed");
+
+        // A suboptimal image can still be presented; the swapchain is recreated before the next frame.
+        if (result == VK_SUBOPTIMAL_KHR) NeedsRecreation = true;
 
         GetNextImage = false;
         VkContext->VulkanCommandPool->WaitSemaphore(acquireSemaphore);
     }
+
+    return true;
 }
 
 VkSurfaceFormatKHR VulkanSwapChain::GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace)
@@ -2201,6 +2230,7 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
 
     CreateVulkanInstance(contextDescription.ApplicationName);
     SetupDebugMessenger();
+    Window = contextDescription.Window;
     CreateSurface(contextDescription.Window);
 
     //Select the Physical Device
@@ -2214,13 +2244,9 @@ VulkanContext::VulkanContext(const EOS::ContextCreationDescription& contextDescr
                                   &HasAccelerationStructure, &HasRaytracingPipeline);
 
     //Create SwapChain
-    VulkanSwapChainCreationDescription desc
-    {
-        .vulkanContext = this,
-        .width = static_cast<uint32_t>(contextDescription.Width),
-        .height = static_cast<uint32_t>(contextDescription.Height),
-    };
-    InitializeSwapChain(desc);
+    RequestedSwapChainWidth = static_cast<uint32_t>(contextDescription.Width);
+    RequestedSwapChainHeight = static_cast<uint32_t>(contextDescription.Height);
+    InitializeSwapChain({.vulkanContext = this, .width = RequestedSwapChainWidth, .height = RequestedSwapChainHeight});
 
     //Create our CommandPool
     VulkanCommandPool = std::make_unique<CommandPool>(VulkanDevice, VulkanDeviceQueues.Graphics.QueueFamilyIndex);
@@ -2462,7 +2488,15 @@ EOS::TextureHandle VulkanContext::GetSwapChainTexture()
        EOS::Logger->error("No SwapChain Found");
     }
 
+    UpdateSwapChain();
     EOS::TextureHandle swapChainTexture = SwapChain->GetCurrentTexture();
+    if (!swapChainTexture.Valid())
+    {
+        // The window changed between the size check and the acquire: recreate and acquire from the new swapchain.
+        UpdateSwapChain();
+        swapChainTexture = SwapChain->GetCurrentTexture();
+    }
+
     CHECK(swapChainTexture.Valid(), "The SwapChain texture is not valid.");
     CHECK(TexturePool.Get(swapChainTexture)->ImageFormat != VK_FORMAT_UNDEFINED, "Invalid image format");
 
@@ -2482,18 +2516,41 @@ EOS::ColorSpace VulkanContext::GetSwapchainColorSpace() const
     return Configuration.DesiredSwapChainColorSpace;
 }
 
-void VulkanContext::ResizeSwapChain(uint32_t width, uint32_t height)
+void VulkanContext::UpdateSwapChain()
 {
+    // Never while an image is acquired: the frame that acquired it renders to it.
+    if (!SwapChain || !SwapChain->GetNextImage) return;
+
+    GLFWwindow* window = static_cast<GLFWwindow*>(Window);
+    int width = 0;
+    int height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+
+    // Minimized. An out-of-date swapchain cannot be rendered to, so wait until the window has a size again; a swapchain
+    // that is still valid is kept (applications usually skip frames while minimized).
+    while ((width == 0 || height == 0) && SwapChain->NeedsRecreation && !glfwWindowShouldClose(window))
+    {
+        glfwWaitEvents();
+        glfwGetFramebufferSize(window, &width, &height);
+    }
     if (width == 0 || height == 0) return;
 
-    const VulkanSwapChainCreationDescription desc
-    {
-        .vulkanContext = this,
-        .width = width,
-        .height = height,
-    };
+    const bool resized = static_cast<uint32_t>(width) != RequestedSwapChainWidth || static_cast<uint32_t>(height) != RequestedSwapChainHeight;
+    if (!resized && !SwapChain->NeedsRecreation) return;
 
-    InitializeSwapChain(desc);
+    RequestedSwapChainWidth = static_cast<uint32_t>(width);
+    RequestedSwapChainHeight = static_cast<uint32_t>(height);
+    InitializeSwapChain({.vulkanContext = this, .width = RequestedSwapChainWidth, .height = RequestedSwapChainHeight});
+}
+
+EOS::Dimensions VulkanContext::GetSwapchainDimensions()
+{
+    CHECK(HasSwapChain() && !SwapChain->Textures.empty(), "You dont have a SwapChain");
+    UpdateSwapChain();
+    if (!HasSwapChain() || SwapChain->Textures.empty()) return {};
+
+    // Every swapchain image has the same size, so the first one answers without acquiring the next image.
+    return GetDimensions(SwapChain->Textures.front());
 }
 
 EOS::Dimensions VulkanContext::GetDimensions(EOS::TextureHandle handle) const

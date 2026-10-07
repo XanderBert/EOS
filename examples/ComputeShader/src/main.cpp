@@ -49,22 +49,20 @@ int main()
     };
     Handles.ComputePipeline = App.Context->CreateComputePipeline(computePipelineDescription);
 
-    const ComputePushConstants computePushConstants
-    {
-        .payload = App.Context->GetGPUAddress(Handles.ComputeBuffer),
-    };
-
     App.Run([&]()
     {
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
-        cmdPushMarker(cmdBuffer, "Compute Validation", 0xfff59d00);
-        cmdBindComputePipeline(cmdBuffer, Handles.ComputePipeline);
-        cmdPushConstants(cmdBuffer, computePushConstants);
-        cmdDispatchThreadGroups(cmdBuffer, {1, 1, 1});
-        cmdPopMarker(cmdBuffer);
+        // A graph without a swapchain image: Execute() submits without presenting.
+        EOS::RenderGraph& graph = *App.Graph;
+        const EOS::GraphBuffer payload = graph.ImportBuffer(Handles.ComputeBuffer, "ComputePayloadBuffer");
 
-        EOS::SubmitHandle waitHandle = App.Context->Submit(cmdBuffer, {});
-        App.Context->Wait(waitHandle);
+        graph.AddComputePass("Compute Validation").Write(payload).Execute([payload](EOS::PassContext& pass)
+        {
+            cmdBindComputePipeline(pass.Cmd, Handles.ComputePipeline);
+            cmdPushConstants(pass.Cmd, ComputePushConstants{.payload = pass.Address(payload)});
+            cmdDispatchThreadGroups(pass.Cmd, {1, 1, 1});
+        });
+
+        App.Context->Wait(graph.Execute());
 
         const auto* computeData = reinterpret_cast<const ComputePayload*>(App.Context->GetMappedPtr(Handles.ComputeBuffer));
         if (computeData->result == computeData->lhs * computeData->rhs)

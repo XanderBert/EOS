@@ -21,7 +21,6 @@ struct Resources final
 {
     EOS::ShaderProgramHolder ShadeShader;
     EOS::ShaderProgramHolder ShadowShader;
-    EOS::Holder<EOS::TextureHandle> DepthTexture;
     EOS::Holder<EOS::TextureHandle> ShadowDepthTexture;
     EOS::SamplerHolder DepthMapSampler;
     EOS::Holder<EOS::BufferHandle> VertexBuffer;
@@ -92,7 +91,6 @@ int main()
         .InputBindings ={{ .Stride = sizeof(Vertex) }}
     };
 
-    Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - ShadowMapping");
 
     Handles.ShadowDepthTexture = App.Context->CreateTexture(
 {
@@ -175,7 +173,7 @@ int main()
         .VertexShader = {Handles.ShadeShader, "vertexMain"},
         .FragmentShader = {Handles.ShadeShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
+        .DepthFormat = EOS::Format::Z_F32,
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
@@ -238,61 +236,32 @@ int main()
             .shadowMap = Handles.ShadowDepthTexture,
             .shadowSampler = Handles.DepthMapSampler,
         };
-        App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
-
-        EOS::Framebuffer framebufferShade
-        {
-            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DepthStencil = { .Texture = Handles.DepthTexture },
-            .DebugName = "Basic Color Depth Framebuffer",
-        };
-
-        EOS::Framebuffer framebufferShadow
-        {
-            .DepthStencil = { .Texture = Handles.ShadowDepthTexture },
-            .DebugName = "ShadowMap framebuffer"
-        };
-
-        constexpr EOS::RenderPass renderPass
-        {
-            .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
-            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
-        };
-
-        constexpr EOS::RenderPass shadowRenderPass
-        {
-            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
-        };
-
         constexpr EOS::DepthState depthState
         {
             .CompareOpState = EOS::CompareOp::Less,
             .IsDepthWriteEnabled = true,
         };
 
+        EOS::RenderGraph& graph = *App.Graph;
+        const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
+        const EOS::GraphTexture depth = graph.CreateTexture({.TextureFormat = EOS::Format::Z_F32, .DebugName = "Depth"});
+        // Owned by the example rather than the graph: PerFrameData and the UI refer to it before the graph executes.
+        const EOS::GraphTexture shadowMap = graph.ImportTexture(Handles.ShadowDepthTexture, "Shadow Map");
+        const EOS::GraphBuffer perFrame = graph.ImportBuffer(Handles.PerFrameBuffer, "PerFrameBuffer");
+        graph.AddUpload("Upload Frame Data", perFrame, perFrameData);
 
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
-
-        cmdPipelineBarrier(cmdBuffer, {},
-            {
-                { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
-                { Handles.ShadowDepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite },
-            });
-
-        cmdPushMarker(cmdBuffer, "Shadow Pass", 0xff0000ff);
-        cmdBeginRendering(cmdBuffer, shadowRenderPass, framebufferShadow);
+        graph.AddRasterPass("Shadow").Depth(EOS::ClearDepth(shadowMap)).Read(perFrame).Execute([&](EOS::PassContext& pass)
         {
-            cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-            cmdSetDepthState(cmdBuffer, depthState);
+            cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdSetDepthState(pass.Cmd, depthState);
 
             // Opaque meshes go through a fragment shader that never discards, which keeps the fast depth-only path.
             // Only the alpha-tested ones pay for the alpha test. Draw indices restart at 0 in the second indirect draw,
             // so its push constants point the draw data at the first alpha-tested mesh.
-            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShadowHandle);
-            cmdPushConstants(cmdBuffer, framePointers);
-            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, nOpaqueMeshes);
+            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipelineShadowHandle);
+            cmdPushConstants(pass.Cmd, framePointers);
+            cmdDrawIndexedIndirect(pass.Cmd, Handles.IndirectBuffer, 0, nOpaqueMeshes);
 
             const uint32_t nAlphaTestedMeshes = static_cast<uint32_t>(scene.meshes.size()) - nOpaqueMeshes;
             if (nAlphaTestedMeshes > 0)
@@ -303,47 +272,36 @@ int main()
                     .draws = framePointers.draws + nOpaqueMeshes * sizeof(DrawData),
                 };
 
-                cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineShadowAlphaTestedHandle);
-                cmdPushConstants(cmdBuffer, alphaTestedPointers);
-                cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, nOpaqueMeshes * sizeof(EOS::DrawIndexedIndirectCommand), nAlphaTestedMeshes);
+                cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipelineShadowAlphaTestedHandle);
+                cmdPushConstants(pass.Cmd, alphaTestedPointers);
+                cmdDrawIndexedIndirect(pass.Cmd, Handles.IndirectBuffer, nOpaqueMeshes * sizeof(EOS::DrawIndexedIndirectCommand), nAlphaTestedMeshes);
             }
-        }
-        cmdEndRendering(cmdBuffer);
-        cmdPopMarker(cmdBuffer);
+        });
 
-
-        cmdPipelineBarrier(cmdBuffer, {},{{ Handles.ShadowDepthTexture, EOS::ResourceState::DepthWrite, EOS::ResourceState::ShaderResource },});
-
-        cmdPushMarker(cmdBuffer, "Shade Pass", 0xff00f0ff);
-        cmdBeginRendering(cmdBuffer, renderPass, framebufferShade);
+        graph.AddRasterPass("Shade")
+            .Color(EOS::Clear(backbuffer, {0.36f, 0.4f, 1.0f, 0.28f}))
+            .Depth(EOS::ClearDepth(depth))
+            .Sample(shadowMap)
+            .Read(perFrame)
+            .Execute([&](EOS::PassContext& pass)
         {
-            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipelineHandle);
-            cmdPushConstants(cmdBuffer, framePointers);
-            cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectBuffer, 0, scene.meshes.size());
-        }
-        cmdEndRendering(cmdBuffer);
-        cmdPopMarker(cmdBuffer);
+            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipelineHandle);
+            cmdPushConstants(pass.Cmd, framePointers);
+            cmdSetDepthState(pass.Cmd, depthState);
+            cmdDrawIndexedIndirect(pass.Cmd, Handles.IndirectBuffer, 0, scene.meshes.size());
+        });
 
-
-        //Render UI
-        App.UIRenderer->BeginFrame(cmdBuffer);
+        App.AddUIPass(backbuffer, [&]
         {
             EOS::UI::SetNextWindowSize(300, 300);
             EOS::UI::Begin("Light Settings");
-
             EOS::UI::DragFloat3("Light Position", glm::value_ptr(lightPos));
             EOS::UI::DragFloat2("Light Rotation", glm::value_ptr(lightRotation));
-            const uint64_t shadowArrayLayerTextureID = EOS::UI::MakeTextureID(Handles.ShadowDepthTexture);
-            EOS::UI::Image(shadowArrayLayerTextureID, 200,200);
-
+            EOS::UI::Image(EOS::UI::MakeTextureID(Handles.ShadowDepthTexture), 200, 200);
             EOS::UI::End();
-        }
-        App.UIRenderer->EndFrame(cmdBuffer);
+        }).Sample(shadowMap);
 
-
-        cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
+        graph.Execute();
     });
 
     Handles = {};

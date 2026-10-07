@@ -41,6 +41,12 @@ namespace EOS
             void SetFont(const char* defaultFont, float fontSize) const;
             void SetScale(float scale) const;
 
+            // Starts the UI of a frame; widgets can be declared from here on.
+            void NewFrame() const;
+            // Draws the frame's UI into the color target being rendered to (the swapchain), e.g. in a render graph pass.
+            void Render(ICommandBuffer& commandBuffer) const;
+
+            // NewFrame() and Render(), plus rendering onto the swapchain, for callers without a render graph.
             void BeginFrame(ICommandBuffer& commandBuffer) const;
             void EndFrame(ICommandBuffer& commandBuffer) const;
 

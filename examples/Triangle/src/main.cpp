@@ -1,4 +1,5 @@
 #include "EOS.h"
+#include "renderGraph.h"
 
 struct Resources final
 {
@@ -39,38 +40,22 @@ int main()
     };
     Handles.RenderPipeline = context->CreateRenderPipeline(renderPipelineDescription);
 
-    bool AllowStartupFrame = true;
+    std::unique_ptr<EOS::RenderGraph> graph = std::make_unique<EOS::RenderGraph>(context.get());
 
     while (!window->ShouldClose())
     {
         window->Poll();
 
-        if (!window->IsFocused() && !AllowStartupFrame) continue;
-        AllowStartupFrame = false;
-
-
-        EOS::ICommandBuffer& cmdBuffer = context->AcquireCommandBuffer();
-        EOS::Framebuffer framebuffer =
+        const EOS::GraphTexture backbuffer = graph->ImportSwapchain();
+        graph->AddRasterPass("Triangle").Color(EOS::Clear(backbuffer, {0.36f, 0.4f, 1.0f, 0.28f})).Execute([](EOS::PassContext& pass)
         {
-            .Color = {{.Texture = context->GetSwapChainTexture()}},
-            .DebugName = "Triangle Framebuffer",
-        };
-        EOS::RenderPass renderPass{ .Color = { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } }};
-        cmdPipelineBarrier(cmdBuffer, {},{{ context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget }});
-
-        cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
-        {
-            cmdPushMarker(cmdBuffer, "Triangle", 0xff0000ff);
-            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
-            cmdDraw(cmdBuffer, 3);
-            cmdPopMarker(cmdBuffer);
-        }
-        cmdEndRendering(cmdBuffer);
-
-        cmdPipelineBarrier(cmdBuffer, {}, {{context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        context->Submit(cmdBuffer, context->GetSwapChainTexture());
+            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipeline);
+            cmdDraw(pass.Cmd, 3);
+        });
+        graph->Execute();
     }
 
+    graph = nullptr;
     Handles = {};
 
     return 0;

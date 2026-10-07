@@ -305,6 +305,7 @@ namespace EOS
             float ClearColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
             float ClearDepth = 1.0f;
             uint32_t ClearStencil = 0;
+            bool ReadOnly = false;      // depth/stencil only: the pass only tests it, so shaders may sample it meanwhile
         };
 
         AttachmentDesc Color[EOS_MAX_COLOR_ATTACHMENTS]{};
@@ -333,16 +334,6 @@ namespace EOS
         const char* DebugName = "";
 
         uint32_t GetNumColorAttachments() const;
-    };
-
-    /**
-     * @brief Resource dependency list used when starting a render pass.
-     */
-    struct Dependencies final
-    {
-        constexpr static  uint8_t MaxSubmitDependencies = 4;
-        TextureHandle Textures[MaxSubmitDependencies]{};
-        BufferHandle Buffers[MaxSubmitDependencies]{};
     };
 
     /**
@@ -614,6 +605,8 @@ namespace EOS
          * @brief Gets the handle to the currently in use SwapChain image and advances to the
          *        next one. Internally this CPU-waits (via the timeline semaphore) until the
          *        previous frame's GPU work for this swapchain slot is fully complete.
+         *        The swapchain follows the window by itself: it is recreated here when the window was resized, or when
+         *        presentation reported it out of date.
          *
          * @note  **Call this BEFORE uploading any per-frame GPU buffers** (e.g. via Upload()).
          *        The wait that happens inside this call is what makes it safe to overwrite
@@ -647,11 +640,10 @@ namespace EOS
         virtual ColorSpace GetSwapchainColorSpace() const = 0;
 
         /**
-         * @brief Recreates the swapchain for a new framebuffer size.
-         * @param width New framebuffer width.
-         * @param height New framebuffer height.
+         * @brief Gets the size of the swapchain images, without acquiring one. The swapchain follows the window by
+         *        itself: when the window was resized since the last frame, it is recreated first.
          */
-        virtual void ResizeSwapChain(uint32_t width, uint32_t height) = 0;
+        virtual Dimensions GetSwapchainDimensions() = 0;
 
         /**
          * @brief Gets dimensions for a texture handle.
@@ -1068,30 +1060,27 @@ void cmdBindComputePipeline(EOS::ICommandBuffer& commandBuffer, EOS::ComputePipe
 
 
 /**
- *
+ * @brief Dispatches thread groups of the bound compute pipeline.
  * @param commandBuffer The commandbuffer we want to record into.
  * @param threadGroupCount The 3D threadGroup Count to execute the compute pipeline.
- * @param dependencies The Input/Output dependencies of this pipeline
  */
-void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount, const EOS::Dependencies& dependencies = {});
+void cmdDispatchThreadGroups(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadGroupCount);
 
 /**
  * @brief Dispatches enough thread groups of the bound compute pipeline to cover threadCount threads in every dimension.
  *        The thread-group size comes from the shader's [numthreads] attribute.
  * @param commandBuffer The commandbuffer we want to record into.
  * @param threadCount The number of threads to run in each dimension.
- * @param dependencies The Input/Output dependencies of this pipeline
  */
-void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadCount, const EOS::Dependencies& dependencies = {});
+void cmdDispatchThreads(EOS::ICommandBuffer& commandBuffer, const EOS::Dimensions& threadCount);
 
 /**
- * @brief Add a command to the commandbuffer that we will now start rendering, defining what should be rendered and what dependencies we have.
+ * @brief Add a command to the commandbuffer that we will now start rendering, defining what should be rendered.
  * @param commandBuffer The commandbuffer where we add the command to.
  * @param renderPass Describes what how our framebuffer attachements should be loaded / stored ...
  * @param description Describes our actual textures we want to use for rendering.
- * @param dependencies Describes the depandancies of this "Pass".
  */
-void cmdBeginRendering(EOS::ICommandBuffer& commandBuffer, const EOS::RenderPass& renderPass, EOS::Framebuffer& description, const EOS::Dependencies& dependencies = {});
+void cmdBeginRendering(EOS::ICommandBuffer& commandBuffer, const EOS::RenderPass& renderPass, EOS::Framebuffer& description);
 
 /**
  * @brief Add a command to the commandbuffer that we will now end rendering

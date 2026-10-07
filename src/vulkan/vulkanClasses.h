@@ -232,7 +232,8 @@ public:
 private:
     static constexpr uint32_t MAX_IMAGES{16};
 
-    void GetAndWaitOnNextImage();
+    // False when the swapchain is out of date and no image was acquired.
+    [[nodiscard]] bool AcquireNextImage();
     [[nodiscard]] static VkSurfaceFormatKHR GetSwapChainFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats, EOS::ColorSpace desiredColorSpace);
 
     VkSurfaceFormatKHR SurfaceFormat = {.format = VK_FORMAT_UNDEFINED};
@@ -241,6 +242,7 @@ private:
     uint32_t CurrentImageIndex{};
     uint64_t CurrentFrame{};
     bool GetNextImage{true};
+    bool NeedsRecreation{false};    // acquire or present reported it out of date or suboptimal
 
     std::vector<VkSemaphore> AcquireSemaphores{};
     std::vector<VkFence> AcquireFences{};
@@ -482,8 +484,8 @@ public:
     [[nodiscard]] EOS::SubmitHandle Submit(EOS::ICommandBuffer &commandBuffer, EOS::TextureHandle present) override;
     [[nodiscard]] EOS::TextureHandle GetSwapChainTexture() override;
     [[nodiscard]] EOS::Format GetSwapchainFormat() const override;
+    [[nodiscard]] EOS::Dimensions GetSwapchainDimensions() override;
     [[nodiscard]] EOS::ColorSpace GetSwapchainColorSpace() const override;
-    void ResizeSwapChain(uint32_t width, uint32_t height) override;
     [[nodiscard]] EOS::Dimensions GetDimensions(EOS::TextureHandle handle) const override;
     [[nodiscard]] uint32_t GetNumMipLevels(EOS::TextureHandle handle) const override;
     [[nodiscard]] EOS::Holder<EOS::ShaderProgramHandle> CreateShaderProgram(const EOS::ShaderProgramDescription& description) override;
@@ -584,6 +586,8 @@ private:
     void CreateVulkanInstance(const char* applicationName);
     void SetupDebugMessenger();
     void CreateSurface(void* window);
+    // Recreates the swapchain between frames when the window changed size or the swapchain went out of date.
+    void UpdateSwapChain();
     void CreateAllocator();
     void StorePhysicalDeviceProperties();
     void GenerateMipmaps(const EOS::TextureHandle& handle);
@@ -616,6 +620,9 @@ private:
     VkSurfaceKHR VulkanSurface                      = VK_NULL_HANDLE;
     VkSemaphore TimelineSemaphore                   = VK_NULL_HANDLE;
     std::unique_ptr<VulkanSwapChain> SwapChain      = nullptr;
+    void* Window                                    = nullptr;  // the GLFWwindow the surface belongs to
+    uint32_t RequestedSwapChainWidth                = 0;
+    uint32_t RequestedSwapChainHeight               = 0;
     std::unique_ptr<VulkanStagingDevice> VulkanStagingBuffer = nullptr;
     mutable std::deque<DeferredTask> DeferredTasks;
         

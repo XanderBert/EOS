@@ -103,7 +103,23 @@ namespace EOS
     void Window::Poll()
     {
         glfwPollEvents();
+        UpdateFramebufferSize();
 
+        while (IsMinimized() && !ShouldClose())
+        {
+            glfwWaitEvents();
+            UpdateFramebufferSize();
+        }
+
+        if (!IsFocused() && !ShouldClose())
+        {
+            glfwWaitEventsTimeout(BackgroundFrameInterval);
+            UpdateFramebufferSize();
+        }
+    }
+
+    void Window::UpdateFramebufferSize()
+    {
         int newWidth;
         int newHeight;
         glfwGetFramebufferSize(GlfwWindow, &newWidth, &newHeight);
@@ -128,6 +144,11 @@ namespace EOS
     bool Window::IsFocused() const
     {
         return glfwGetWindowAttrib(GlfwWindow, GLFW_FOCUSED) == GLFW_TRUE;
+    }
+
+    bool Window::IsMinimized() const
+    {
+        return Width == 0 || Height == 0 || glfwGetWindowAttrib(GlfwWindow, GLFW_ICONIFIED) == GLFW_TRUE;
     }
 
     CallbackSubscription Window::OnKey(KeyCallback callback)

@@ -12,7 +12,6 @@ struct Vertex final
 struct Resources final
 {
     EOS::ShaderProgramHolder ModelShader;
-    EOS::TextureHolder DepthTexture;
     EOS::BufferHolder VertexBuffer;
     EOS::BufferHolder IndexBuffer;
     EOS::BufferHolder PerDrawBuffer;
@@ -49,7 +48,6 @@ int main()
     ExampleApp App{appDescription};
 
     Handles.ModelShader = App.Context->CreateShaderProgram({.Module = "indirectModel"});
-    Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - MultiDrawIndirect");
 
     //TODO: This could be constevaled with reflection Or use Shader Resource Table model
     constexpr EOS::VertexInputData vdesc
@@ -127,7 +125,7 @@ int main()
         .VertexShader = {Handles.ModelShader, "vertexMain"},
         .FragmentShader = {Handles.ModelShader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
+        .DepthFormat = EOS::Format::Z_F32,
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
@@ -146,8 +144,6 @@ int main()
         const float aspectRatio = static_cast<float>(App.Window.Width) / static_cast<float>(App.Window.Height);
         if (std::isnan(aspectRatio)) return;
 
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
-        EOS::TextureHandle swapchainTexture = App.Context->GetSwapChainTexture();
 
         glm::mat4 m = glm::mat4(1);
         const glm::mat4 mvp = App.MainCamera.GetViewProjectionMatrix(aspectRatio) * m;
@@ -158,21 +154,6 @@ int main()
             .mvp = mvp,
             .cameraPos = glm::vec4(App.MainCamera.GetPosition(), 0),
         };
-        App.Context->Upload(Handles.PerFrameBuffer, &perFrameData, sizeof(PerFrameData), 0);
-
-
-        EOS::Framebuffer framebuffer
-        {
-            .Color = {{.Texture = swapchainTexture}},
-            .DepthStencil = { .Texture = Handles.DepthTexture },
-            .DebugName = "Basic Color Depth Framebuffer"
-        };
-
-        constexpr EOS::RenderPass renderPass
-        {
-            .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
-            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
-        };
 
         constexpr EOS::DepthState depthState
         {
@@ -180,31 +161,27 @@ int main()
             .IsDepthWriteEnabled = true,
         };
 
-        
-        cmdPipelineBarrier(cmdBuffer, {},
-            {
-                { swapchainTexture, EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
-            });
+        EOS::RenderGraph& graph = *App.Graph;
+        const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
+        const EOS::GraphTexture depth = graph.CreateTexture({.TextureFormat = EOS::Format::Z_F32, .DebugName = "Depth"});
+        const EOS::GraphBuffer perFrame = graph.ImportBuffer(Handles.PerFrameBuffer, "PerFrameBuffer");
+        graph.AddUpload("Upload Frame Data", perFrame, perFrameData);
 
-        cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
+        graph.AddRasterPass("Sponza")
+            .Color(EOS::Clear(backbuffer, {0.36f, 0.4f, 1.0f, 0.28f}))
+            .Depth(EOS::ClearDepth(depth))
+            .Read(perFrame)
+            .Execute([&](EOS::PassContext& pass)
         {
-            cmdPushMarker(cmdBuffer, "Sponza", 0xff00f0ff);
-            cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
+            cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipeline);
+            cmdPushConstants(pass.Cmd, framePointers);
+            cmdSetDepthState(pass.Cmd, depthState);
+            cmdDrawIndexedIndirect(pass.Cmd, Handles.IndirectDrawBuffer, 0, scene.meshes.size());
+        });
 
-            cmdPushConstants(cmdBuffer, framePointers);
-            cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexedIndirect(cmdBuffer, Handles.IndirectDrawBuffer, 0, scene.meshes.size());
-
-            cmdPopMarker(cmdBuffer);
-        }
-        cmdEndRendering(cmdBuffer);
-
-        cmdPipelineBarrier(cmdBuffer, {}, {{swapchainTexture, EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        
-        App.Context->Submit(cmdBuffer, swapchainTexture);
+        graph.Execute();
     });
 
     Handles = {};

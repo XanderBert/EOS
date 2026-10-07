@@ -166,12 +166,23 @@ namespace EOS
         SetFont(CurrentFont, BaseFontSize * Scale);
     }
 
-    void ImGuiRenderer::BeginFrame(ICommandBuffer& cmd)
+    void ImGuiRenderer::NewFrame()
     {
         if (Scale != PendingScale)
         {
             SetScaleInternal();
         }
+
+        ImGuiIO& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+    }
+
+    void ImGuiRenderer::BeginFrame(ICommandBuffer& cmd)
+    {
+        NewFrame();
 
         constexpr RenderPass renderPass
         {
@@ -184,22 +195,23 @@ namespace EOS
             .DebugName = "ImGui framebuffer"
         };
 
-
-        ImGuiIO& io = ImGui::GetIO();
-        io.IniFilename = nullptr;
-
-        if (RenderPipeline.Empty()) CreateNewPipeline(framebuffer);
-
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
         cmdPushMarker(cmd, "GUI", 0xff11ff01);
         cmdBeginRendering(cmd, renderPass, framebuffer);
     }
 
     void ImGuiRenderer::EndFrame(ICommandBuffer& cmd)
     {
+        Render(cmd);
+        cmdEndRendering(cmd);
+        cmdPopMarker(cmd);
+    }
+
+    void ImGuiRenderer::Render(ICommandBuffer& cmd)
+    {
         static_assert(sizeof(ImDrawIdx) == 2);
+
+        // The UI is drawn into the swapchain, so its pipeline renders to the swapchain's format.
+        if (RenderPipeline.Empty()) CreateNewPipeline(Context->GetSwapchainFormat());
 
         ImGui::EndFrame();
         ImGui::Render();
@@ -209,8 +221,6 @@ namespace EOS
         const float framebufferHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;
         if (framebufferWidth <= 0 || framebufferHeight <= 0 || drawData->CmdListsCount == 0)
         {
-            cmdEndRendering(cmd);
-            cmdPopMarker(cmd);
             return;
         }
 
@@ -318,17 +328,11 @@ namespace EOS
             indexOffset += cmdList->IdxBuffer.Size;
             vertexOffset += cmdList->VtxBuffer.Size;
         }
-
-        cmdEndRendering(cmd);
-        cmdPopMarker(cmd);
     }
 
-    void ImGuiRenderer::CreateNewPipeline(const Framebuffer& framebuffer)
+    void ImGuiRenderer::CreateNewPipeline(Format colorFormat)
     {
-        CHECK(framebuffer.Color[0].Texture, "There should be at least 1 valid texture in the framebuffer");
-
         const uint32_t nonLinearColorSpace = Context->GetSwapchainColorSpace() == ColorSpace::SRGB_NonLinear ? 1u : 0u;
-        static_assert(EOS_MAX_COLOR_ATTACHMENTS == 8, "Update all color attachments below");
 
         const RenderPipelineDescription renderPipelineDesc
         {
@@ -340,23 +344,13 @@ namespace EOS
                 .Data = &nonLinearColorSpace,
                 .DataSize = sizeof(nonLinearColorSpace),
             },
-
             .ColorAttachments =
             {{
-                .ColorFormat = Context->GetFormat(framebuffer.Color[0].Texture),
+                .ColorFormat = colorFormat,
                 .BlendEnabled = true,
                 .SrcRGBBlendFactor = BlendFactor::SrcAlpha,
                 .DstRGBBlendFactor = BlendFactor::OneMinusSrcAlpha,
-            },
-                {.ColorFormat = framebuffer.Color[1].Texture ? Context->GetFormat(framebuffer.Color[1].Texture) : Invalid},
-                {.ColorFormat = framebuffer.Color[2].Texture ? Context->GetFormat(framebuffer.Color[2].Texture) : Invalid},
-                {.ColorFormat = framebuffer.Color[3].Texture ? Context->GetFormat(framebuffer.Color[3].Texture) : Invalid},
-                {.ColorFormat = framebuffer.Color[4].Texture ? Context->GetFormat(framebuffer.Color[4].Texture) : Invalid},
-                {.ColorFormat = framebuffer.Color[5].Texture ? Context->GetFormat(framebuffer.Color[5].Texture) : Invalid},
-                {.ColorFormat = framebuffer.Color[6].Texture ? Context->GetFormat(framebuffer.Color[6].Texture) : Invalid},
-                {.ColorFormat = framebuffer.Color[7].Texture ? Context->GetFormat(framebuffer.Color[7].Texture) : Invalid},
-            },
-            .DepthFormat = framebuffer.DepthStencil.Texture ? Context->GetFormat(framebuffer.DepthStencil.Texture) : Invalid,
+            }},
             .PipelineCullMode = CullMode::None,
             .DebugName = "ImGui Render Pipeline"
         };

@@ -152,6 +152,54 @@ turns off early depth testing for the whole draw, so depth-only passes draw the 
 that never discards and only the alpha-tested ones with one that does. `PartitionMeshesByAlphaTest` in the example
 helpers orders the meshes so that is two indirect draws (see the shadow-mapping examples).
 
+# Render graph
+Frames are described with `EOS::RenderGraph` (`src/renderGraph.h`), rebuilt every frame like Frostbite's FrameGraph
+and Unreal's RDG. A pass declares what it renders to, samples, writes and reads; `Execute()` derives the rest.
+
+```cpp
+EOS::RenderGraph& graph = *App.Graph;
+const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
+const EOS::GraphTexture albedo = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_UN8, .DebugName = "Albedo"});
+const EOS::GraphTexture depth  = graph.CreateTexture({.TextureFormat = EOS::Format::Z_F32, .DebugName = "Depth"});
+const EOS::GraphTexture lit    = graph.CreateTexture({.TextureFormat = EOS::Format::RGBA_F16, .Scale = 0.5f, .DebugName = "Lit"});
+
+graph.AddRasterPass("GBuffer").Color(EOS::Clear(albedo)).Depth(EOS::ClearDepth(depth)).Execute([&](EOS::PassContext& pass)
+{
+    cmdBindRenderPipeline(pass.Cmd, gbufferPipeline);
+    cmdDrawIndexedIndirect(pass.Cmd, indirectBuffer, 0, drawCount);
+});
+
+graph.AddComputePass("Lighting").Sample(albedo).Write(lit).Execute([&](EOS::PassContext& pass)
+{
+    cmdBindComputePipeline(pass.Cmd, lightingPipeline);
+    cmdPushConstants(pass.Cmd, LightingPC{.albedo = pass.Descriptor(albedo), .output = pass.Descriptor(lit)});
+    cmdDispatchThreads(pass.Cmd, pass.Size(lit));
+});
+
+graph.Execute();   // barriers, render passes, markers, submit and present
+```
+
+- **Resources**: `CreateTexture`/`CreateBuffer` resources belong to the graph. Textures are sized relative to the
+  swapchain (`Scale`) or fixed (`Size`), get their usage flags from how passes use them, are pooled across frames and
+  are recreated when the window is resized. Their contents do not survive the frame; `CreateHistoryTexture` gives a
+  texture that does, together with last frame's version (temporal effects).
+- **Imports**: resources owned elsewhere are imported (`ImportTexture`, `ImportBuffer`, `ImportSwapchain`). The graph
+  keeps the state it left them in for the next frame. Anything referenced before the graph executes, such as a texture
+  the UI shows or a handle uploaded in a buffer, has to be such an import: graph resources only exist inside passes,
+  where `pass.Descriptor()`, `pass.Texture()` and `pass.Address()` resolve them.
+- **Per-frame data**: write it with `graph.AddUpload(name, buffer, data)`, which copies it on the GPU in order with the
+  passes (`cmdUpdateBuffer`, at most 64 KiB), and let the passes that use it `.Read(buffer)`. Writing it from the CPU
+  (`IContext::Upload` into host-visible memory) changes it while earlier frames may still be reading it: in the
+  cascaded shadow mapping example that made early-Z and shading see different camera matrices, and the scene vanished
+  while the camera moved.
+- **Execution**: passes run in the order they were added. Passes whose results nothing uses are skipped (writes to
+  imports, the swapchain and history textures always count). Every pass gets the barriers it needs in one batch,
+  raster passes are wrapped in `cmdBeginRendering` for their targets, and every pass is a named debug marker.
+- **Data**: the graph is flat arrays of resources, passes and accesses indexed by the handles, and pass functions live
+  in a reused arena, so building a frame allocates nothing once the graph is warm.
+
+In the examples, `App.AddUIPass(target, [&] { ... })` declares the frame's UI and draws it on top of `target`.
+
 # Building
 This project is built using CMake and Ninja.
 

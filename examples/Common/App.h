@@ -3,6 +3,7 @@
 #include "ExampleHelpers.h"
 #include "Camera.h"
 #include "EOS.h"
+#include "renderGraph.h"
 #include "UI/UI.h"
 #include "glm/gtc/type_ptr.hpp"
 
@@ -45,27 +46,34 @@ public:
         DefaultSampler = Context->CreateSampler(samplerDescription);
         SetupInputCallbacks();
 
+        Graph = std::make_unique<EOS::RenderGraph>(Context.get());
+
 
         UIRenderer = std::make_unique<EOS::UI::Renderer>(Context.get(), Window);
     }
 
     DELETE_COPY_MOVE(ExampleApp)
 
-    [[nodiscard]] EOS::Holder<EOS::TextureHandle> CreateDepthTexture(const char* debugName = "Depth Buffer") const
+    // Declares the UI of this frame (declareWidgets calls EOS::UI functions) and draws it on top of target. Textures the
+    // UI shows have to be imported into the graph and added with .Sample() on the returned pass.
+    template <typename Function>
+    EOS::PassBuilder AddUIPass(EOS::GraphTexture target, Function&& declareWidgets)
     {
-        return Context->CreateTexture(
+        UIRenderer->NewFrame();
+        std::forward<Function>(declareWidgets)();
+
+        EOS::PassBuilder pass = Graph->AddRasterPass("UI").Color(EOS::Load(target));
+        pass.Execute([this](EOS::PassContext& context)
         {
-            .Type                   = EOS::ImageType::Image_2D,
-            .TextureFormat          = EOS::Format::Z_F32,
-            .TextureDimensions      = {static_cast<uint32_t>(Window.Width), static_cast<uint32_t>(Window.Height)},
-            .Usage                  = EOS::TextureUsageFlags::Attachment,
-            .DebugName              = debugName,
+            UIRenderer->Render(context.Cmd);
         });
+        return pass;
     }
 
     Camera MainCamera;
     EOS::Window Window;
     std::unique_ptr<EOS::IContext> Context;
+    std::unique_ptr<EOS::RenderGraph> Graph;        // destroyed before the context, which its textures belong to
     std::unique_ptr<EOS::UI::Renderer> UIRenderer;
     EOS::Holder<EOS::SamplerHandle> DefaultSampler;
     InputState Input;
@@ -90,20 +98,13 @@ public:
     void Run(Function&& renderLoop)
     {
         lastTime = glfwGetTime();
-        bool AllowStartupFrame = true;
 
         while (!Window.ShouldClose() && !ShouldExit)
         {
             Window.Poll();
 
-            if (!Window.IsFocused() && !AllowStartupFrame)
-            {
-                if (Input.rightMouse) SetMouseLookMode(false);
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-            }
-
-            AllowStartupFrame = false;
+            // Mouse look holds on to the cursor; give it back when the user switches away.
+            if (!Window.IsFocused() && Input.rightMouse) SetMouseLookMode(false);
 
             //Update time
             const double currentTime = glfwGetTime();

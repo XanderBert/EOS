@@ -64,6 +64,20 @@ namespace EOS::UI
 #endif
     }
 
+    void Renderer::NewFrame() const
+    {
+#if defined(EOS_USE_IMGUI)
+        Impl->ImGui.NewFrame();
+#endif
+    }
+
+    void Renderer::Render([[maybe_unused]] ICommandBuffer& commandBuffer) const
+    {
+#if defined(EOS_USE_IMGUI)
+        Impl->ImGui.Render(commandBuffer);
+#endif
+    }
+
     void Renderer::BeginFrame([[maybe_unused]] ICommandBuffer& commandBuffer) const
     {
 #if defined(EOS_USE_IMGUI)

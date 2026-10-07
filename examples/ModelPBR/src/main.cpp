@@ -12,7 +12,6 @@ struct Vertex final
 struct Resources final
 {
     EOS::ShaderProgramHolder Shader;
-    EOS::Holder<EOS::TextureHandle> DepthTexture;
     EOS::Holder<EOS::RenderPipelineHandle> RenderPipeline;
     EOS::Holder<EOS::BufferHandle> VertexBuffer;
     EOS::Holder<EOS::BufferHandle> IndexBuffer;
@@ -64,7 +63,6 @@ int main()
         }
     };
 
-    Handles.DepthTexture = App.CreateDepthTexture("Depth Buffer - ModelPBR");
 
     //It would be nice if these pipeline descriptions would be stored as JSON/XML into the material system
     EOS::RenderPipelineDescription renderPipelineDescription
@@ -73,7 +71,7 @@ int main()
         .VertexShader = {Handles.Shader, "vertexMain"},
         .FragmentShader = {Handles.Shader, "fragmentMain"},
         .ColorAttachments = {{ .ColorFormat = App.Context->GetSwapchainFormat()}},
-        .DepthFormat = App.Context->GetFormat(Handles.DepthTexture),
+        .DepthFormat = EOS::Format::Z_F32,
         .PipelineCullMode = EOS::CullMode::Back,
         .DebugName = "Basic Render Pipeline",
     };
@@ -128,55 +126,34 @@ int main()
         perFrameData.material.samplerState = App.DefaultSampler;
 
 
-        EOS::ICommandBuffer& cmdBuffer = App.Context->AcquireCommandBuffer();
-        EOS::Framebuffer framebuffer
-        {
-            .Color = {{.Texture = App.Context->GetSwapChainTexture()}},
-            .DepthStencil = { .Texture = Handles.DepthTexture },
-            .DebugName = "Basic Color Depth Framebuffer"
-        };
-
-        constexpr EOS::RenderPass renderPass
-        {
-            .Color { { .LoadOpState = EOS::LoadOp::Clear, .ClearColor = { 0.36f, 0.4f, 1.0f, 0.28f } } },
-            .Depth{ .LoadOpState = EOS::LoadOp::Clear, .ClearDepth = 1.0f }
-        };
-
         constexpr EOS::DepthState depthState
         {
             .CompareOpState = EOS::CompareOp::Less,
             .IsDepthWriteEnabled = true,
         };
 
+        EOS::RenderGraph& graph = *App.Graph;
+        const EOS::GraphTexture backbuffer = graph.ImportSwapchain();
+        const EOS::GraphTexture depth = graph.CreateTexture({.TextureFormat = EOS::Format::Z_F32, .DebugName = "Depth"});
+        const EOS::GraphBuffer perFrame = graph.ImportBuffer(Handles.PerFrameBuffer, "PerFrameBuffer");
 
-        cmdPipelineBarrier(cmdBuffer, {},
-            {
-                { App.Context->GetSwapChainTexture(), EOS::ResourceState::Undefined, EOS::ResourceState::RenderTarget },
-                { Handles.DepthTexture, EOS::ResourceState::Undefined, EOS::ResourceState::DepthWrite }
-            });
+        graph.AddUpload("Upload Frame Data", perFrame, perFrameData);
 
-        cmdUpdateBuffer(cmdBuffer, Handles.PerFrameBuffer, perFrameData);
-        cmdBeginRendering(cmdBuffer, renderPass, framebuffer);
+        graph.AddRasterPass("Damaged Helmet")
+            .Color(EOS::Clear(backbuffer, {0.36f, 0.4f, 1.0f, 0.28f}))
+            .Depth(EOS::ClearDepth(depth))
+            .Read(perFrame)
+            .Execute([&](EOS::PassContext& pass)
         {
-            cmdPushMarker(cmdBuffer, "Damaged Helmet", 0xff0000ff);
-            cmdBindVertexBuffer(cmdBuffer, 0, Handles.VertexBuffer);
-            cmdBindIndexBuffer(cmdBuffer, Handles.IndexBuffer, EOS::IndexFormat::UI32);
-            cmdBindRenderPipeline(cmdBuffer, Handles.RenderPipeline);
+            cmdBindVertexBuffer(pass.Cmd, 0, Handles.VertexBuffer);
+            cmdBindIndexBuffer(pass.Cmd, Handles.IndexBuffer, EOS::IndexFormat::UI32);
+            cmdBindRenderPipeline(pass.Cmd, Handles.RenderPipeline);
+            cmdPushConstants(pass.Cmd, FramePointers{.perFrame = pass.Address(perFrame)});
+            cmdSetDepthState(pass.Cmd, depthState);
+            cmdDrawIndexed(pass.Cmd, scene.indices.size());
+        });
 
-            const FramePointers pc
-            {
-                .perFrame = App.Context->GetGPUAddress(Handles.PerFrameBuffer)
-            };
-
-            cmdPushConstants(cmdBuffer, pc);
-            cmdSetDepthState(cmdBuffer, depthState);
-            cmdDrawIndexed(cmdBuffer, scene.indices.size());
-            cmdPopMarker(cmdBuffer);
-        }
-        cmdEndRendering(cmdBuffer);
-
-        cmdPipelineBarrier(cmdBuffer, {}, {{App.Context->GetSwapChainTexture(), EOS::ResourceState::RenderTarget, EOS::ResourceState::Present}});
-        App.Context->Submit(cmdBuffer, App.Context->GetSwapChainTexture());
+        graph.Execute();
     });
 
     Handles = {};
