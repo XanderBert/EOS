@@ -263,8 +263,9 @@ edges:
   its bypass (`BypassFrom`). In the depth of field example, disabling `DOF Composite` shows the scene without blur.
 - **Mistakes** are reported like compiler errors (`file:line:column: message`) and the last version without errors
   keeps running, so a typo while editing never takes the frame down.
-- **UI:** `EOS::UI::GraphFileProperties(graphFile)` shows every pass with an enable checkbox and its properties. Changes
-  last until the file is reloaded. `EOS::UI::GraphFilePanel` adds a preview of any texture a pass writes, picked from a
+- **UI:** `EOS::UI::GraphFileProperties(graphFile)` shows every pass as a section that opens to its properties; passes
+  that can be turned off without starving the passes after them (every output they create has a bypass) have an enable
+  checkbox. Changes last until the file is reloaded. `EOS::UI::GraphFilePanel` adds a preview of any texture a pass writes, picked from a
   list: one layer of it, with its values remapped to a range (depth in grey).
 - **In the examples**, `App.Run("depthOfField")` runs `src/graphs/depthOfField.yaml` as the whole frame, with the panel
   on top; `-` reloads it with the shaders. `App.Run({"csmCompute", "csmCpu", "csmRayQuery"})` offers several files in
@@ -358,7 +359,7 @@ This project is built using CMake and Ninja.
 
 
 # Screenshots
-![Shadow Mapping](assets/ShadowMapping.png)
+![Shader hot reload: new properties show up in the UI](assets/ShaderHotReload.gif)
 
 
 
