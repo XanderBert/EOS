@@ -97,7 +97,11 @@ namespace
         {
             ktxBasisParams basisParams = {};
             basisParams.structSize = sizeof(basisParams);
-            basisParams.noSSE = KTX_FALSE;
+            // basisu's SSE4.1 ETC1S kernels shift the 32-bit square of a chroma difference arithmetically where the
+            // scalar code shifts it unsigned, so a near-maximal red/green difference (ORM maps) counts as a negative
+            // error: blocks are fit wrongly, and debug builds abort in etc1_optimizer::compute(). Slower, but textures
+            // are compressed once and cached.
+            basisParams.noSSE = KTX_TRUE;
             basisParams.threadCount = std::max(1u, std::thread::hardware_concurrency());
             basisParams.uastc = info.useUASTC ? KTX_TRUE : KTX_FALSE;
             basisParams.uastcFlags = info.useUASTC ? KTX_PACK_UASTC_LEVEL_DEFAULT : 0;
