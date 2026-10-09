@@ -391,6 +391,8 @@ namespace EOS
         const char* Name = "";
         const char* Type = "";
         bool* Enabled = nullptr;
+        bool CanBeDisabled = false;     // disabled, it passes on what readers need: every output it creates has a
+                                        // bypass, or it only changes what it receives
         uint32_t PinCount = 0;
         uint32_t PropertyCount = 0;
     };

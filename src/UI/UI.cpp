@@ -211,58 +211,74 @@ namespace EOS::UI
 #endif
     }
 
-    void GraphFileProperties(GraphFile& file)
+    void GraphFileProperties([[maybe_unused]] GraphFile& file)
     {
+#if defined(EOS_USE_IMGUI)
         for (uint32_t passIndex = 0; passIndex < file.GetPassCount(); ++passIndex)
         {
             const GraphFilePass pass = file.GetPass(passIndex);
-            PushID(pass.Name);
-            Checkbox(pass.Name, pass.Enabled);
+            ImGui::PushID(pass.Name);
 
-            Indent();
-            for (uint32_t propertyIndex = 0; propertyIndex < pass.PropertyCount; ++propertyIndex)
+            // A section per pass, closed until opened. A pass with nothing to edit is a row that does not open; one
+            // that can be turned off without starving the passes after it has its enable checkbox on the row.
+            // The label is drawn after the header, at the same place on every row, arrow or not.
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_CollapsingHeader | ImGuiTreeNodeFlags_AllowOverlap;
+            if (pass.PropertyCount == 0) flags |= ImGuiTreeNodeFlags_Leaf;
+
+            const bool open = ImGui::TreeNodeEx("##pass", flags, "%s", "");
+            ImGui::SameLine(ImGui::GetTreeNodeToLabelSpacing() + ImGui::GetStyle().FramePadding.x);
+            if (pass.CanBeDisabled) ImGui::Checkbox(pass.Name, pass.Enabled);
+            else ImGui::TextUnformatted(pass.Name);
+
+            if (open && pass.PropertyCount > 0)
             {
-                const GraphFileProperty property = file.GetProperty(passIndex, propertyIndex);
-                PropertyValue& value = *property.Value;
-                const bool ranged = property.Min < property.Max;
-                float* components = &value.Float.x;
-
-                switch (property.Type)
+                ImGui::Indent();
+                for (uint32_t propertyIndex = 0; propertyIndex < pass.PropertyCount; ++propertyIndex)
                 {
-                    case PropertyType::Bool:
-                        Checkbox(property.Name, &value.Bool);
-                        break;
-                    case PropertyType::Int:
-                        if (ranged) SliderInt(property.Name, &value.Int, static_cast<int>(property.Min), static_cast<int>(property.Max));
-                        else DragInt(property.Name, &value.Int);
-                        break;
-                    case PropertyType::Float:
-                        if (ranged) SliderFloat(property.Name, components, property.Min, property.Max);
-                        else DragFloat(property.Name, components);
-                        break;
-                    case PropertyType::Float2:
-                        if (ranged) SliderFloat2(property.Name, components, property.Min, property.Max);
-                        else DragFloat2(property.Name, components);
-                        break;
-                    case PropertyType::Float3:
-                        if (ranged) SliderFloat3(property.Name, components, property.Min, property.Max);
-                        else DragFloat3(property.Name, components);
-                        break;
-                    case PropertyType::Float4:
-                        if (ranged) SliderFloat4(property.Name, components, property.Min, property.Max);
-                        else DragFloat4(property.Name, components);
-                        break;
-                    case PropertyType::Choice:
-                        Combo(property.Name, &value.Int, property.Choices.data(), static_cast<int>(property.Choices.size()));
-                        break;
-                    case PropertyType::String:
-                        Text("%s: %s", property.Name, value.String);
-                        break;
+                    const GraphFileProperty property = file.GetProperty(passIndex, propertyIndex);
+                    PropertyValue& value = *property.Value;
+                    const bool ranged = property.Min < property.Max;
+                    float* components = &value.Float.x;
+
+                    switch (property.Type)
+                    {
+                        case PropertyType::Bool:
+                            Checkbox(property.Name, &value.Bool);
+                            break;
+                        case PropertyType::Int:
+                            if (ranged) SliderInt(property.Name, &value.Int, static_cast<int>(property.Min), static_cast<int>(property.Max));
+                            else DragInt(property.Name, &value.Int);
+                            break;
+                        case PropertyType::Float:
+                            if (ranged) SliderFloat(property.Name, components, property.Min, property.Max);
+                            else DragFloat(property.Name, components);
+                            break;
+                        case PropertyType::Float2:
+                            if (ranged) SliderFloat2(property.Name, components, property.Min, property.Max);
+                            else DragFloat2(property.Name, components);
+                            break;
+                        case PropertyType::Float3:
+                            if (ranged) SliderFloat3(property.Name, components, property.Min, property.Max);
+                            else DragFloat3(property.Name, components);
+                            break;
+                        case PropertyType::Float4:
+                            if (ranged) SliderFloat4(property.Name, components, property.Min, property.Max);
+                            else DragFloat4(property.Name, components);
+                            break;
+                        case PropertyType::Choice:
+                            Combo(property.Name, &value.Int, property.Choices.data(), static_cast<int>(property.Choices.size()));
+                            break;
+                        case PropertyType::String:
+                            Text("%s: %s", property.Name, value.String);
+                            break;
+                    }
                 }
+                ImGui::Unindent();
             }
-            Unindent();
-            PopID();
+
+            ImGui::PopID();
         }
+#endif
     }
 
     // -------------------------------------------------------------------------------------------------------------------

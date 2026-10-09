@@ -1988,7 +1988,31 @@ namespace EOS
         CHECK(pass < GetPassCount(), "No pass {} in the graph file", pass);
         GraphFileData::Pass& entry = File->Current->Passes[pass];
         const PassRegistryData::Type& type = File->Registry.Types[entry.Type];
-        return {.Name = entry.Name, .Type = type.Name, .Enabled = &entry.Enabled, .PinCount = type.PinCount, .PropertyCount = type.PropertyCount};
+
+        // An output written into an application resource (the swapchain) is not written at all while the pass is
+        // disabled, bypass or not.
+        bool passesSomethingOn = false;
+        bool passesEverythingOn = true;
+        for (uint32_t pin = 0; pin < type.PinCount; ++pin)
+        {
+            const PassRegistryData::Pin& description = File->Registry.Pins[type.FirstPin + pin];
+            if (description.Direction == PinDirection::Input) continue;
+
+            const bool passedOn = description.Direction == PinDirection::InputOutput
+                               || (description.BypassFrom != kNone && File->Current->Slots[entry.FirstSlot + pin].TargetResource == kNone);
+            passesSomethingOn |= passedOn;
+            passesEverythingOn &= passedOn;
+        }
+
+        return
+        {
+            .Name = entry.Name,
+            .Type = type.Name,
+            .Enabled = &entry.Enabled,
+            .CanBeDisabled = passesSomethingOn && passesEverythingOn,
+            .PinCount = type.PinCount,
+            .PropertyCount = type.PropertyCount,
+        };
     }
 
     GraphFilePin GraphFile::GetPin(uint32_t pass, uint32_t pin) const

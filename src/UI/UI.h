@@ -93,8 +93,9 @@ namespace EOS
 
         void Image(uint64_t textureID, float width, float height);
 
-        // Every pass of a graph file with an enable checkbox and a widget per property, sliders where the property
-        // has a range. Edits last until the file is reloaded.
+        // Every pass of a graph file as a section that opens to a widget per property, sliders where the property has
+        // a range; a pass that can be turned off without starving the passes after it (GraphFilePass::CanBeDisabled)
+        // has an enable checkbox. Edits last until the file is reloaded.
         void GraphFileProperties(GraphFile& file);
 
         /**
