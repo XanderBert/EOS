@@ -42,6 +42,15 @@ macro(SETUP_X11_NONE_WORKAROUND targetName)
         #    define RevertToNone (int)X11None
         #  endif
         #endif
+
+        // <X11/Xlib.h> (pulled in by vulkan.h with VK_USE_PLATFORM_XLIB_KHR) defines "Bool" as a macro
+        // that expands to "int", which breaks enumerators and functions named "Bool".
+        // Include it here so its include guard is set, then replace the macro with "X11Bool".
+        #include <X11/Xlib.h>
+        #ifdef Bool
+        #  undef Bool
+        #  define X11Bool int
+        #endif
         #endif
 ]=])
 
