@@ -6,11 +6,12 @@
 #include "window.h"
 #include ".generated/eos/view.h"    // View
 
-// A camera flown through the scene, and the flyCamera graph node that hands passes its View:
+// A camera flown through the scene, and the flyCamera graph file data that hands passes its View:
 //
-//     passes:
+//     data:
 //       Camera:   { type: flyCamera, origin: [0, 1, 0], speed: 100 }
-//       Geometry: { type: gbuffer }
+//     passes:
+//       Geometry: { shader: gbuffer }
 //     edges:
 //       - Camera.view -> Geometry.view
 namespace EOS
@@ -81,10 +82,10 @@ namespace EOS
     };
 
     /**
-     * @brief Registers the flyCamera pass type: a node with a `view` output (eos.view's View, uploaded every frame) and
-     *        the properties origin, rotation (pitch, yaw), fov, speed, damping, near and far. Each flyCamera pass of a
-     *        graph file has a camera of its own, kept by pass name across reloads; a reload or UI edit that changes
-     *        its origin or rotation moves it there.
+     * @brief Registers the flyCamera data type: a `view` output (eos.view's View, uploaded every frame) and the
+     *        properties origin, rotation (pitch, yaw), fov, speed, damping, near and far. Each flyCamera of a graph
+     *        file has a camera of its own, kept by name across reloads; a reload or UI edit that changes its origin or
+     *        rotation moves it there.
      */
-    void RegisterFlyCameraPass(PassRegistry& registry, Window& window);
+    void RegisterFlyCamera(PassRegistry& registry, Window& window);
 }

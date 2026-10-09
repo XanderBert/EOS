@@ -9,11 +9,13 @@
 #include "renderGraphFile.h"
 #include ".generated/eos/scene.h"   // MeshVertex, MeshInstance, Scene
 
-// Scenes from glTF files on the GPU, in the layout eos.scene gives shaders, and the gltfScene graph node that loads one:
+// Scenes from glTF files on the GPU, in the layout eos.scene gives shaders, and the gltfScene graph file data that loads
+// one:
 //
-//     passes:
+//     data:
 //       Sponza:   { type: gltfScene, path: sponza/Sponza.gltf }
-//       Geometry: { type: gbuffer }
+//     passes:
+//       Geometry: { shader: gbuffer }
 //     edges:
 //       - Sponza.scene -> Geometry.scene
 namespace EOS
@@ -71,9 +73,9 @@ namespace EOS
     };
 
     /**
-     * @brief Registers the gltfScene pass type: a node with a `path` property (a glTF file, relative to assetDirectory)
-     *        and a `scene` output. A scene is loaded the first time a graph file uses its path and stays loaded while
+     * @brief Registers the gltfScene data type: a `path` property (a glTF file, relative to assetDirectory) and a
+     *        `scene` output. A scene is loaded the first time a graph file uses its path and stays loaded while
      *        graph files keep using it, across reloads.
      */
-    void RegisterGltfScenePass(PassRegistry& registry, IContext* context, std::filesystem::path assetDirectory);
+    void RegisterGltfScene(PassRegistry& registry, IContext* context, std::filesystem::path assetDirectory);
 }

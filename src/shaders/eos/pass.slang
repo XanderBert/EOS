@@ -1,7 +1,7 @@
 // Render graph passes written in Slang.
 //
-// A shader file whose push constants are a struct marked [Pass] is a pass type: graph files use it by the file's
-// module name (`type: dofComposite`), and the engine creates its pipeline, fills its push constants and records it, so
+// A shader file whose push constants are a struct marked [Pass] is a pass: graph files use it by the file's module
+// name (`shader: dofComposite`), and the engine creates its pipeline, fills its push constants and records it, so
 // it needs no C++. One pass per file. Its fields say what the pass reads and writes (pins) and what it can be tuned
 // with (properties):
 //

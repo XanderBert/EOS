@@ -3,7 +3,7 @@
 #include "glm/ext/matrix_transform.hpp"
 
 // The frame is graphs/shadowMapping.yaml. The shadow map is rendered from a light at a position, looking along the
-// sun: the lightView pass type below, written in C++, builds that light's View from the sun's direction.
+// sun: the lightView data below, written in C++, builds that light's View from the sun's direction.
 int main()
 {
     ExampleApp App{{.Name = "EOS - ShadowMapping"}};

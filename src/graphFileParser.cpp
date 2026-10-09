@@ -60,21 +60,25 @@ namespace EOS
                 const ryml::id_type root = Tree.root_id();
                 if (!Tree.is_map(root))
                 {
-                    Error(root, "a graph file is a map with 'passes' and 'edges'");
+                    Error(root, "a graph file is a map with 'data', 'passes' and 'edges'");
                     return;
                 }
 
-                ryml::id_type passes = ryml::NONE;
+                bool hasPasses = false;
                 for (ryml::id_type node = Tree.first_child(root); node != ryml::NONE; node = Tree.next_sibling(node))
                 {
                     const std::string_view key = View(Tree.key(node));
-                    if (key == "passes") passes = node;
+                    if (key == "data") ParseEntries(node, true);
+                    else if (key == "passes")
+                    {
+                        hasPasses = true;
+                        ParseEntries(node, false);
+                    }
                     else if (key == "edges") ParseEdges(node);
-                    else Error(node, std::format("unknown key '{}' (a graph file has 'passes' and 'edges')", key));
+                    else Error(node, std::format("unknown key '{}' (a graph file has 'data', 'passes' and 'edges')", key));
                 }
 
-                if (passes == ryml::NONE) Error(root, "the file has no 'passes'");
-                else ParsePasses(passes);
+                if (!hasPasses) Error(root, "the file has no 'passes'");
             }
 
         private:
@@ -106,36 +110,45 @@ namespace EOS
                 return Tree.has_val(node) && !Tree.is_container(node);
             }
 
-            void ParsePasses(ryml::id_type passes)
+            // 'data' (data is named by its C++ type) or 'passes' (a pass by its shader, or by a C++ type that records).
+            void ParseEntries(ryml::id_type section, bool data)
             {
-                if (!Tree.is_map(passes))
+                const std::string_view what = data ? "data" : "a pass";
+                if (!Tree.is_map(section))
                 {
-                    Error(passes, "'passes' is a map from pass names to their settings: 'Name: { type: PassType }'");
+                    if (data) Error(section, "'data' is a map from names to their settings: 'Camera: { type: flyCamera }'");
+                    else Error(section, "'passes' is a map from pass names to their settings: 'Name: { shader: module }'");
                     return;
                 }
 
-                for (ryml::id_type node = Tree.first_child(passes); node != ryml::NONE; node = Tree.next_sibling(node))
+                for (ryml::id_type node = Tree.first_child(section); node != ryml::NONE; node = Tree.next_sibling(node))
                 {
                     const std::string_view name = View(Tree.key(node));
                     if (name.empty() || name.find('.') != std::string_view::npos || name.find("->") != std::string_view::npos)
                     {
-                        Error(node, std::format("'{}' cannot name a pass: names are not empty and have no '.' or '->'", name));
+                        Error(node, std::format("'{}' cannot name {}: names are not empty and have no '.' or '->'", name, what));
                         continue;
                     }
-                    if (Tree.find_child(passes, Tree.key(node)) != node)
+                    if (Tree.find_child(section, Tree.key(node)) != node)
                     {
-                        Error(node, std::format("there is already a pass named '{}'", name));
+                        Error(node, std::format("there is already {} named '{}'", what, name));
                         continue;
                     }
                     if (!Tree.is_map(node))
                     {
-                        Error(node, std::format("pass '{}' needs its settings, at least a type: '{}: {{ type: PassType }}'", name, name));
+                        if (data) Error(node, std::format("data '{}' needs its settings, at least a type: '{}: {{ type: flyCamera }}'", name, name));
+                        else Error(node, std::format("pass '{}' needs its settings, at least a shader: '{}: {{ shader: module }}'", name, name));
                         continue;
                     }
 
+                    const ryml::id_type shader = Tree.find_child(node, "shader");
                     const ryml::id_type type = Tree.find_child(node, "type");
-                    if (type == ryml::NONE) Error(node, std::format("pass '{}' has no type", name));
-                    else if (!IsScalar(type)) Error(type, "a pass type is a name");
+                    if (data && shader != ryml::NONE) Error(shader, "data is made on the CPU by a C++ type, not by a shader: a shader goes under 'passes'");
+                    else if (data && type == ryml::NONE) Error(node, std::format("data '{}' has no type", name));
+                    else if (!data && shader != ryml::NONE && type != ryml::NONE) Error(node, std::format("pass '{}' has a shader and a type: 'shader' names a Slang pass, 'type' a pass type registered in C++", name));
+                    else if (!data && shader == ryml::NONE && type == ryml::NONE) Error(node, std::format("pass '{}' has no shader: '{}: {{ shader: module }}'", name, name));
+                    else if (shader != ryml::NONE && !IsScalar(shader)) Error(shader, "a shader is a module name");
+                    else if (type != ryml::NONE && !IsScalar(type)) Error(type, "a type is a name");
 
                     const uint32_t settingCount = static_cast<uint32_t>(Tree.num_children(node));
                     Out.Passes.push_back(
@@ -143,6 +156,7 @@ namespace EOS
                         .Name = Intern(name),
                         .FirstSetting = static_cast<uint32_t>(Out.Settings.size()),
                         .SettingCount = settingCount,
+                        .Data = data,
                         .Location = LocationOf(node),
                     });
                     ParseSettings(node, 1);
@@ -201,7 +215,7 @@ namespace EOS
             {
                 if (!Tree.is_seq(edges))
                 {
-                    Error(edges, "'edges' is a list of connections: '- Pass.output -> Pass.input'");
+                    Error(edges, "'edges' is a list of connections from an output to an input: '- Camera.view -> Geometry.view'");
                     return;
                 }
 
@@ -213,7 +227,7 @@ namespace EOS
                     const std::string_view to = arrow == std::string_view::npos ? std::string_view{} : Trim(text.substr(arrow + 2));
                     if (from.empty() || to.empty() || to.find("->") != std::string_view::npos)
                     {
-                        Error(node, std::format("'{}' is not a connection: 'Pass.output -> Pass.input'", text));
+                        Error(node, std::format("'{}' is not a connection from an output to an input: 'Camera.view -> Geometry.view'", text));
                         continue;
                     }
 

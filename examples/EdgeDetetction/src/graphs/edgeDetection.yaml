@@ -1,23 +1,25 @@
 # The frame of the edge detection example, and all there is to it: main.cpp only runs this file. Edit it while the
 # example runs and press '-' to reload it (and the shaders).
 #
-# gltfScene and flyCamera are nodes the engine provides; gbuffer, deferredLight and edgeDetect are the Slang files in
-# ../shaders, used by module name. swapchain is the window's image.
+# Data is made on the CPU: gltfScene and flyCamera come with the engine. Passes run on the GPU: gbuffer, deferredLight
+# and edgeDetect are the Slang files in ../shaders, named by module. swapchain is the window's image.
 
-passes:
+data:
   Camera:  { type: flyCamera, origin: [0, 1, 0], speed: 100 }
   Sponza:  { type: gltfScene, path: sponza/Sponza.gltf }
+
+passes:
   Geometry:
-    type: gbuffer
+    shader: gbuffer
   Deferred Lighting:
-    type: deferredLight
+    shader: deferredLight
     debugView: Lit
     lightDirection: [-0.4, -1.0, -0.3]
     lightIntensity: 1.0
     lightColor: [1.0, 0.98, 0.92]
     ambient: 0.3
   Edge Detect:
-    type: edgeDetect
+    shader: edgeDetect
     threshold: 4.0
     edgesOnly: false
 

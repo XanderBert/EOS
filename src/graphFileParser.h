@@ -7,11 +7,11 @@
 #include <string>
 #include <vector>
 
-// Reads render graph files (YAML) into a GraphFileDescription: what the file says, as plain data, before its pass types
-// are looked up. GraphFile uses it to load and reload graph files.
+// Reads render graph files (YAML) into a GraphFileDescription: what the file says, as plain data, before its shaders and
+// types are looked up. GraphFile uses it to load and reload graph files.
 //
-// Parsing checks the shape of the file (a map of passes with settings, a list of "From -> To" edges). Whether the pass
-// types, pins and properties exist is checked when the file is resolved against the registered pass types.
+// Parsing checks the shape of the file (maps of data and passes with settings, a list of "From -> To" edges). Whether
+// the shaders, types, pins and properties exist is checked when the file is resolved against the registered types.
 namespace EOS
 {
     // 1-based, for messages; 0 when unknown.
@@ -34,15 +34,17 @@ namespace EOS
         GraphSourceLocation Location{};
     };
 
+    // An entry of 'data' (made on the CPU by a C++ type) or of 'passes' (GPU work, a Slang shader).
     struct GraphPassEntry final
     {
         const char* Name = "";
-        uint32_t FirstSetting = 0;              // its type, enabled, properties and output settings
+        uint32_t FirstSetting = 0;              // its shader or type, enabled, properties and output settings
         uint32_t SettingCount = 0;
+        bool Data = false;                      // listed under 'data'
         GraphSourceLocation Location{};
     };
 
-    // "From -> To": "Pass.pin" or the name of an application resource on either side.
+    // "From -> To": "Name.pin" or the name of an application resource on either side.
     struct GraphEdgeEntry final
     {
         const char* From = "";
@@ -54,7 +56,7 @@ namespace EOS
     struct GraphFileDescription final
     {
         const char* Path = "";                  // the YAML file it comes from
-        std::span<const GraphPassEntry> Passes{};
+        std::span<const GraphPassEntry> Passes{};   // data and passes, in file order
         std::span<const GraphSetting> Settings{};
         std::span<const char* const> Values{};
         std::span<const GraphEdgeEntry> Edges{};

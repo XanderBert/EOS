@@ -1,14 +1,16 @@
-# Cascaded shadow maps fit on the CPU, over the camera's whole depth range: cpuCascades is a pass type written in C++
-# (main.cpp) that reads the camera's View and the sun on the CPU and uploads the cascades. Pick another technique with
-# the panel's graph list.
-passes:
+# Cascaded shadow maps fit on the CPU, over the camera's whole depth range: cpuCascades is data made in C++ (main.cpp)
+# that reads the camera's View and the sun on the CPU and uploads the cascades. Pick another technique with the panel's
+# graph list.
+data:
   Camera:   { type: flyCamera, origin: [0, 1, 0], speed: 100 }
   Sponza:   { type: gltfScene, path: sponza/Sponza.gltf }
   Sun:      { type: sun, rotation: [-73, -90], intensity: 3 }
-  Early-Z:  { type: earlyZ }
   Cascades: { type: cpuCascades }
-  Shadow:   { type: shadowDepth }
-  Shade:    { type: shade, shadows: Cascades }
+
+passes:
+  Early-Z:  { shader: earlyZ }
+  Shadow:   { shader: shadowDepth }
+  Shade:    { shader: shade, shadows: Cascades }
 
 edges:
   - Sponza.scene       -> Early-Z.scene

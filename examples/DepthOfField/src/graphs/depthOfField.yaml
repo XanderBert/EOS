@@ -1,28 +1,30 @@
 # The frame of the depth of field example, and all there is to it: main.cpp only runs this file. Edit it while the
 # example runs and press '-' to reload it (and the shaders).
 #
-# gltfScene and flyCamera are nodes the engine provides; the other pass types are the Slang files in ../shaders, used by
-# module name, whose [Pass] struct declares their pins and properties. An edge connects an output pin to an input pin
-# ("Pass.pin"); swapchain is the window's image.
+# Data is made on the CPU: gltfScene and flyCamera come with the engine. Passes run on the GPU: each is a Slang file in
+# ../shaders, named by module, whose [Pass] struct declares its pins and properties. An edge connects an output pin to an
+# input pin ("Name.pin"); swapchain is the window's image.
 # Try disabling "DOF Composite" (enabled: false): Present then gets the lit scene through the composite's bypass.
 
-passes:
+data:
   Camera:  { type: flyCamera, origin: [0, 1, 0], speed: 100 }
   Sponza:  { type: gltfScene, path: sponza/Sponza.gltf }
+
+passes:
   Geometry:
-    type: gbuffer
+    shader: gbuffer
   Deferred Lighting:
-    type: deferredLightCompute
+    shader: deferredLightCompute
     debugView: Lit
     lightDirection: [-0.4, -1.0, -0.3]
     lightIntensity: 1.0
     lightColor: [1.0, 0.98, 0.92]
     ambient: 0.3
-  DOF Downsample: { type: dofDownsample, focusDistance: 6.0, focusRange: 3.0 }
-  DOF Blur H:     { type: dofBlur, direction: Horizontal, maxBlurRadius: 1.0 }
-  DOF Blur V:     { type: dofBlur, direction: Vertical, maxBlurRadius: 1.0 }
-  DOF Composite:  { type: dofComposite, focusDistance: 6.0, focusRange: 3.0 }
-  Present:        { type: present }
+  DOF Downsample: { shader: dofDownsample, focusDistance: 6.0, focusRange: 3.0 }
+  DOF Blur H:     { shader: dofBlur, direction: Horizontal, maxBlurRadius: 1.0 }
+  DOF Blur V:     { shader: dofBlur, direction: Vertical, maxBlurRadius: 1.0 }
+  DOF Composite:  { shader: dofComposite, focusDistance: 6.0, focusRange: 3.0 }
+  Present:        { shader: present }
 
 edges:
   - Sponza.scene             -> Geometry.scene

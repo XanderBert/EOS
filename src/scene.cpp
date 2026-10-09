@@ -482,7 +482,7 @@ namespace EOS
         };
     }
 
-    void RegisterGltfScenePass(PassRegistry& registry, IContext* context, std::filesystem::path assetDirectory)
+    void RegisterGltfScene(PassRegistry& registry, IContext* context, std::filesystem::path assetDirectory)
     {
         auto cache = std::make_shared<SceneCache>(context, std::move(assetDirectory));
         registry.Register(

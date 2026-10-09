@@ -1,10 +1,12 @@
 # The frame of the multi-draw indirect example, and all there is to it: main.cpp only runs this file. Its one pass,
 # ../shaders/forward.slang, draws every mesh of the scene with one indirect draw.
-passes:
+data:
   Camera: { type: flyCamera, origin: [0, 1, 0], speed: 100 }
   Sponza: { type: gltfScene, path: sponza/Sponza.gltf }
+
+passes:
   Forward:
-    type: forward
+    shader: forward
     lightDirection: [-1.0, -1.0, -1.0]
     lightIntensity: 3.0
     lightColor: [1.0, 1.0, 1.0]

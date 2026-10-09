@@ -16,24 +16,30 @@
 
 #include "renderGraph.h"
 
-// The data layer of the render graph, in the style of Falcor's render passes and graph scripts. C++ registers pass
-// types: named pins (the textures and buffers a pass reads and writes), properties, and the function that records the
-// pass. A graph file (YAML) says which passes a frame has, their property values and how their pins are connected. It is
-// what a node editor would save: passes are nodes, edges are wires. GraphFile reads the YAML at runtime, and
-// GraphFile::Reload() picks up changes to it.
+// The data layer of the render graph, in the style of Falcor's render passes and graph scripts. A graph file (YAML) says
+// what a frame is made of, their property values and how their pins (the textures and buffers they read and write) are
+// connected. It is what a node editor would save: data and passes are nodes, edges are wires. GraphFile reads the YAML at
+// runtime, and GraphFile::Reload() picks up changes to it.
 //
+//     data:
+//       Camera:   { type: flyCamera, origin: [0, 1, 0] }
+//       Sponza:   { type: gltfScene, path: sponza/Sponza.gltf }
 //     passes:
-//       Geometry: { type: GBuffer }
-//       Lighting: { type: DeferredLighting, debugView: Normals }
-//       Present:  { type: Present }
+//       Geometry: { shader: gbuffer }
+//       Lighting: { shader: deferredLight, debugView: Normals }
 //     edges:
-//       - perFrame        -> Geometry.perFrame
+//       - Sponza.scene    -> Geometry.scene
+//       - Camera.view     -> Geometry.view
 //       - Geometry.albedo -> Lighting.albedo
 //       - Geometry.normal -> Lighting.normal
-//       - Lighting.output -> Present.input
-//       - Present.output  -> swapchain
+//       - Lighting.output -> swapchain
 //
-// "Pass.pin" names a pin. A name without a dot is a resource the application hands to GraphFile::AddTo(), such as the
+// - Data is made on the CPU by a type registered in C++ (PassTypeDescription with a Setup function only): a scene, a
+//   camera's View, a light. It records nothing on the GPU, so it is not a pass.
+// - A pass is GPU work: a Slang shader (eos.pass) named by its module, or a C++ type that records its own commands
+//   (an Execute function), named with 'type'.
+//
+// "Name.pin" names a pin. A name without a dot is a resource the application hands to GraphFile::AddTo(), such as the
 // swapchain or a buffer it owns. Outputs nothing reads are culled, so passes that do not lead to an application resource
 // do not run.
 namespace EOS
@@ -48,7 +54,7 @@ namespace EOS
     {
         Input,          // reads what another pass or the application provides
         Output,         // writes a resource the graph creates, or the application resource it is connected to
-        InputOutput,    // changes the resource it receives and passes it on
+        InOut,          // changes the resource it receives and passes it on (not "InputOutput": a macro of <X11/X.h>)
     };
 
     /**
@@ -154,10 +160,10 @@ namespace EOS
             return {.Name = name, .Direction = PinDirection::Output, .Usage = PinUsage::TransferBuffer, .BufferSize = size, .Output = options};
         }
 
-        [[nodiscard]] constexpr PinDescription ColorInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InputOutput, .Usage = PinUsage::ColorTarget}; }
-        [[nodiscard]] constexpr PinDescription DepthInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InputOutput, .Usage = PinUsage::DepthTarget}; }
-        [[nodiscard]] constexpr PinDescription StorageInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InputOutput, .Usage = PinUsage::Storage}; }
-        [[nodiscard]] constexpr PinDescription BufferInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InputOutput, .Usage = PinUsage::WriteBuffer}; }
+        [[nodiscard]] constexpr PinDescription ColorInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InOut, .Usage = PinUsage::ColorTarget}; }
+        [[nodiscard]] constexpr PinDescription DepthInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InOut, .Usage = PinUsage::DepthTarget}; }
+        [[nodiscard]] constexpr PinDescription StorageInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InOut, .Usage = PinUsage::Storage}; }
+        [[nodiscard]] constexpr PinDescription BufferInOut(const char* name) { return {.Name = name, .Direction = PinDirection::InOut, .Usage = PinUsage::WriteBuffer}; }
     }
 
     enum class PropertyType : uint8_t
@@ -263,8 +269,8 @@ namespace EOS
         // How to draw the scene on a buffer pin; nullptr when what is connected is not a scene.
         [[nodiscard]] const SceneDrawData* Scene(std::string_view pin) const;
 
-        // What a C++ pass type uploaded this frame into the buffer on a pin (PassSetup::Upload), for C++ pass types
-        // downstream to read: the camera's View, the sun's DirectionalLight. nullptr when the buffer comes from
+        // What a C++ type uploaded this frame into the buffer on a pin (PassSetup::Upload), for C++ types downstream
+        // to read: the camera's View, the sun's DirectionalLight. nullptr when the buffer comes from
         // elsewhere (a Slang pass writes it on the GPU) or holds something of another size.
         template<typename T>
         [[nodiscard]] const T* Host(std::string_view pin) const
@@ -297,8 +303,8 @@ namespace EOS
     using PassTypeFunction = std::function<void(PassContext& context, const PassData& data)>;
 
     /**
-     * @brief What a pass type's Setup function gets: called while a graph file's passes are added to a frame, before the
-     *        graph creates the pass's outputs. A pass that owns its resources (a scene, a camera) hands them out on its
+     * @brief What a type's Setup function gets: called while a graph file's data and passes are added to a frame, before
+     *        the graph creates their outputs. Data that owns its resources (a scene, a camera) hands them out on its
      *        output pins here, imported into the graph or written by passes Setup adds (RenderGraph::AddUpload).
      */
     class PassSetup final
@@ -341,14 +347,16 @@ namespace EOS
         std::vector<PinDescription> Pins{};
         std::vector<PropertyDescription> Properties{};
         PassTypeFunction Execute;                   // recorded like a PassBuilder::Execute function
-        PassSetupFunction Setup;                    // optional; a type with Setup may have no Execute, it adds no pass then
+        PassSetupFunction Setup;                    // optional; a type with Setup and no Execute makes data (graph files
+                                                    // list it under 'data'), it adds no pass
     };
 
     /**
-     * @brief The pass types graph files can use.
+     * @brief The types graph files can use.
      *
-     * Two kinds: pass types registered from C++ (Register), and passes written in Slang (eos.pass), which the registry
-     * loads by module name the first time a graph file uses one (`type: dofComposite` loads dofComposite.slang). A
+     * Two kinds: types registered from C++ (Register), which graph files name with `type: flyCamera` (data when they
+     * only have a Setup function, passes when they record), and passes written in Slang (eos.pass), which the registry
+     * loads by module name the first time a graph file uses one (`shader: dofComposite` loads dofComposite.slang). A
      * Slang pass's pins, properties and pipeline come from its shader; the registry creates the pipeline, fills the push
      * constants and records the dispatch or the fullscreen draw. When a hot reload changes a Slang pass's pins or
      * properties, it registers the pass again, and graph files using it are resolved again.
@@ -384,12 +392,13 @@ namespace EOS
     };
 
     /**
-     * @brief A pass of a graph file, for UIs that edit it.
+     * @brief Data or a pass of a graph file, for UIs that edit it.
      */
     struct GraphFilePass final
     {
         const char* Name = "";
-        const char* Type = "";
+        const char* Type = "";          // the shader's module name, or the C++ type's name
+        bool Data = false;              // listed under 'data': made on the CPU, it is not a pass and cannot be disabled
         bool* Enabled = nullptr;
         bool CanBeDisabled = false;     // disabled, it passes on what readers need: every output it creates has a
                                         // bypass, or it only changes what it receives
@@ -430,7 +439,7 @@ namespace EOS
     class GraphFile final
     {
     public:
-        // registry loads the Slang passes the file names.
+        // registry has the file's C++ types and loads the Slang passes it names.
         GraphFile(PassRegistry& registry, std::filesystem::path path);
         ~GraphFile();
         DELETE_COPY_MOVE(GraphFile)

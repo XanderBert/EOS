@@ -2,8 +2,8 @@
 #include ".generated/model.h"
 #include "glm/ext/matrix_transform.hpp"
 
-// The frame is graphs/modelPBR.yaml. What a graph file cannot do is written as a pass type in C++, like the turntable
-// below: a node that uploads the model's transform every frame (ObjectTransform, declared in shaders/model.slang).
+// The frame is graphs/modelPBR.yaml. What a graph file cannot do is written in C++, like the turntable below: data the
+// file lists under 'data', the model's transform uploaded every frame (ObjectTransform, declared in shaders/model.slang).
 int main()
 {
     ExampleApp App{{.Name = "EOS - Model PBR"}};

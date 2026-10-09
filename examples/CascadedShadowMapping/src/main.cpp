@@ -108,7 +108,7 @@ CascadeData CalculateCascades(const EOS::View& view, const glm::vec3& lightForwa
 }
 
 // The frame is one of three graph files, picked in the panel: graphs/csmCompute.yaml fits the cascades on the GPU,
-// csmCpu.yaml on the CPU with the cpuCascades pass type below, csmRayQuery.yaml traces rays instead.
+// csmCpu.yaml on the CPU with the cpuCascades data below, csmRayQuery.yaml traces rays instead.
 int main()
 {
     ExampleApp App{{.Name = "EOS - Cascaded Shadow Mapping"}};
@@ -132,6 +132,6 @@ int main()
         },
     });
 
-    App.Run({"csmCompute", "csmCpu", "csmRayQuery"});
+    App.Run({"csmCompute", "csmCpu", "csmRayQuery", "csmCompute_game"});
     return 0;
 }

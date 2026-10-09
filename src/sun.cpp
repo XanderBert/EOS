@@ -11,7 +11,7 @@ namespace EOS
         return glm::normalize(glm::vec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)));
     }
 
-    void RegisterSunPass(PassRegistry& registry)
+    void RegisterSun(PassRegistry& registry)
     {
         registry.Register(
         {

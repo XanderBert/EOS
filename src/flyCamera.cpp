@@ -166,7 +166,7 @@ namespace EOS
         if (glfwRawMouseMotionSupported()) glfwSetInputMode(TargetWindow.GlfwWindow, GLFW_RAW_MOUSE_MOTION, enabled ? GLFW_TRUE : GLFW_FALSE);
     }
 
-    void RegisterFlyCameraPass(PassRegistry& registry, Window& window)
+    void RegisterFlyCamera(PassRegistry& registry, Window& window)
     {
         // A camera per pass name, so a reload keeps where it is. One no pass used in the last updates of the others is
         // released: its pass was renamed or removed. Counted in updates, not time, so a minimized window keeps them.

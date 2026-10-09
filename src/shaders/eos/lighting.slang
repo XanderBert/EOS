@@ -5,7 +5,7 @@ module "eos/lighting";
 import eos.core;
 import eos.bsdf;
 
-// What a sun graph node (EOS::RegisterSunPass) hands passes on its light pin.
+// What a sun graph node (EOS::RegisterSun) hands passes on its light pin.
 [CppExport]
 public struct DirectionalLight
 {

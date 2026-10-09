@@ -3,11 +3,12 @@
 #include "renderGraphFile.h"
 #include ".generated/eos/lighting.h"    // DirectionalLight
 
-// The sun graph node: a directional light every pass that needs it reads from one place.
+// The sun, graph file data: a directional light every pass that needs it reads from one place.
 //
-//     passes:
+//     data:
 //       Sun:   { type: sun, rotation: [-73, -90], intensity: 3 }
-//       Shade: { type: shade }
+//     passes:
+//       Shade: { shader: shade }
 //     edges:
 //       - Sun.light -> Shade.sun
 namespace EOS
@@ -19,9 +20,9 @@ namespace EOS
     [[nodiscard]] glm::vec3 DirectionFromRotation(glm::vec2 rotation);
 
     /**
-     * @brief Registers the sun pass type: a node with the properties rotation (pitch, yaw, as DirectionFromRotation),
-     *        color and intensity, and a `light` output: eos.lighting's DirectionalLight, uploaded every frame. C++ pass
-     *        types downstream read it with PassData::Host<DirectionalLight>.
+     * @brief Registers the sun data type: the properties rotation (pitch, yaw, as DirectionFromRotation), color and
+     *        intensity, and a `light` output: eos.lighting's DirectionalLight, uploaded every frame. C++ types
+     *        downstream read it with PassData::Host<DirectionalLight>.
      */
-    void RegisterSunPass(PassRegistry& registry);
+    void RegisterSun(PassRegistry& registry);
 }

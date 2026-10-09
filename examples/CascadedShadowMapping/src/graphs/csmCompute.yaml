@@ -1,17 +1,18 @@
 # Cascaded shadow maps fit on the GPU: the depth reduction finds the depth range the camera sees, and cascadeSetup fits
 # the cascades to it. Pick another technique with the panel's graph list: csmCpu fits them on the CPU, csmRayQuery
-# traces rays instead. The pass types are the Slang files in ../shaders; gltfScene, flyCamera and sun come with the
-# engine.
-passes:
+# traces rays instead. The shaders are the Slang files in ../shaders; gltfScene, flyCamera and sun come with the engine.
+data:
   Camera:            { type: flyCamera, origin: [0, 1, 0], speed: 100 }
   Sponza:            { type: gltfScene, path: sponza/Sponza.gltf }
   Sun:               { type: sun, rotation: [-73, -90], intensity: 3 }
-  Early-Z:           { type: earlyZ }
-  Reset Depth Range: { type: resetDepthRange }
-  Depth Reduction:   { type: depthReduction }
-  Cascade Setup:     { type: cascadeSetup, useDepthReduction: true }
-  Shadow:            { type: shadowDepth }
-  Shade:             { type: shade, shadows: Cascades }
+
+passes:
+  Early-Z:           { shader: earlyZ }
+  Reset Depth Range: { shader: resetDepthRange }
+  Depth Reduction:   { shader: depthReduction }
+  Cascade Setup:     { shader: cascadeSetup, useDepthReduction: true }
+  Shadow:            { shader: shadowDepth }
+  Shade:             { shader: shade, shadows: Cascades }
 
 edges:
   - Sponza.scene                 -> Early-Z.scene

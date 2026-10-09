@@ -214,9 +214,15 @@ namespace EOS::UI
     void GraphFileProperties([[maybe_unused]] GraphFile& file)
     {
 #if defined(EOS_USE_IMGUI)
+        bool data = false;
         for (uint32_t passIndex = 0; passIndex < file.GetPassCount(); ++passIndex)
         {
             const GraphFilePass pass = file.GetPass(passIndex);
+
+            // Headed like the file's sections.
+            if (passIndex == 0 || pass.Data != data) ImGui::SeparatorText(pass.Data ? "Data" : "Passes");
+            data = pass.Data;
+
             ImGui::PushID(pass.Name);
 
             // A section per pass, closed until opened. A pass with nothing to edit is a row that does not open; one
@@ -442,9 +448,9 @@ namespace EOS::UI
                 Image(MakeTextureID(panel.Image), width, width * static_cast<float>(panel.ImageSize.Height) / static_cast<float>(panel.ImageSize.Width));
             }
         }
-        Separator();
 #endif
 
+        // Its section headings separate it from the preview.
         GraphFileProperties(panel.File);
     }
 

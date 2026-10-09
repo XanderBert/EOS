@@ -21,8 +21,8 @@ struct ExampleAppDescription final
     EOS::ContextCreationDescription contextDescription{};
 };
 
-// What the examples share: the window, the context, the render graph, the pass types graph files can use (the engine's
-// nodes and Slang passes, and what an example registers itself) and the UI. An example is its graph files and their
+// What the examples share: the window, the context, the render graph, the types graph files can use (the engine's data
+// types, the Slang passes, and what an example registers itself) and the UI. An example is its graph files and their
 // Slang passes: main.cpp runs them with Run().
 class ExampleApp final
 {
@@ -34,7 +34,7 @@ public:
 
     DELETE_COPY_MOVE(ExampleApp)
 
-    // The example's graph file src/graphs/<name>.yaml, whose pass types are registered in Passes:
+    // The example's graph file src/graphs/<name>.yaml, whose C++ types are registered in Passes:
     // LoadGraphFile("depthOfField"). The '-' key reloads it, with the shaders.
     EOS::GraphFile& LoadGraphFile(std::string_view name)
     {
@@ -142,7 +142,7 @@ public:
     EOS::Window Window;
     std::unique_ptr<EOS::IContext> Context;
     std::unique_ptr<EOS::RenderGraph> Graph;        // destroyed before the context, which its textures belong to
-    EOS::PassRegistry Passes{Context.get()};        // the pass types graph files can use; loads the Slang ones
+    EOS::PassRegistry Passes{Context.get()};        // the types graph files can use: C++ ones, and the Slang passes it loads
     std::unique_ptr<EOS::UI::Renderer> UIRenderer;
 
 private:
@@ -169,9 +169,9 @@ private:
 
         // Graph files can load glTF scenes (paths relative to the repository's data folder), fly a camera and light
         // the scene with a sun.
-        EOS::RegisterGltfScenePass(Passes, Context.get(), EOS_DATA_PATH);
-        EOS::RegisterFlyCameraPass(Passes, Window);
-        EOS::RegisterSunPass(Passes);
+        EOS::RegisterGltfScene(Passes, Context.get(), EOS_DATA_PATH);
+        EOS::RegisterFlyCamera(Passes, Window);
+        EOS::RegisterSun(Passes);
 
         UIRenderer = std::make_unique<EOS::UI::Renderer>(Context.get(), Window);
     }

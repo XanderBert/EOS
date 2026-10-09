@@ -209,8 +209,9 @@ graph.Execute();   // barriers, render passes, markers, submit and present
 In the examples, `App.AddUIPass(target, [&] { ... })` declares the frame's UI and draws it on top of `target`.
 
 ## Render graph files
-A graph file (YAML, `src/renderGraphFile.h`) lists a frame's passes, their settings and how their pins connect, in
-the style of Falcor's render graphs. It is what a node editor would save: passes are nodes, edges are wires.
+A graph file (YAML, `src/renderGraphFile.h`) lists what a frame is made of: its data, its passes, their settings and
+how their pins connect, in the style of Falcor's render graphs. It is what a node editor would save: data and passes
+are nodes, edges are wires.
 
 `EOS::GraphFile file{registry, "graphs/depthOfField.yaml"}` reads the YAML at runtime, and `graphFile.Reload()` loads
 it again when it changed on disk, so passes can be added, rewired or tuned while the application runs; the examples
@@ -218,13 +219,14 @@ call it on the same key as shader reloading (`-`). Examples read their graph fil
 (`examples/<name>/src/graphs`, `EOS_PROJECT_GRAPH_PATH`), so edits change the running example.
 
 ```yaml
-passes:
+data:
   Camera:        { type: flyCamera, origin: [0, 1, 0], speed: 100 }
   Sponza:        { type: gltfScene, path: sponza/Sponza.gltf }
-  Geometry:      { type: gbuffer }
-  Lighting:      { type: deferredLightCompute, debugView: Normals }
-  DOF Composite: { type: dofComposite, enabled: false, output: { format: RGBA_F16 } }
-  Present:       { type: present }
+passes:
+  Geometry:      { shader: gbuffer }
+  Lighting:      { shader: deferredLightCompute, debugView: Normals }
+  DOF Composite: { shader: dofComposite, enabled: false, output: { format: RGBA_F16 } }
+  Present:       { shader: present }
 edges:
   - Sponza.scene         -> Geometry.scene
   - Camera.view          -> Geometry.view
@@ -234,17 +236,18 @@ edges:
   - Present.output       -> swapchain
 ```
 
-- **Pass types** are registered in a `PassRegistry`: their pins (the textures and buffers they read and write, with how
-  they use them), their properties (bool, int, float, float2-4, a choice of names, a string) and the function that
-  records them. The function reads its pins and properties by name through `PassData`. Most pass types are Slang files
-  (below); C++ ones are for what a shader cannot do.
-- **C++ nodes**: a C++ pass type can have a `Setup` function, called while the file's passes are added to the frame,
-  each after the passes it reads from. A pass that owns resources hands them out on its outputs there
-  (`setup.Output(pin, buffer)`), and one that computes data on the CPU uploads it (`setup.Upload(pin, value)`). What a
-  C++ pass type uploads travels along the pin with a CPU copy, so C++ pass types downstream read it on the CPU
-  (`setup.Data.Host<EOS::View>("view")`) while Slang passes read the buffer. Such a type needs no `Execute`. The
-  examples' C++ is pass types like these: a turntable (model), a light's View (shadow mapping), the CPU cascade fit.
-- **Scene, camera and sun nodes** come with the engine. `gltfScene` (`src/scene.h`) loads a glTF file (`path`, relative
+- **Passes** are GPU work: `shader: gbuffer` is the Slang file `gbuffer.slang` (below), whose pins (the textures and
+  buffers it reads and writes, with how it uses them) and properties come from the shader. A pass type registered in
+  C++ with an `Execute` function that records its own commands is named with `type:` instead.
+- **Data** is made on the CPU by a type registered in C++ (a `PassRegistry`), named with `type:`: its pins, its
+  properties (bool, int, float, float2-4, a choice of names, a string) and a `Setup` function, called while the file is
+  added to the frame, each after what it reads from. Data that owns resources hands them out on its outputs there
+  (`setup.Output(pin, buffer)`), and data computed on the CPU is uploaded (`setup.Upload(pin, value)`). What a C++ type
+  uploads travels along the pin with a CPU copy, so C++ types downstream read it on the CPU
+  (`setup.Data.Host<EOS::View>("view")`) while Slang passes read the buffer. Data records nothing on the GPU, so it is
+  not a pass and cannot be disabled. The examples' C++ is data like this: a turntable (model), a light's View (shadow
+  mapping), the CPU cascade fit.
+- **Scene, camera and sun data** come with the engine. `gltfScene` (`src/scene.h`) loads a glTF file (`path`, relative
   to the data folder in the examples) once and hands out the scene on its `scene` pin: every mesh in one vertex and
   index buffer, the instances sorted opaque, alpha-tested, blended, the materials, indirect draws and a TLAS on devices
   that build acceleration structures. `flyCamera` (`src/flyCamera.h`) is flown with WASD/QE and the right mouse button
@@ -253,9 +256,9 @@ edges:
   shares it.
 - **Typed buffers**: a buffer pin can say what it holds (`Scene`, `View`; Slang passes take it from what their pointer
   points to), and only pins of the same type connect, so `Camera.view -> Geometry.scene` is an error in the file.
-- **A pass** has a `type`, may set `enabled`, sets property values by name, and can override an output's `format` and
-  `scale`.
-- **Edges** connect an output to an input: `Pass.pin -> Pass.pin`. A name without a dot is a resource of the
+- **An entry** has its `shader` (passes) or `type` (data), sets property values by name, and can override an output's
+  `format` and `scale`; a pass may set `enabled`. Data and passes share one set of names.
+- **Edges** connect an output to an input: `Name.pin -> Name.pin`. A name without a dot is a resource of the
   application, handed over every frame: `graphFile.AddTo(graph, {{"swapchain", backbuffer}, {"perFrame", perFrame}})`.
 - **Order:** every pass runs after the passes it reads from; otherwise the file's order is kept. Passes added to the
   graph before and after `AddTo` run before and after the file's passes. Outputs nobody reads are culled as usual.
@@ -263,23 +266,24 @@ edges:
   its bypass (`BypassFrom`). In the depth of field example, disabling `DOF Composite` shows the scene without blur.
 - **Mistakes** are reported like compiler errors (`file:line:column: message`) and the last version without errors
   keeps running, so a typo while editing never takes the frame down.
-- **UI:** `EOS::UI::GraphFileProperties(graphFile)` shows every pass as a section that opens to its properties; passes
-  that can be turned off without starving the passes after them (every output they create has a bypass) have an enable
-  checkbox. Changes last until the file is reloaded. `EOS::UI::GraphFilePanel` adds a preview of any texture a pass writes, picked from a
-  list: one layer of it, with its values remapped to a range (depth in grey).
+- **UI:** `EOS::UI::GraphFileProperties(graphFile)` shows the data and the passes under a heading each, every one a
+  section that opens to its properties; passes that can be turned off without starving the passes after them (every
+  output they create has a bypass) have an enable checkbox. Changes last until the file is reloaded.
+  `EOS::UI::GraphFilePanel` adds a preview of any texture a pass writes, picked from a list: one layer of it, with its
+  values remapped to a range (depth in grey).
 - **In the examples**, `App.Run("depthOfField")` runs `src/graphs/depthOfField.yaml` as the whole frame, with the panel
   on top; `-` reloads it with the shaders. `App.Run({"csmCompute", "csmCpu", "csmRayQuery"})` offers several files in
   the panel, one shown at a time (the cascaded shadow mapping example has a file per shadow technique). `App.Passes`
-  holds the pass types, where an example registers its C++ ones.
+  holds the types graph files use, where an example registers its C++ ones.
 
 Every example is built this way: its frame is graph files and their Slang passes, and `main.cpp` runs them, after
-registering the few C++ pass types it has. Only the compute example has a loop of its own, since it reads its result
+registering the few C++ data types it has. Only the compute example has a loop of its own, since it reads its result
 back and checks it.
 
 ## Passes written in Slang
-A pass type can be a Slang file instead of C++: a shader whose push constants are a struct marked `[Pass]` (from
-`eos.pass`). Graph files use it by its module name (`type: dofComposite`); the registry loads it the first time a file
-names it, creates its pipeline, fills its push constants and records it. One pass per file.
+A pass is a Slang file: a shader whose push constants are a struct marked `[Pass]` (from `eos.pass`). Graph files use
+it by its module name (`shader: dofComposite`); the registry loads it the first time a file names it, creates its
+pipeline, fills its push constants and records it. One pass per file.
 
 ```slang
 import eos.pass;

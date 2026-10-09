@@ -111,6 +111,7 @@ namespace EOS
             uint32_t PropertyCount = 0;
             PassTypeFunction Execute;
             PassSetupFunction Setup;
+            bool Shader = false;                    // a pass written in Slang, named by 'shader' in graph files
         };
 
         std::deque<std::string> Strings;            // every name; a deque keeps them in place as it grows
@@ -198,8 +199,15 @@ namespace EOS
         // Registers description; returns why not otherwise.
         [[nodiscard]] std::string Add(PassTypeDescription& description, uint32_t& outType);
 
-        // A registered type, or the Slang pass of that module name, loaded now.
-        [[nodiscard]] uint32_t FindOrLoadType(std::string_view name);
+        // A type registered in C++ (graph files name it with 'type').
+        [[nodiscard]] uint32_t FindCppType(std::string_view name) const
+        {
+            const uint32_t type = FindType(name);
+            return type != kNone && !Types[type].Shader ? type : kNone;
+        }
+
+        // The Slang pass of that module name, loaded now if it was not yet (graph files name it with 'shader').
+        [[nodiscard]] uint32_t FindOrLoadShader(std::string_view module);
         [[nodiscard]] uint32_t LoadShaderPass(std::string_view module);
         [[nodiscard]] uint32_t RegisterShaderPass(ShaderPass& pass, const CompiledShaderProgram& program);
 
@@ -225,6 +233,19 @@ namespace EOS
             }
             return list.empty() ? "none" : list;
         }
+
+        // "a, b, c": the C++ types that record GPU work (passes), or the ones that do not (data).
+        [[nodiscard]] std::string ListCppTypes(bool records) const
+        {
+            std::string list;
+            for (const Type& type : Types)
+            {
+                if (!*type.Name || type.Shader || static_cast<bool>(type.Execute) != records) continue;
+                if (!list.empty()) list += ", ";
+                list += type.Name;
+            }
+            return list.empty() ? "none" : list;
+        }
     };
 
     struct GraphFileData final
@@ -246,6 +267,7 @@ namespace EOS
             const char* Name = "";
             uint32_t Type = kNone;
             bool Enabled = true;
+            bool Data = false;                      // listed under 'data': made on the CPU, not a pass
             uint32_t FirstSlot = 0;
             uint32_t FirstValue = 0;
         };
@@ -418,7 +440,7 @@ namespace EOS
             const PropertyDescription& property = description.Properties[i];
             const std::string_view propertyName = property.Name;
 
-            if (!(IsIdentifier(propertyName) && propertyName != "type" && propertyName != "enabled")) return fmt::format("Pass type '{}': property '{}' needs a name of letters, digits and '_' other than 'type' and 'enabled'", name, propertyName);
+            if (!(IsIdentifier(propertyName) && propertyName != "shader" && propertyName != "type" && propertyName != "enabled")) return fmt::format("Pass type '{}': property '{}' needs a name of letters, digits and '_' other than 'shader', 'type' and 'enabled'", name, propertyName);
             if (!(std::ranges::count_if(description.Properties, [propertyName](const PropertyDescription& other) { return propertyName == other.Name; }) == 1)) return fmt::format("Pass type '{}' has two properties named '{}'", name, propertyName);
             if (!(property.Type != PropertyType::Choice || (!property.Choices.empty() && property.Default.Int >= 0 && property.Default.Int < static_cast<int32_t>(property.Choices.size())))) return fmt::format("Pass type '{}': choice '{}' needs choices and a default among them", name, propertyName);
         }
@@ -488,15 +510,13 @@ namespace EOS
     // -------------------------------------------------------------------------------------------------------------------
     // Passes written in Slang
 
-    uint32_t PassRegistryData::FindOrLoadType(std::string_view name)
+    uint32_t PassRegistryData::FindOrLoadShader(std::string_view module)
     {
-        if (const uint32_t type = FindType(name); type != kNone) return type;
-
         // A Slang pass whose current version could not be registered was reported when it changed; do not load it twice.
-        const auto known = std::ranges::find_if(ShaderPasses, [name](const std::unique_ptr<ShaderPass>& pass) { return pass->Module == name; });
+        const auto known = std::ranges::find_if(ShaderPasses, [module](const std::unique_ptr<ShaderPass>& pass) { return pass->Module == module; });
         if (known != ShaderPasses.end()) return (*known)->Type;
 
-        return LoadShaderPass(name);
+        return LoadShaderPass(module);
     }
 
     uint32_t PassRegistryData::LoadShaderPass(std::string_view module)
@@ -647,6 +667,7 @@ namespace EOS
         uint32_t type = kNone;
         const std::string error = Add(description, type);
         if (!error.empty()) Logger->error("Render graph pass '{}' cannot be used: {}", pass.Module, error);
+        else Types[type].Shader = true;
         return type;
     }
 
@@ -1035,34 +1056,13 @@ namespace EOS
 
                 if (Out.FindPass(name) != kNone)
                 {
-                    Error(entry.Location, fmt::format("there is already a pass named '{}'", name));
+                    Error(entry.Location, fmt::format("there is already data or a pass named '{}'", name));
                     return;
                 }
 
-                const auto typeSetting = std::ranges::find_if(settings, [](const GraphSetting& setting) { return std::string_view(setting.Key) == "type"; });
-                std::string_view typeName;
-                if (typeSetting == settings.end())
-                {
-                    Error(entry.Location, fmt::format("pass '{}' has no type", name));
-                    FailedPasses.push_back(name);
-                    return;
-                }
-                if (!ReadSingle(*typeSetting, typeName))
-                {
-                    FailedPasses.push_back(name);
-                    return;
-                }
-
-                const uint32_t typeIndex = Registry.FindOrLoadType(typeName);
+                const uint32_t typeIndex = FindEntryType(entry, settings);
                 if (typeIndex == kNone)
                 {
-                    std::string known;
-                    for (const PassRegistryData::Type& type : Registry.Types)
-                    {
-                        if (*type.Name) known += fmt::format("{}{}", known.empty() ? "" : ", ", type.Name);
-                    }
-                    Error(typeSetting->Location, fmt::format("unknown pass type '{}': no pass type of that name is registered ({}) and no Slang pass module of that name loads",
-                                                             typeName, known.empty() ? "none" : known));
                     FailedPasses.push_back(name);
                     return;
                 }
@@ -1073,6 +1073,7 @@ namespace EOS
                 {
                     .Name = Out.Intern(name),
                     .Type = typeIndex,
+                    .Data = entry.Data,
                     .FirstSlot = static_cast<uint32_t>(Out.Slots.size()),
                     .FirstValue = static_cast<uint32_t>(Out.Values.size()),
                 });
@@ -1089,12 +1090,13 @@ namespace EOS
                 for (const GraphSetting& setting : settings)
                 {
                     const std::string_view key = setting.Key;
-                    if (key == "type") continue;
+                    if (key == "shader" || key == "type") continue;
 
                     if (key == "enabled")
                     {
                         bool enabled = true;
-                        if (ReadBool(setting, enabled)) pass.Enabled = enabled;
+                        if (entry.Data) Error(setting.Location, "data cannot be disabled: the passes reading it would have nothing to read");
+                        else if (ReadBool(setting, enabled)) pass.Enabled = enabled;
                         continue;
                     }
 
@@ -1112,9 +1114,67 @@ namespace EOS
 
                     std::string properties;
                     for (uint32_t i = 0; i < type.PropertyCount; ++i) properties += fmt::format("{}{}", properties.empty() ? "" : ", ", Registry.Properties[type.FirstProperty + i].Name);
-                    Error(setting.Location, fmt::format("pass type '{}' has no property or output '{}' (properties: {}; outputs: {})",
-                                                        type.Name, key, properties.empty() ? "none" : properties, Registry.ListPins(type, false, true)));
+                    Error(setting.Location, fmt::format("'{}' ({}) has no property or output '{}' (properties: {}; outputs: {})",
+                                                        name, type.Name, key, properties.empty() ? "none" : properties, Registry.ListPins(type, false, true)));
                 }
+            }
+
+            // Data is made by a C++ type that records nothing on the GPU ('type'). A pass is a Slang shader ('shader'),
+            // or a C++ type that records its own commands ('type'). The parser made sure the right one is there.
+            [[nodiscard]] uint32_t FindEntryType(const GraphPassEntry& entry, std::span<const GraphSetting> settings)
+            {
+                const std::string_view name = entry.Name;
+                const auto find = [settings](std::string_view key) -> const GraphSetting*
+                {
+                    const auto setting = std::ranges::find_if(settings, [key](const GraphSetting& candidate) { return key == candidate.Key; });
+                    return setting == settings.end() ? nullptr : &*setting;
+                };
+
+                const GraphSetting* shader = entry.Data ? nullptr : find("shader");
+                const GraphSetting* typeSetting = shader ? nullptr : find("type");
+                std::string_view typeName;
+                if (!shader && !typeSetting)
+                {
+                    Error(entry.Location, fmt::format("'{}' has no {}", name, entry.Data ? "type" : "shader"));
+                    return kNone;
+                }
+                if (!ReadSingle(shader ? *shader : *typeSetting, typeName)) return kNone;
+
+                if (shader)
+                {
+                    // A C++ type is not looked for as a Slang file: say where it goes instead.
+                    if (const uint32_t cppType = Registry.FindCppType(typeName); cppType != kNone)
+                    {
+                        if (Registry.Types[cppType].Execute) Error(shader->Location, fmt::format("'{}' is a pass type registered in C++, not a shader: 'type: {}'", typeName, typeName));
+                        else Error(shader->Location, fmt::format("'{}' makes data on the CPU, it is not a shader: list '{}' under 'data' as '{}: {{ type: {} }}'", typeName, name, name, typeName));
+                        return kNone;
+                    }
+
+                    const uint32_t type = Registry.FindOrLoadShader(typeName);
+                    if (type == kNone) Error(shader->Location, fmt::format("no Slang pass '{}' loads (the shader messages above say why)", typeName));
+                    return type;
+                }
+
+                const uint32_t type = Registry.FindCppType(typeName);
+                if (type == kNone)
+                {
+                    if (entry.Data) Error(typeSetting->Location, fmt::format("no data type '{}' is registered in C++ (there are: {}); a Slang shader is a pass, under 'passes' as 'shader: {}'", typeName, Registry.ListCppTypes(false), typeName));
+                    else Error(typeSetting->Location, fmt::format("no pass type '{}' is registered in C++ (there are: {}); a pass written in Slang is named with 'shader: {}'", typeName, Registry.ListCppTypes(true), typeName));
+                    return kNone;
+                }
+
+                const bool records = static_cast<bool>(Registry.Types[type].Execute);
+                if (entry.Data && records)
+                {
+                    Error(typeSetting->Location, fmt::format("'{}' records GPU work, so '{}' is a pass: list it under 'passes'", typeName, name));
+                    return kNone;
+                }
+                if (!entry.Data && !records)
+                {
+                    Error(typeSetting->Location, fmt::format("'{}' makes data on the CPU and records nothing on the GPU: list '{}' under 'data'", typeName, name));
+                    return kNone;
+                }
+                return type;
             }
 
             void ResolveProperty(const PassRegistryData::Property& property, const GraphSetting& setting, PropertyValue& value)
@@ -1264,7 +1324,7 @@ namespace EOS
                 const uint32_t pass = Out.FindPass(passName);
                 if (pass == kNone)
                 {
-                    if (std::ranges::find(FailedPasses, passName) == FailedPasses.end()) Error(location, fmt::format("there is no pass named '{}'", passName));
+                    if (std::ranges::find(FailedPasses, passName) == FailedPasses.end()) Error(location, fmt::format("there is no data or pass named '{}'", passName));
                     return {};
                 }
 
@@ -1272,7 +1332,7 @@ namespace EOS
                 const uint32_t pin = Registry.FindPin(type, pinName);
                 if (pin == kNone)
                 {
-                    Error(location, fmt::format("pass '{}' ({}) has no pin '{}' (pins: {})", passName, type.Name, pinName, Registry.ListPins(type, true, true)));
+                    Error(location, fmt::format("'{}' ({}) has no pin '{}' (pins: {})", passName, type.Name, pinName, Registry.ListPins(type, true, true)));
                     return {};
                 }
 
@@ -1290,7 +1350,7 @@ namespace EOS
             {
                 if (source.Resource != kNone && destination.Resource != kNone)
                 {
-                    Error(location, "a connection has a pass on at least one side");
+                    Error(location, "a connection has a pin ('Name.pin') on at least one side");
                     return;
                 }
 
@@ -1645,7 +1705,7 @@ namespace EOS
                 if (IsBufferUsage(description.Usage))
                 {
                     if (description.BufferSize > 0) resource.Buffer = graph.CreateBuffer({.Size = description.BufferSize, .DebugName = slot.DebugName});
-                    else ReportOnce(fmt::format("'{}' has no buffer: its pass type's Setup gave it none", slot.DebugName));
+                    else ReportOnce(fmt::format("'{}' has no buffer: its type's Setup gave it none", slot.DebugName));
                     continue;
                 }
 
@@ -1998,7 +2058,7 @@ namespace EOS
             const PassRegistryData::Pin& description = File->Registry.Pins[type.FirstPin + pin];
             if (description.Direction == PinDirection::Input) continue;
 
-            const bool passedOn = description.Direction == PinDirection::InputOutput
+            const bool passedOn = description.Direction == PinDirection::InOut
                                || (description.BypassFrom != kNone && File->Current->Slots[entry.FirstSlot + pin].TargetResource == kNone);
             passesSomethingOn |= passedOn;
             passesEverythingOn &= passedOn;
@@ -2008,8 +2068,9 @@ namespace EOS
         {
             .Name = entry.Name,
             .Type = type.Name,
+            .Data = entry.Data,
             .Enabled = &entry.Enabled,
-            .CanBeDisabled = passesSomethingOn && passesEverythingOn,
+            .CanBeDisabled = !entry.Data && passesSomethingOn && passesEverythingOn,
             .PinCount = type.PinCount,
             .PropertyCount = type.PropertyCount,
         };
